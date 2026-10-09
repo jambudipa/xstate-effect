@@ -39,6 +39,7 @@ export interface BaseInspectionEventProperties {
  * @category Inspection
  */
 export interface InspectedSnapshotEvent extends BaseInspectionEventProperties {
+  /** The discriminant: narrow an {@link InspectionEvent} on it. */
   readonly type: "@xstate.snapshot"
   /** The event the actor processed. */
   readonly event: EventObject
@@ -54,8 +55,11 @@ export interface InspectedSnapshotEvent extends BaseInspectionEventProperties {
  * @category Inspection
  */
 export interface InspectedTransitionEvent extends BaseInspectionEventProperties {
+  /** The discriminant; no inspection function ever receives an event with it. */
   readonly type: "@xstate.transition"
+  /** Upstream's field, kept for type parity; never filled, as the event is never sent. */
   readonly event: EventObject
+  /** Upstream's field, kept for type parity; never filled, as the event is never sent. */
   readonly snapshot: Snapshot
 }
 
@@ -68,6 +72,7 @@ export interface InspectedTransitionEvent extends BaseInspectionEventProperties 
  * @category Inspection
  */
 export interface InspectedMicrostepEvent extends BaseInspectionEventProperties {
+  /** The discriminant: narrow an {@link InspectionEvent} on it. */
   readonly type: "@xstate.microstep"
   /** The event the microstep handled. */
   readonly event: EventObject
@@ -85,7 +90,9 @@ export interface InspectedMicrostepEvent extends BaseInspectionEventProperties {
  * @category Inspection
  */
 export interface InspectedActionEvent extends BaseInspectionEventProperties {
+  /** The discriminant: narrow an {@link InspectionEvent} on it. */
   readonly type: "@xstate.action"
+  /** The action about to run, as a plain `{ type, params }` record, not the action object. */
   readonly action: {
     /** The action's type: its name, or the built-in action's `xstate.*` type. */
     readonly type: string
@@ -104,8 +111,14 @@ export interface InspectedActionEvent extends BaseInspectionEventProperties {
  * @category Inspection
  */
 export interface InspectedEventEvent extends BaseInspectionEventProperties {
+  /** The discriminant: narrow an {@link InspectionEvent} on it. */
   readonly type: "@xstate.event"
+  /**
+   * The sending actor; `Option.none()` where upstream has `undefined`: an event sent from
+   * outside every actor, and a root actor's init event (D8, DEV-7).
+   */
   readonly sourceRef: Option.Option<ActorRefBase>
+  /** The event as sent; the inspection functions receive it before the recipient does. */
   readonly event: EventObject
 }
 
@@ -116,6 +129,11 @@ export interface InspectedEventEvent extends BaseInspectionEventProperties {
  * @category Inspection
  */
 export interface InspectedActorEvent extends BaseInspectionEventProperties {
+  /**
+   * The discriminant. The event is sent once the actor exists, before it registers its
+   * `systemId` and computes its first snapshot, so an actor whose creating macrostep then
+   * fails is still reported.
+   */
   readonly type: "@xstate.actor"
 }
 
