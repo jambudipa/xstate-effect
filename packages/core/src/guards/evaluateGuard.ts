@@ -25,7 +25,13 @@ type AnyGuardDefinition<TContext, TEvent extends EventObject> = Pick<GuardDefini
 
 /** What a name resolves to: something that decides, and the params of the use that named it. */
 interface ResolvedGuard<TContext, TEvent extends EventObject> {
+  /** The function or definition at the end of the chain of names and `{ type, params }` uses. */
   readonly decider: GuardPredicate<TContext, TEvent, never> | AnyGuardDefinition<TContext, TEvent>
+  /**
+   * The params of the use that names `decider` directly, already resolved for the context and
+   * the event; none for a bare name or `undefined` params. The params of earlier hops in the
+   * chain are dropped, as upstream.
+   */
   readonly params: Option.Option<unknown>
 }
 
