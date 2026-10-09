@@ -77,7 +77,6 @@ _bmad-output/goals/*.goal/run-log.jsonl
 /AGENTS.md
 /refactor.md
 /update-plan.md
-/packages/core/CLAUDE.md
 /packages/core/MIGRATION-REPORT.md
 /.github/.eque2-code-review.json
 /.github/actions

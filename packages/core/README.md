@@ -191,6 +191,49 @@ then rebuilds `test/upstream/upstream-manifest.json` from it.
 Releases use [Changesets](https://github.com/changesets/changesets): `pnpm changeset` records a
 change, and `pnpm run version` applies the changesets to `package.json` and `CHANGELOG.md`.
 
+## Contributing
+
+Start with [`src/README.md`](./src/README.md) for the module layout. The rules that apply to
+every change:
+
+- **Effect-native `src/`.** ESLint enforces the canonical Effect rule bundle at error on every
+  file in `src/`: no `async`/`await` (use `Effect.gen` with `yield*`), no Promises (use
+  `Effect.tryPromise` at the edge), no `throw` or `try`/`catch` (fail with a typed error), no
+  native `Set`/`Map` or in-place array mutation (use `HashSet`/`HashMap`/`Chunk` or immutable
+  arrays), no `Date`, `JSON.parse` or `console`. Tests and scripts have these rules relaxed.
+- **Upstream first.** Where XState 5.33.2 defines a behaviour, the port follows it. A deliberate
+  difference needs a row in [`test/upstream/CONFORMANCE.md`](./test/upstream/CONFORMANCE.md) that
+  cites a decision in [`docs/decisions.md`](./docs/decisions.md).
+- **Conventions.** Public exports carry JSDoc with `@since` and `@category`; an intentionally
+  unused binding starts with `_`; generic types carry variance markers; runtime type checks use
+  `TypeId` symbols.
+- **Gates.** `pnpm lint`, `pnpm typecheck`, the test type check, `pnpm test`, `pnpm build` and
+  `pnpm run docs:audit` all pass before a merge; CI runs them.
+
+<!-- docs-audit:maintenance -->
+
+## Keeping the documentation current
+
+This package documents itself under three rules, and `pnpm run docs:audit` proves all three.
+CI runs the same command, so a change that breaks a rule fails the build.
+
+1. **Every declaration carries a JSDoc block** — exported, public, private, or internal alike.
+   Say why the thing exists and what a caller must know. Do not restate the signature.
+2. **Every folder that holds source files carries a `README.md`** describing what the folder is
+   for. One file, not two: every agent and every reader opens the same text.
+3. **This block stays in this `README.md`.** The `AGENTS.md` and `CLAUDE.md` beside it point at
+   this file rather than repeating it.
+
+When you change the code:
+
+- Write or update the JSDoc block in the same commit as the declaration it describes. A stale
+  block is worse than no block, because a reader trusts it.
+- Update the folder's `README.md` when you change what the folder is for, add a new entry point,
+  or move code in or out of it.
+- Add a `README.md` when you add a folder.
+- Run `pnpm run docs:audit` before you commit. The `eslint-rules/` folder is excluded on purpose:
+  it holds a byte-exact copy of the canonical Effect lint bundle, which a test checks by hash.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE). The ported state-machine semantics and the rewritten upstream
