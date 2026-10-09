@@ -48,6 +48,10 @@ const makeActorLogicVariance = <
  * @category Actors
  */
 export interface CallbackSnapshot<TInput = unknown> extends Snapshot<undefined> {
+  /**
+   * The input the actor was created with; `start` hands it to the callback, also for a restored
+   * snapshot. Unlike promise logic, a stop keeps it.
+   */
   readonly input: TInput
 }
 

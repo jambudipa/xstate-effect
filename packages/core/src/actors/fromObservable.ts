@@ -49,7 +49,7 @@ const makeActorLogicVariance = <
  *
  * @example
  * ```ts
- * import type { Observer } from "@xstate-effect/core"
+ * import type { Observer } from "@jambudipa/xstate-effect"
  *
  * const values: Array<number> = []
  * const collect: Observer<number> = { next: (value) => values.push(value) }
@@ -71,6 +71,11 @@ export type Observer<T> = {
  * @category Actors
  */
 export interface Subscribable<T> {
+  /**
+   * Starts delivering values to `observer` and gives the handle that stops it. The actor calls
+   * `unsubscribe` at most once, at its stop, and never after the source completed or errored;
+   * what `subscribe` throws is the actor's error.
+   */
   subscribe(observer: Observer<T>): { unsubscribe: () => void }
 }
 
@@ -84,7 +89,9 @@ export interface Subscribable<T> {
  * @category Actors
  */
 export interface ObservableSnapshot<TContext, TInput = unknown> extends Snapshot<undefined> {
+  /** The source's last value; `None` before the first value, and always for an event observable. */
   readonly context: Option.Option<TContext>
+  /** The input while active; `undefined` once done, errored or stopped (`clearedInput`). */
   readonly input: TInput | undefined
 }
 

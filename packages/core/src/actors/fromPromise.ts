@@ -47,7 +47,9 @@ const XSTATE_PROMISE_REJECT = "xstate.promise.reject"
 
 /** What a settled promise relays to its own actor: upstream `{ type, data }`, plain data. */
 interface PromiseSettledEvent extends EventObject {
+  /** Which way the promise settled; `settle` reads it to pick `done` or `error`. */
   readonly type: typeof XSTATE_PROMISE_RESOLVE | typeof XSTATE_PROMISE_REJECT
+  /** The resolved value, or the raw rejection reason (SD-4). */
   readonly data: unknown
 }
 
@@ -60,6 +62,7 @@ interface PromiseSettledEvent extends EventObject {
  * @category Actors
  */
 export interface PromiseSnapshot<TOutput, TInput = unknown> extends Snapshot<TOutput> {
+  /** The input while active; `undefined` once settled or stopped (`clearedInput`). */
   readonly input: TInput | undefined
 }
 

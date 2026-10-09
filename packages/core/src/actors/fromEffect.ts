@@ -49,7 +49,9 @@ const XSTATE_EFFECT_FAILURE = "xstate.effect.failure"
 
 /** What an ended Effect relays to its own actor: `{ type, data }`, plain data. */
 interface EffectEndedEvent extends EventObject {
+  /** Which way the Effect ended; `settle` reads it to pick `done` or `error`. */
   readonly type: typeof XSTATE_EFFECT_SUCCESS | typeof XSTATE_EFFECT_FAILURE
+  /** The success value, or the squashed failure (the raw value, SD-4). */
   readonly data: unknown
 }
 
@@ -62,6 +64,7 @@ interface EffectEndedEvent extends EventObject {
  * @category Actors
  */
 export interface EffectSnapshot<TOutput, TInput = unknown> extends Snapshot<TOutput> {
+  /** The input while active; `undefined` once done, errored or stopped (`clearedInput`). */
   readonly input: TInput | undefined
 }
 

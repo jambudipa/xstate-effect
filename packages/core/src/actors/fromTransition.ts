@@ -47,6 +47,10 @@ const makeActorLogicVariance = <
  * @category Actors
  */
 export interface TransitionSnapshot<TContext> extends Snapshot<undefined> {
+  /**
+   * The reducer's current state: the initial state, then what the reducer returned for the last
+   * event. A reducer that throws leaves it as it was before that event.
+   */
   readonly context: TContext
 }
 
