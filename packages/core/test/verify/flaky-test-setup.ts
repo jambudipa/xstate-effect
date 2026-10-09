@@ -153,8 +153,10 @@ const guardState = (): GuardState => {
     getBuiltinModule: guardedGetBuiltinModule,
     binding: (name: string): unknown => (POWERFUL_BINDINGS.has(name) ? refuse(`process.binding(${JSON.stringify(name)})`) : binding(name)),
     _linkedBinding: (name: string): never => refuse(`process._linkedBinding(${JSON.stringify(name)})`),
-    dlopen: (module: { exports: unknown }, filename: string, flags?: number): void =>
-      pathToFileURL(realpathSync(filename)).href.startsWith(storeUrl) ? dlopen(module, filename, flags) : refuse(`process.dlopen(${JSON.stringify(filename)})`),
+    // Forward exactly the caller's arguments: an explicit `undefined` flags reads as mode 0, which
+    // Linux's dlopen() refuses ("invalid mode for dlopen()").
+    dlopen: (...args: Parameters<typeof process.dlopen>): void =>
+      pathToFileURL(realpathSync(args[1])).href.startsWith(storeUrl) ? dlopen(...args) : refuse(`process.dlopen(${JSON.stringify(args[1])})`),
     execve: (file: string): never => refuse(`process.execve(${JSON.stringify(file)})`)
   })
   return state
