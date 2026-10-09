@@ -47,6 +47,13 @@ jobs:
     - name: Lint
       run: pnpm lint
 
+    # Every declaration carries JSDoc and every source folder a README (see packages/core/README.md)
+    - name: Docs audit
+      run: pnpm run docs:audit
+
+    - name: Test the docs audit
+      run: node --test scripts/docs-audit.test.mjs
+
     - name: Type check
       run: pnpm typecheck
 
