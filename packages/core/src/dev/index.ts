@@ -5,13 +5,17 @@
  * The dev entry point (upstream `xstate/dev`, `src/dev/index.ts` at xstate@5.33.2): the
  * global object, the dev tools hook that it may hold as `__xstate__`, and the adapter that
  * the `devTools` actor option calls to register each actor that starts with that hook. The
- * functions return Effects (D6, EFF-05) and read the global object only when they run,
- * through `Predicate` guards.
+ * functions return Effects (D6), so nothing runs at import, and they read the global object
+ * only when they run, through `Predicate` guards.
  */
 import { Data, Effect, Option, Predicate } from "effect"
 import type { AnyActor } from "../Actor.js"
 import { firstGlobalObject } from "../internal/globalObject.js"
 
+/**
+ * A listener that a dev tools hook calls with each actor it registers (upstream
+ * `ServiceListener`). The port never calls `onRegister`, so it never makes one.
+ */
 type ServiceListener = (service: AnyActor) => void
 
 /**
@@ -33,11 +37,19 @@ type ServiceListener = (service: AnyActor) => void
  * @category Models
  */
 export interface XStateDevInterface {
+  /**
+   * Takes an actor. The port calls it from `registerService` and when an actor with
+   * `devTools: true` starts, only where a `window` object exists; a throw fails the call with
+   * {@link DevToolsError}.
+   */
   readonly register: (service: AnyActor) => void
+  /** Upstream's counterpart of `register`; the port never calls it, not even at an actor's stop. */
   readonly unregister: (service: AnyActor) => void
+  /** Adds a listener for later registrations; the hook owns it until `unsubscribe`. Unused by the port. */
   readonly onRegister: (listener: ServiceListener) => {
     readonly unsubscribe: () => void
   }
+  /** The actors the hook holds. The hook owns this set; the port neither reads nor changes it. */
   readonly services: Set<AnyActor>
 }
 
@@ -45,8 +57,9 @@ export interface XStateDevInterface {
  * The global hook could not register a service: its `register` threw (the thrown value is
  * `cause`), or the truthy `__xstate__` value has no `register` function (the value is
  * `cause`; upstream's call throws a `TypeError` there). Upstream lets the throw leave
- * `registerService`, `devToolsAdapter` and the actor's `start`; the port fails the Effect
- * with this error (EFF-04), and an actor's `start` dies with it.
+ * `registerService`, `devToolsAdapter` and the actor's `start`; the port wraps the foreign
+ * call at the boundary and fails the Effect with this typed error, and an actor's `start` dies
+ * with it.
  *
  * @since 0.1.0
  * @category Errors
