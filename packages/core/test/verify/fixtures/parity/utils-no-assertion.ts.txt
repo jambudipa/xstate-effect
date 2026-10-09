@@ -1,0 +1,13 @@
+// Parity fixture: a testAll helper whose generated tests assert nothing. A generator call
+// to it falls short of the upstream helper's assertion count.
+import { it } from "@effect/vitest"
+
+export const testAll = (machine: string, expected: Record<string, Record<string, unknown>>): void => {
+  Object.keys(expected).forEach((fromState) => {
+    Object.keys(expected[fromState] ?? {}).forEach((eventTypes) => {
+      it(`should go from ${fromState} on ${eventTypes} in ${machine}`, () => {
+        // expect(machine).toBeDefined() is only a comment here
+      })
+    })
+  })
+}

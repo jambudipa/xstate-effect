@@ -1,0 +1,18 @@
+{
+  "scripts/upstream/freeze-upstream.ts": "b228e5e23279a4c0c5f451ad180b8031ad2d01d69b4bb2733638fb6e96df753b",
+  "test/upstream/exports.test.ts": "77a0e2ef08ca1f917e3912bea49c2c7e298c5184a5b4b7ce10f9304dc9aa511d",
+  "test/upstream/support/scxml.ts": "7cc25a5ba6a689b89c6d8b0b2aaaee4bfb2a6a4f2be4b6474f3ceafd1f6700b9",
+  "test/verify/delivery.ts": "bf322a41b64175aa46596284275d48fb3725efa4f7966cd87fb4944fc965c4eb",
+  "test/verify/flaky-test-setup.ts": "d6e29abd4c176ae1aef52bcea89448ca028e296df10e2327cb74dbcff8dba9e5",
+  "test/verify/pending-rewrite-setup.ts": "47ef825f9a2958357b67e70b276f6ea24129fbc2c0a9e0b6868dd8180aa61325",
+  "test/verify/skip-scan.ts": "830d1571fa42e364fdb4e60ad8604cd50e38332dcf2980bb4345c814abd34dd7",
+  "test/verify/verify-xstate-5-33-2-port-BASELINE-1.spec.ts": "09ca4cf637ca5d16b7dad8fca3d111431e3e73e6effcb171a68d576c7c16347f",
+  "test/verify/verify-xstate-5-33-2-port-COMPAT-1.spec.ts": "2636edf5e6d78b693087ac18d7c193ba12d0cc61b47077ed5c6b44dba3a4b5e1",
+  "test/verify/verify-xstate-5-33-2-port-CONF-8.spec.ts": "984b6ac51af5d60a7556daf0ed49c98386304d286e560b02e295dbe7442c678a",
+  "test/verify/verify-xstate-5-33-2-port-DELIVERY-1.spec.ts": "18c3bf1782e4be65b9a7a71c8c6048a88c5a3c5e8e3d5a7055e7c673c9f7110f",
+  "test/verify/verify-xstate-5-33-2-port-DELIVERY-2.spec.ts": "5eb9683903410b39c0b9dbe3b009cdb2b892abd26f6cd6a93bd27f676d45c18d",
+  "test/verify/verify-xstate-5-33-2-port-HARNESS-1.spec.ts": "d4699b22521c364cd6b8ed6d74bcf500e8c15e726313f9648adec0c6df425141",
+  "test/verify/verify-xstate-5-33-2-port-HARNESS-2.spec.ts": "a5997bedae0d20edca0e47bca7d87f6e09b8f98556f0a94c4d1453c07c189b07",
+  "test/verify/verify-xstate-5-33-2-port-PARITY-2.spec.ts": "4ef295e39868903fbda3e23ee71af611a3fc87a8c96e6e3a7fa8d9c9d90a2b2c",
+  "test/verify/vitest-runs.ts": "bb157a00aee98594b2bba60d2159092e59c499bb8f1580bf1b754be8fd79c60a"
+}

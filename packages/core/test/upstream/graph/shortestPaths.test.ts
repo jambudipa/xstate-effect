@@ -1,0 +1,173 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { assign, createMachine } from "../../../src/index.js";
+import { getShortestPaths, joinPaths } from "../../../src/graph/index.js";
+
+describe('getShortestPaths', () => {
+  // upstream: src/graph/test/shortestPaths.test.ts > getShortestPaths > finds the shortest paths to a state without continuing traversal from that state
+  it.effect('finds the shortest paths to a state without continuing traversal from that state', () => Effect.gen(function* () {
+    const m = createMachine({
+      types: {} as { context: { count: number } },
+      initial: 'a',
+      context: { count: 0 },
+      states: {
+        a: {
+          on: {
+            NEXT: 'b'
+          }
+        },
+        b: {
+          on: {
+            NEXT: 'c'
+          }
+        },
+        c: {
+          on: {
+            NEXT: 'd'
+          }
+        },
+        d: {
+          // If we reach this state, this will cause an infinite loop
+          // if the stop condition does not stop the algorithm
+          on: {
+            NEXT: {
+              target: 'd',
+              actions: assign({
+                count: ({ context }) => context.count + 1
+              })
+            }
+          }
+        }
+      }
+    });
+
+    const p = yield* getShortestPaths(m, {
+      toState: (state) => state.matches('c')
+    });
+
+    expect(p).toHaveLength(1);
+    // (`!`: the port's `noUncheckedIndexedAccess`; upstream reads the first path unchecked too)
+    expect(p[0]!.state.matches('c')).toBeTruthy();
+  }));
+
+  // upstream: src/graph/test/shortestPaths.test.ts > getShortestPaths > finds the shortest paths from a state to another state
+  it.effect('finds the shortest paths from a state to another state', () => Effect.gen(function* () {
+    const m = createMachine({
+      types: {} as {
+        context: { count: number };
+      },
+      initial: 'a',
+      context: { count: 0 },
+      states: {
+        a: {
+          on: {
+            TO_Y: 'y',
+            TO_B: 'b'
+          }
+        },
+        b: {
+          on: {
+            NEXT_B_TO_X: 'x'
+          }
+        },
+        x: {
+          on: {
+            NEXT_X_TO_Y: 'y'
+          }
+        },
+        y: {}
+      }
+    });
+
+    const pathsToB = yield* getShortestPaths(m, {
+      toState: (state) => state.matches('b')
+    });
+    const paths = (yield* Effect.forEach(pathsToB, (path) => Effect.gen(function* () {
+      const pathsToY = yield* getShortestPaths(m, {
+        fromState: path.state,
+        toState: (state) => state.matches('y')
+      });
+
+      return yield* Effect.forEach(pathsToY, (pathToY) => {
+        return joinPaths(path, pathToY);
+      });
+    }))).flat();
+
+    expect(paths).toHaveLength(1);
+    // (`!`: the port's `noUncheckedIndexedAccess`; upstream reads the first path unchecked too)
+    expect(paths[0]!.steps.map((s) => s.event.type)).toMatchInlineSnapshot(`
+      [
+        "xstate.init",
+        "TO_B",
+        "NEXT_B_TO_X",
+        "NEXT_X_TO_Y",
+      ]
+    `);
+  }));
+
+  // upstream: src/graph/test/shortestPaths.test.ts > getShortestPaths > handles event cases
+  it.effect('handles event cases', () => Effect.gen(function* () {
+    const machine = createMachine({
+      types: {
+        events: {} as { type: 'todo.add'; todo: string },
+        context: {} as { todos: string[] }
+      },
+      context: {
+        todos: []
+      },
+      on: {
+        'todo.add': {
+          actions: assign({
+            todos: ({ context, event }) => {
+              return context.todos.concat(event.todo);
+            }
+          })
+        }
+      }
+    });
+
+    const shortestPaths = yield* getShortestPaths(machine, {
+      events: [
+        {
+          type: 'todo.add',
+          todo: 'one'
+        } as const,
+        {
+          type: 'todo.add',
+          todo: 'two'
+        } as const
+      ],
+      stopWhen: (state) => state.context.todos.length >= 3
+    });
+
+    const pathWithTwoTodos = shortestPaths.filter(
+      (path) =>
+        path.state.context.todos.includes('one') &&
+        path.state.context.todos.includes('two')
+    );
+
+    expect(pathWithTwoTodos).toBeDefined();
+  }));
+
+  // upstream: src/graph/test/shortestPaths.test.ts > getShortestPaths > should work for machines with delays
+  it.effect('should work for machines with delays', () => Effect.gen(function* () {
+    const machine = createMachine({
+      initial: 'a',
+      states: {
+        a: {
+          after: {
+            1000: 'b'
+          }
+        },
+        b: {}
+      }
+    });
+
+    const shortestPaths = yield* getShortestPaths(machine);
+
+    expect(shortestPaths.map((p) => p.steps.map((s) => s.event.type))).toEqual([
+      ['xstate.init'],
+      ['xstate.init', 'xstate.after.1000.(machine).a']
+    ]);
+  }));
+});

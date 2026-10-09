@@ -1,0 +1,120 @@
+{
+  "name": "@jambudipa/xstate-effect",
+  "version": "0.1.0",
+  "description": "Effect-native port of XState 5.33.2 for TypeScript — state machines, statecharts and actors on effect 4, checked against the 74 upstream test files",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./guards": {
+      "types": "./dist/guards/index.d.ts",
+      "import": "./dist/guards/index.js",
+      "default": "./dist/guards/index.js"
+    },
+    "./actions": {
+      "types": "./dist/actions/index.d.ts",
+      "import": "./dist/actions/index.js",
+      "default": "./dist/actions/index.js"
+    },
+    "./dev": {
+      "types": "./dist/dev/index.d.ts",
+      "import": "./dist/dev/index.js",
+      "default": "./dist/dev/index.js"
+    },
+    "./graph": {
+      "types": "./dist/graph/index.d.ts",
+      "import": "./dist/graph/index.js",
+      "default": "./dist/graph/index.js"
+    },
+    "./actors": {
+      "types": "./dist/actors/index.d.ts",
+      "import": "./dist/actors/index.js",
+      "default": "./dist/actors/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE",
+    "llms.txt"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "CI=true vitest run",
+    "test:upstream": "CI=true vitest run --config vitest.upstream.config.ts",
+    "test:watch": "vitest",
+    "lint": "eslint --cache --cache-location node_modules/.cache/eslint src test",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.green.json --noEmit",
+    "clean": "npx tsx scripts/clean.ts",
+    "clean:verbose": "npx tsx scripts/clean.ts --verbose",
+    "clean:analyze": "npx tsx scripts/clean.ts --analyze-only",
+    "check-docs": "node --experimental-strip-types scripts/check-markdown-code.ts",
+    "upstream:fetch": "sh scripts/upstream/fetch-upstream.sh",
+    "prepublishOnly": "rm -rf dist && pnpm build && pnpm typecheck",
+    "prepack": "pnpm build",
+    "changeset": "changeset",
+    "version": "changeset version"
+  },
+  "keywords": [
+    "xstate",
+    "state-machine",
+    "statecharts",
+    "statechart",
+    "actor",
+    "actor-model",
+    "fsm",
+    "effect",
+    "effect-ts",
+    "typescript"
+  ],
+  "author": "Jambudipa.io",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jambudipa/xstate-effect.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/jambudipa/xstate-effect/issues"
+  },
+  "homepage": "https://github.com/jambudipa/xstate-effect#readme",
+  "peerDependencies": {
+    "effect": "^4.0.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.69",
+    "@changesets/cli": "^2.31.1",
+    "@effect/language-service": "^0.87.3",
+    "@effect/vitest": "4.0.0",
+    "@scion-scxml/test-framework": "2.0.16",
+    "@types/node": "^24.19.1",
+    "@typescript-eslint/eslint-plugin": "^8.71.0",
+    "@typescript-eslint/parser": "^8.71.0",
+    "ajv": "^8.12.0",
+    "cli-progress": "^3.12.0",
+    "commander": "^14.0.2",
+    "effect": "4.0.0",
+    "eslint": "^10.11.0",
+    "rxjs": "^7.8.1",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3",
+    "xml-js": "1.6.11"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

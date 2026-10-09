@@ -1,0 +1,13 @@
+{
+  "name": "effect-xstate",
+  "private": true,
+  "scripts": {
+    "test": "cd packages/core && pnpm test",
+    "test:watch": "cd packages/core && pnpm test:watch",
+    "build": "cd packages/core && pnpm build",
+    "lint": "cd packages/core && pnpm lint",
+    "typecheck": "cd packages/core && pnpm typecheck",
+    "clean": "cd packages/core && npx tsx scripts/clean.ts",
+    "clean:verbose": "cd packages/core && npx tsx scripts/clean.ts --verbose"
+  }
+}

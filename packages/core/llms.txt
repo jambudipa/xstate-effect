@@ -1,0 +1,92 @@
+# @jambudipa/xstate-effect
+
+The runtime behaviour of XState 5.33.2 in Effect-native form, on effect 4.0.0. State machines, statecharts and actors run as Effects; the 74 upstream test files of xstate@5.33.2 are rewritten in Effect form and pass.
+
+## What this package does
+
+- Defines state machines with `createMachine` or `setup(...).createMachine`, with XState's config format (states, `on`, `always`, `after`, `invoke`, `entry`/`exit`, `tags`, `meta`, `output`)
+- Runs them as actors: `createActor` returns an `Effect` that needs a `Scope`; the actor stops when the scope closes
+- Follows XState's statechart algorithm: parallel and history states, eventless and delayed transitions, final states, one published snapshot per macrostep
+- Spawns and invokes child actors from promises, callbacks, observables, transition functions, Effects and Streams
+- Persists snapshots through an Effect `Schema` codec and restores them
+- Generates test paths from machines (`./graph`: `createTestModel`, `getShortestPaths`, `getSimplePaths`)
+
+## Install
+
+```
+pnpm add @jambudipa/xstate-effect effect
+```
+
+`effect` is a peer dependency (`^4.0.0`). ESM only; Node.js 20 or later.
+
+## Minimal usage
+
+```typescript
+import { Effect } from "effect"
+import { assign, createActor, createMachine } from "@jambudipa/xstate-effect"
+
+const counterMachine = createMachine({
+  types: {} as { context: { count: number }; events: { type: "increment" } | { type: "set"; value: number } },
+  id: "counter",
+  initial: "active",
+  context: { count: 0 },
+  states: {
+    active: {
+      on: {
+        increment: { actions: assign(({ context }) => ({ count: context.count + 1 })) },
+        set: { actions: assign(({ event }) => ({ count: event.type === "set" ? event.value : 0 })) }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(counterMachine) // needs a Scope
+  yield* actor.start
+  yield* actor.send({ type: "increment" })          // completes after the event's macrostep
+  const snapshot = yield* actor.getSnapshot
+  return snapshot.context.count                     // 1
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+## Entry points
+
+- `@jambudipa/xstate-effect` — machines, actors, actions, guards, actor logic creators, pure functions, `waitFor`, `toEffect`, `toPromise`, `SimulatedClock`, built-in events, types
+- `@jambudipa/xstate-effect/actions` — `assign`, `sendTo`, `sendParent`, `raise`, `forwardTo`, `emit`, `cancel`, `log`, `spawnChild`, `stopChild`, `enqueueActions`
+- `@jambudipa/xstate-effect/actors` — `fromPromise`, `fromCallback`, `fromObservable`, `fromEventObservable`, `fromTransition`, `fromEffect`, `fromStream`, `createEmptyActor`
+- `@jambudipa/xstate-effect/guards` — `stateIn`, `and`, `or`, `not`, `evaluateGuard`
+- `@jambudipa/xstate-effect/graph` — `createTestModel`, `TestModel`, `getShortestPaths`, `getSimplePaths`, `getPathsFromEvents`, `getAdjacencyMap`, `toDirectedGraph`
+- `@jambudipa/xstate-effect/dev` — `devToolsAdapter`, `registerService`, `getGlobal`
+
+## Key APIs
+
+- `createActor(logic, options?)` → `Effect<Actor, never, Scope | requirements of the logic>`. A root actor owns its own system; children share their parent's.
+- `Actor`: `start`, `stop`, `getSnapshot` and `getPersistedSnapshot` are Effects; `send(event)` → `Effect<void>`; `changes` is a `Stream` of snapshots (the current one, then each change); `subscribe(fn)` takes `(snapshot) => Effect<void>` and needs a `Scope` (each snapshot published after the call, as XState); `on(type, fn)` and the `emissions` Stream give emitted events; `system.get(systemId)` → `Effect<Option<ActorRef>>`.
+- Snapshot: `value`, `context`, `status` (`active` | `done` | `error` | `stopped`), `output` and `error` as `Option`, `children`, `tags`; `matches`, `hasTag`, `getMeta` and `toJSON` are synchronous, `can(event)` → `Effect<boolean>`.
+- Pure functions that can run user code return Effects: `transition`, `initialTransition`, `getNextSnapshot`, `getInitialSnapshot`, `getMicrosteps`, `getNextTransitions`, `machine.transition`, `machine.resolveState`.
+- `waitFor(actor, predicate, options?)` → `Effect<Snapshot, unknown>`; `toEffect(actor)` succeeds with the output (`Option`) or fails with the actor's error; `toPromise` is the Promise form.
+- `SimulatedClock`: `increment(ms)` and `set(ms)` return Effects; pass it as the `clock` option of `createActor`.
+
+## Differences from XState
+
+- Effect-returning APIs in place of synchronous calls and Promises; no `interpret`, `toObserver`, observer objects or `Subscription` objects.
+- No synchronous throws: definition errors, `resolveState` and `assertEvent` fail Effects with the upstream message.
+- Absent output, error and observable context are `Option` values.
+- Unhandled actor errors go to the actor's logger (`Effect.logError` by default), not a rethrow.
+- An actor that errors closes its scope, so its children stop.
+- Every deviation is a row of `test/upstream/CONFORMANCE.md`, with the decision (D1–D20, SD-1–SD-28 in `docs/decisions.md`) that requires it.
+
+## Versioning
+
+Pre-1.0. A minor version may change the API. Read the CHANGELOG before upgrading.
+
+## Links
+
+- Repository: https://github.com/jambudipa/xstate-effect
+- README: https://github.com/jambudipa/xstate-effect/blob/main/packages/core/README.md
+- Conformance ledger: https://github.com/jambudipa/xstate-effect/blob/main/packages/core/test/upstream/CONFORMANCE.md
+- Decisions: https://github.com/jambudipa/xstate-effect/blob/main/packages/core/docs/decisions.md
+- Changelog: https://github.com/jambudipa/xstate-effect/blob/main/packages/core/CHANGELOG.md
+- Upstream XState: https://github.com/statelyai/xstate

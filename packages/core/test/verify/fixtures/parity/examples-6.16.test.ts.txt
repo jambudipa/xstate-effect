@@ -1,0 +1,15 @@
+// Parity fixture: a rewrite of upstream test/examples/6.16.test.ts, checked against the
+// committed xstate@5.33.2 inventory. The one annotated testAll call stands for the 9 tests
+// that upstream generates.
+import { describe } from "@effect/vitest"
+import { testAll } from "../utils.js"
+
+describe("Example 6.16", () => {
+  const expected = {
+    A: { 1: "B", 2: undefined },
+    B: { 1: "A", 2: undefined }
+  }
+
+  // upstream: test/examples/6.16.test.ts > Example 6.16 > should go from ${fromState} to ${JSON.stringify(toState)} on ${eventTypes}
+  testAll("machine", expected)
+})

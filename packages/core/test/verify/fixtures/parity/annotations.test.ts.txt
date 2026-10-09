@@ -1,0 +1,67 @@
+// Parity fixture: the complete rewrite plus four bad annotations. One names a title that is
+// not upstream; one sits above a const declaration; one sits above a describe call; one is
+// separated from its test by a blank line. Only the first is a known-file annotation.
+import { assert, describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { testAll } from "./utils.js"
+
+describe("parity", () => {
+  // upstream: test/parity.test.ts > parity > keeps its annotation
+  it.effect("keeps its annotation", () =>
+    Effect.sync(() => {
+      assert.strictEqual(1, 1)
+    }))
+
+  // upstream: test/parity.test.ts > parity > counts two assertions
+  it("counts two assertions", () => {
+    assert.strictEqual(1, 1)
+    expect(2).toBe(2)
+  })
+
+  // upstream: test/parity.test.ts > parity > keeps its inline snapshot
+  it("keeps its inline snapshot", () => {
+    expect({ a: 1 }).toMatchInlineSnapshot(`
+          {
+            "a": 1,
+          }
+        `)
+  })
+
+  // upstream: test/parity.test.ts > parity > keeps its directive
+  it("keeps its directive", () => {
+    // @ts-expect-error a number is not a string
+    const id: string = 1
+    assert(id === "1")
+  })
+
+  // upstream: test/parity.test.ts > parity > is duplicated #1
+  it("is duplicated", () => {
+    assert.isTrue(true)
+  })
+
+  // upstream: test/parity.test.ts > parity > is duplicated #2
+  it("is duplicated", () => {
+    assert.isTrue(true)
+  })
+
+  describe("generated", () => {
+    // upstream: test/parity.test.ts > parity > generated > above a declaration
+    const expected = { a: { x: "b", y: undefined }, b: { 1: "a" } }
+    // upstream: test/parity.test.ts > parity > generated > should go from ${fromState} to ${JSON.stringify(toState)} on ${eventTypes}
+    testAll("machine", expected)
+  })
+
+  // upstream: test/parity.test.ts > parity > was never upstream
+  it("was never upstream", () => {
+    assert.isTrue(true)
+  })
+
+  // upstream: test/parity.test.ts > parity > above a describe
+  describe("extra", () => {
+    // upstream: test/parity.test.ts > parity > extra > after a blank line
+
+    it("after a blank line", () => {
+      assert.isTrue(true)
+    })
+  })
+})

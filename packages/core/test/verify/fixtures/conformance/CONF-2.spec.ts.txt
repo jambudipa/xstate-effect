@@ -1,0 +1,16 @@
+// Conformance fixture: a CONF-2 evidence file that imports exactly the upstream rewrites
+// whose green phase is 2 (deep, initial, multiple), one describe block per file.
+import { describe } from "@effect/vitest"
+import { conformancePhase, upstreamFileOptions } from "./conformance.js"
+
+conformancePhase(2, () => {
+  describe("upstream/deep.test.ts", upstreamFileOptions(), async () => {
+    await import("../upstream/deep.test.js")
+  })
+  describe("upstream/initial.test.ts", upstreamFileOptions(), async () => {
+    await import("../upstream/initial.test.js")
+  })
+  describe("upstream/multiple.test.ts", upstreamFileOptions(), async () => {
+    await import("../upstream/multiple.test.js")
+  })
+})

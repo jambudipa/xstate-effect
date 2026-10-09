@@ -1,0 +1,90 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Documentation code check output
+.markdown-code-check/
+
+# >>> eque2-code managed (do not edit this block) >>>
+# NOTE: Linus's sanctum (_bmad/_memory/linus-sidecar/), generated docs
+# (docs/CLAUDE/, .github/review-rules/) and _bmad/config.yaml are intentionally
+# NOT ignored — they are committed and shared across all developers.
+# Personal settings — never shared (user_name, language, user_setting:true keys).
+_bmad/config.user.yaml
+# State engine runtime audit log — regenerated, not version-controlled.
+.state-events.jsonl
+# Per-spec verdict signing key — plaintext Ed25519 private key, policy-protected.
+.signer-key
+# Legacy per-spec evidence key — no longer created; ignored for hygiene on older folders.
+.evidence-key
+# Verifier role marker — machine-local, minted/revoked by the SubagentStart/Stop hooks.
+.eque2-tests/state/.verifier-marker.json
+# Mint-verb policy denial log — machine-local observability, never shared state.
+.eque2-tests/state/policy-denials.log
+# Codex project hook — contains an absolute machine-local executable path.
+/.codex/hooks.json
+# <<< eque2-code managed (do not edit this block) <<<
+
+# Agent-managed git worktrees (eque2 goals, Claude Code --worktree)
+.claude/worktrees/
+
+# Python bytecode caches (eque2 skill scripts)
+__pycache__/
+
+# Goal-gate runtime files (rewritten on every stop-hook evaluation)
+.goal-gate/
+_bmad-output/goals/*.goal/run-log.jsonl
+
+# Serena MCP project state (created on activation; machine-local)
+.serena/
+
+# effect-v4-migrate diagnose progress (machine-local resume state)
+.effect-v4-migrate-progress.json
+
+# Private tooling, agent records and plans: kept locally, never published
+/_bmad-output
+/_bmad
+/.claude
+/.agents
+/state
+/.eque2-tests
+/docs/CLAUDE
+/AGENTS.md
+/refactor.md
+/update-plan.md
+/packages/core/CLAUDE.md
+/packages/core/MIGRATION-REPORT.md
+/.github/.eque2-code-review.json
+/.github/actions
+/.github/prompts
+/.github/review-rules
+/.github/scripts
+/.github/workflows/README.md
+/.github/workflows/code-review.yml
+/.github/workflows/jira-verification.yml
+/.github/workflows/pr-review.yml

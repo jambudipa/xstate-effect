@@ -1,0 +1,60 @@
+// Parity fixture: the complete rewrite, but the second assertion of "counts two assertions"
+// and the @ts-expect-error line of "keeps its directive" exist only inside comments and
+// string literals. Neither counts.
+import { assert, describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { testAll } from "./utils.js"
+
+describe("parity", () => {
+  // upstream: test/parity.test.ts > parity > keeps its annotation
+  it.effect("keeps its annotation", () =>
+    Effect.sync(() => {
+      assert.strictEqual(1, 1)
+    }))
+
+  // upstream: test/parity.test.ts > parity > counts two assertions
+  it("counts two assertions", () => {
+    assert.strictEqual(1, 1)
+    // expect(2).toBe(2)
+    /* assert.strictEqual(2, 2) */
+    const text = "expect(2).toBe(2); assert.strictEqual(2, 2); assert(true)"
+    const template = `expect(${text.length}).toBe(2)`
+    void template
+  })
+
+  // upstream: test/parity.test.ts > parity > keeps its inline snapshot
+  it("keeps its inline snapshot", () => {
+    expect({ a: 1 }).toMatchInlineSnapshot(`
+          {
+            "a": 1,
+          }
+        `)
+  })
+
+  // upstream: test/parity.test.ts > parity > keeps its directive
+  it("keeps its directive", () => {
+    const note = "// @ts-expect-error inside a string"
+    const other = `
+    // @ts-expect-error inside a template literal
+    `
+    // a comment that mentions // @ts-expect-error later in its text
+    const id: string = note + other
+    assert(id.length > 0)
+  })
+
+  // upstream: test/parity.test.ts > parity > is duplicated #1
+  it("is duplicated", () => {
+    assert.isTrue(true)
+  })
+
+  // upstream: test/parity.test.ts > parity > is duplicated #2
+  it("is duplicated", () => {
+    assert.isTrue(true)
+  })
+
+  describe("generated", () => {
+    const expected = { a: { x: "b", y: undefined }, b: { 1: "a" } }
+    // upstream: test/parity.test.ts > parity > generated > should go from ${fromState} to ${JSON.stringify(toState)} on ${eventTypes}
+    testAll("machine", expected)
+  })
+})

@@ -1,0 +1,44 @@
+// Parity fixture: an upstream-style test file. HARNESS-1 copies it into a synthetic
+// xstate@5.33.2 clone as packages/core/test/parity.test.ts and freezes it, so the
+// manifest entry that the parity checker reads comes from the real freeze script.
+import { testAll } from './utils.ts';
+
+describe('parity', () => {
+  it('keeps its annotation', () => {
+    expect(1).toBe(1);
+  });
+
+  it('counts two assertions', () => {
+    expect(1).toBe(1);
+    expect(2).toBe(2);
+  });
+
+  it('keeps its inline snapshot', () => {
+    expect({ a: 1 }).toMatchInlineSnapshot(`
+      {
+        "a": 1,
+      }
+    `);
+  });
+
+  it('keeps its directive', () => {
+    // @ts-expect-error a number is not a string
+    const id: string = 1;
+    expect(id).toBe(1);
+  });
+
+  it('is duplicated', () => {
+    expect(1).toBe(1);
+  });
+
+  it('is duplicated', () => {
+    expect(2).toBe(2);
+  });
+
+  describe('generated', () => {
+    const expected = { a: { x: 'b', y: undefined }, b: { 1: 'a' } };
+    testAll('machine', expected);
+  });
+
+  it.skip('is skipped upstream', () => {});
+});

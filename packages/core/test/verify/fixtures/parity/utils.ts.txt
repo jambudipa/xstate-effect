@@ -1,0 +1,19 @@
+// Parity fixture: the rewrite of the testAll generator helper (test/upstream/utils.ts).
+// Its body holds three assertions, as upstream test/utils.ts testAll does.
+import { assert, it } from "@effect/vitest"
+
+export function testAll(machine: string, expected: Record<string, Record<string, unknown>>): void {
+  Object.keys(expected).forEach((fromState) => {
+    Object.keys(expected[fromState] ?? {}).forEach((eventTypes) => {
+      const toState = expected[fromState]?.[eventTypes]
+      it(`should go from ${fromState} to ${JSON.stringify(toState)} on ${eventTypes}`, () => {
+        if (toState === undefined) {
+          assert.strictEqual(machine, machine)
+        } else {
+          assert.isDefined(toState)
+          assert.isString(machine)
+        }
+      })
+    })
+  })
+}

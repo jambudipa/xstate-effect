@@ -1,0 +1,23 @@
+// Conformance fixture: a CONF-2 evidence file with four import faults. It imports deep twice,
+// leaves out multiple, imports id (green at phase 3) and wraps initial in a describe block
+// whose title names another file. A helper module import is not an upstream test file.
+import { describe } from "@effect/vitest"
+import { conformancePhase, upstreamFileOptions } from "./conformance.js"
+
+conformancePhase(2, () => {
+  describe("upstream/deep.test.ts", upstreamFileOptions(), async () => {
+    await import("../upstream/deep.test.js")
+  })
+  describe("upstream/deep.test.ts", upstreamFileOptions(), async () => {
+    await import("../upstream/deep.test.js")
+  })
+  describe("upstream/final.test.ts", upstreamFileOptions(), async () => {
+    await import("../upstream/initial.test.js")
+  })
+  describe("upstream/id.test.ts", upstreamFileOptions(), async () => {
+    await import("../upstream/id.test.js")
+  })
+  describe("upstream/utils.ts", upstreamFileOptions(), async () => {
+    await import("../upstream/utils.js")
+  })
+})
