@@ -56,10 +56,18 @@ export namespace Variance {
     out TEmitted extends EventObject,
     out R
   > {
+    /**
+     * Variance marker of `TSnapshot` (invariant). Type only: the run-time value is a placeholder
+     * that no code reads.
+     */
     readonly _Snapshot: EffectTypes.Invariant<TSnapshot>
+    /** Variance marker of `TEvent` (invariant); type only. */
     readonly _Event: EffectTypes.Invariant<TEvent>
+    /** Variance marker of `TInput` (contravariant); type only. */
     readonly _Input: EffectTypes.Contravariant<TInput>
+    /** Variance marker of `TEmitted` (covariant); type only. */
     readonly _Emitted: EffectTypes.Covariant<TEmitted>
+    /** Variance marker of the requirements `R` (covariant); type only. */
     readonly _R: EffectTypes.Covariant<R>
   }
 
@@ -75,8 +83,14 @@ export namespace Variance {
     in TEvent extends EventObject,
     out TEmitted extends EventObject
   > {
+    /**
+     * Variance marker of `TSnapshot` (covariant). Type only: the run-time value is a placeholder
+     * that no code reads.
+     */
     readonly _Snapshot: EffectTypes.Covariant<TSnapshot>
+    /** Variance marker of `TEvent` (contravariant); type only. */
     readonly _Event: EffectTypes.Contravariant<TEvent>
+    /** Variance marker of `TEmitted` (covariant); type only. */
     readonly _Emitted: EffectTypes.Covariant<TEmitted>
   }
 
@@ -92,8 +106,14 @@ export namespace Variance {
     in out TEvent extends EventObject,
     out TEmitted extends EventObject
   > {
+    /**
+     * Variance marker of `TSnapshot` (covariant). Type only: the run-time value is a placeholder
+     * that no code reads.
+     */
     readonly _Snapshot: EffectTypes.Covariant<TSnapshot>
+    /** Variance marker of `TEvent` (invariant); type only. */
     readonly _Event: EffectTypes.Invariant<TEvent>
+    /** Variance marker of `TEmitted` (covariant); type only. */
     readonly _Emitted: EffectTypes.Covariant<TEmitted>
   }
 
@@ -107,7 +127,12 @@ export namespace Variance {
     in out TContext,
     in out TEvent extends EventObject
   > {
+    /**
+     * Variance marker of `TContext` (invariant). Type only: the run-time value is a placeholder
+     * that no code reads.
+     */
     readonly _Context: EffectTypes.Invariant<TContext>
+    /** Variance marker of `TEvent` (invariant); type only. */
     readonly _Event: EffectTypes.Invariant<TEvent>
   }
 
@@ -135,14 +160,26 @@ export namespace Variance {
     in out TStateMeta = unknown,
     in out TTransitionMeta = TStateMeta
   > {
+    /**
+     * Variance marker of the machine id `Id` (covariant). Type only: the run-time value is a
+     * placeholder that no code reads.
+     */
     readonly _Id: EffectTypes.Covariant<Id>
+    /** Variance marker of `TContext` (invariant); type only. */
     readonly _Context: EffectTypes.Invariant<TContext>
+    /** Variance marker of `TEvent` (invariant); type only. */
     readonly _Event: EffectTypes.Invariant<TEvent>
+    /** Variance marker of `TInput` (contravariant); type only. */
     readonly _Input: EffectTypes.Contravariant<TInput>
+    /** Variance marker of `TOutput` (invariant); type only. */
     readonly _Output: EffectTypes.Invariant<TOutput>
+    /** Variance marker of `TEmitted` (covariant); type only. */
     readonly _Emitted: EffectTypes.Covariant<TEmitted>
+    /** Variance marker of the requirements `R` (covariant); type only. */
     readonly _R: EffectTypes.Covariant<R>
+    /** Variance marker of `TStateMeta` (invariant); type only. */
     readonly _StateMeta: EffectTypes.Invariant<TStateMeta>
+    /** Variance marker of `TTransitionMeta` (invariant); type only. */
     readonly _TransitionMeta: EffectTypes.Invariant<TTransitionMeta>
   }
 }
@@ -246,13 +283,31 @@ export interface TransitionConfig<
   TNames extends ImplementationNames = ImplementationNames,
   TSelfEvent extends EventObject = TEvent
 > {
+  /**
+   * Where the transition goes: a sibling key, `.child` for a node below the source, or `#id`; a
+   * list for several parallel regions. On the root only `.child` and `#id` work. None, or the empty
+   * string, gives a targetless transition: its actions run and no state exits. A target that names
+   * no node is a definition error (SD-3): every Effect that computes a snapshot of the machine
+   * fails with it.
+   */
   readonly target?: TransitionTarget
   /** Any XState guard form, or a port `GuardDefinition` (D15). */
   readonly guard?: Guard<TContext, TEvent, TNames>
+  /**
+   * The actions the transition runs, in order: after the exit actions of the states it leaves and
+   * before the entry actions of the states it enters. Each one sees the context the earlier actions
+   * of the list left.
+   */
   readonly actions?:
     | Action<TContext, TEvent, TNames, TSelfEvent>
     | ReadonlyArray<Action<TContext, TEvent, TNames, TSelfEvent>>
+  /** A note for people and tools. The definition keeps it as written; the engine never reads it. */
   readonly description?: string
+  /**
+   * Whether the source exits and enters again when every target is the source or below it (XState
+   * `reenter`). Defaults to `false`: the source then stays active, and only the states below it
+   * exit and enter.
+   */
   readonly reenter?: boolean
   /**
    * Transition metadata, kept on the resolved transition (XState), of the transition meta
@@ -283,16 +338,21 @@ export interface RouteTransitionConfig<
 > {
   /** Any XState guard form; the route is taken only when it passes. */
   readonly guard?: Guard<TContext, TEvent, TNames>
+  /** The actions the route transition runs when it is taken, as a transition's `actions`. */
   readonly actions?: Action<TContext, TEvent, TNames> | ReadonlyArray<Action<TContext, TEvent, TNames>>
   /** Transition metadata, kept on the resolved route transition (XState). */
   readonly meta?: TMeta
+  /**
+   * A note for people and tools, kept on the route transition as written; the engine never reads
+   * it.
+   */
   readonly description?: string
 }
 
 /**
  * The transitions of a state node as a list (upstream `Transitions<TContext, TEvent>`,
  * `Array<TransitionDefinition<TContext, TEvent, any>>`): their meta is upstream's `any` (SD-22
- * amendment, goal journal `2026-10-07-13-node-containers-any.md`).
+ * amendment 2026-10-07, see docs/decisions.md).
  *
  * @since 0.1.0
  * @category Types
@@ -314,15 +374,32 @@ export interface TransitionDefinition<TContext, TEvent extends EventObject, TMet
    * forbidden) transition.
    */
   readonly target: ReadonlyArray<StateNode<TContext, TEvent>> | undefined
+  /**
+   * The guard as written; none for a transition without one. Of a node's transitions for an event,
+   * the engine takes the first, in config order, whose guard passes or that has none.
+   */
   readonly guard: Option.Option<Guard<TContext, TEvent>>
+  /** The transition's actions as written, in the order they run. */
   readonly actions: Chunk.Chunk<Action<TContext, TEvent>>
   /**
    * The transition's description, as written (XState: upstream spreads the config into the
    * definition, so the key is there exactly when the config has it).
    */
   readonly description?: string
+  /** The config's `reenter`, `false` when it gives none (see {@link TransitionConfig}). */
   readonly reenter: boolean
+  /**
+   * The event descriptor the transition is listed under: an `on` key (`*` and partial descriptors
+   * such as `mouse.*` included), `xstate.done.state.<id>`, an invocation's
+   * `xstate.done.actor.<id>`, `xstate.error.actor.<id>` or `xstate.snapshot.<id>`,
+   * `xstate.after.<delay>.<id>`, `xstate.route`, or the empty string for an eventless (`always`)
+   * transition.
+   */
   readonly eventType: string
+  /**
+   * The id of the state node the transition belongs to (upstream holds the node itself); the JSON
+   * form writes it as `#<id>`.
+   */
   readonly source: string // State node ID
   /**
    * Transition metadata, as written (XState `meta`: upstream spreads the config into the
@@ -349,7 +426,16 @@ export interface TransitionDefinition<TContext, TEvent extends EventObject, TMet
  * @category Types
  */
 export interface InitialTransition<TContext, TEvent extends EventObject, TMeta = unknown> {
+  /**
+   * The initial child's key, as the only element (the string form of `initial`, or its `target`).
+   * It stays a key: the engine resolves it when it enters the node, and a key that names no child
+   * is a definition error then (`Initial state node "<key>" not found on parent state node #<id>`).
+   */
   readonly target: ReadonlyArray<string>
+  /**
+   * The actions of the object form of `initial`; empty for the string form. They run only when the
+   * node is entered by default, after its entry actions and before the initial child's.
+   */
   readonly actions: Chunk.Chunk<Action<TContext, TEvent>>
   /** The transition metadata of the object form of `initial` (XState `meta`). */
   readonly meta?: TMeta
@@ -377,10 +463,19 @@ export interface InitialTransitionConfig<
   TMeta = unknown,
   TNames extends ImplementationNames = ImplementationNames
 > {
+  /** The key of the initial child: a direct child of the node, not a path or an id. */
   readonly target: string
+  /**
+   * The actions of the initial transition. They run only when the node is entered by default (not
+   * when a transition targets a child directly), after the node's entry actions and before the
+   * initial child's.
+   */
   readonly actions?: Action<TContext, TEvent, TNames> | ReadonlyArray<Action<TContext, TEvent, TNames>>
   /** Transition metadata, kept on the node's initial transition (XState). */
   readonly meta?: TMeta
+  /**
+   * A note for people and tools, kept on the node's initial transition; the engine never reads it.
+   */
   readonly description?: string
 }
 
@@ -449,6 +544,10 @@ export interface TypedActorContext<
 export interface SpawnOptions<TLogic extends AnyActorLogic> {
   /** The child's id; defaults to its session id. */
   readonly id?: string
+  /**
+   * The child's input: its logic's initial snapshot receives it as given. This form takes no input
+   * function.
+   */
   readonly input?: ActorLogic.InputOf<TLogic>
   /** The id under which the system registers the child (D7). */
   readonly systemId?: string
@@ -464,9 +563,16 @@ export interface SpawnOptions<TLogic extends AnyActorLogic> {
  * @category Typed Context
  */
 export interface NamedSpawnOptions {
+  /** The child's id; defaults to its session id. */
   readonly id?: string
+  /**
+   * The child's input: a value, or a function of `{ context, event, self }` that the spawn calls at
+   * once for a string src. A logic src receives the value as given.
+   */
   readonly input?: unknown
+  /** The key under which the system registers the child (D7), for `system.get`. */
   readonly systemId?: string
+  /** Whether the child sends each active snapshot to its parent as `xstate.snapshot.<id>`. */
   readonly syncSnapshot?: boolean
 }
 
@@ -525,7 +631,7 @@ export type ActorRefFrom<T> =
  *
  * @example
  * ```ts
- * import { createMachine, type ActorRefFromLogic } from "@xstate-effect/core"
+ * import { createMachine, type ActorRefFromLogic } from "@jambudipa/xstate-effect"
  *
  * const child = createMachine({ types: {} as { events: { type: "PING" } } })
  * type ChildRef = ActorRefFromLogic<typeof child>
@@ -548,7 +654,7 @@ export type ActorRefFromLogic<T extends AnyActorLogic> = ActorRef<
  *
  * @example
  * ```ts
- * import { createMachine, type SnapshotFrom } from "@xstate-effect/core"
+ * import { createMachine, type SnapshotFrom } from "@jambudipa/xstate-effect"
  *
  * const machine = createMachine({ context: { count: 0 } })
  * const countOf = (snapshot: SnapshotFrom<typeof machine>) => snapshot.context.count
@@ -572,7 +678,7 @@ export type SnapshotFrom<T> =
  *
  * @example
  * ```ts
- * import { fromPromise, type InputFrom } from "@xstate-effect/core"
+ * import { fromPromise, type InputFrom } from "@jambudipa/xstate-effect"
  *
  * const fetchUser = fromPromise(({ input }: { input: { id: string } }) => Promise.resolve(input.id))
  * type Input = InputFrom<typeof fetchUser> // { id: string }
@@ -593,7 +699,7 @@ export type InputFrom<T> = T extends ActorLogic<infer _TSnapshot, infer _TEvent,
  *
  * @example
  * ```ts
- * import { createMachine, type OutputFrom } from "@xstate-effect/core"
+ * import { createMachine, type OutputFrom } from "@jambudipa/xstate-effect"
  *
  * const machine = createMachine({ types: {} as { output: number }, output: 42 })
  * type Output = OutputFrom<typeof machine> // number
@@ -613,7 +719,7 @@ export type OutputFrom<T> = T extends ActorLogic<infer TSnapshot, infer _TEvent,
  *
  * @example
  * ```ts
- * import { createMachine, type EmittedFrom } from "@xstate-effect/core"
+ * import { createMachine, type EmittedFrom } from "@jambudipa/xstate-effect"
  *
  * const machine = createMachine({ types: {} as { emitted: { type: "saved" } } })
  * type Emitted = EmittedFrom<typeof machine> // { type: "saved" }
@@ -636,7 +742,7 @@ export type EmittedFrom<TLogic extends AnyActorLogic> = TLogic extends
  *
  * @example
  * ```ts
- * import { assign, createMachine, type MachineImplementationsFrom } from "@xstate-effect/core"
+ * import { assign, createMachine, type MachineImplementationsFrom } from "@jambudipa/xstate-effect"
  *
  * const machine = createMachine({ context: { count: 0 } })
  * const implementations: MachineImplementationsFrom<typeof machine> = {
@@ -673,7 +779,7 @@ export type MachineImplementationsFrom<T extends AnyStateMachine | ((...args: ne
  *
  * @example
  * ```ts
- * import { createMachine, type StateValueFrom } from "@xstate-effect/core"
+ * import { createMachine, type StateValueFrom } from "@jambudipa/xstate-effect"
  *
  * const machine = createMachine({ initial: "idle", states: { idle: {} } })
  * const value: StateValueFrom<typeof machine> = "idle"
@@ -693,7 +799,7 @@ export type StateValueFrom<TMachine extends AnyStateMachine> = SnapshotFrom<TMac
  *
  * @example
  * ```ts
- * import { createMachine, type TagsFrom } from "@xstate-effect/core"
+ * import { createMachine, type TagsFrom } from "@jambudipa/xstate-effect"
  *
  * const machine = createMachine({
  *   types: {} as { tags: "loading" },
@@ -845,8 +951,22 @@ export interface ActionDefinition<
   TNames extends ImplementationNames = ImplementationNames,
   TSelfEvent extends EventObject = TEvent
 > {
+  /**
+   * The action's name, as the node's definition and a transition's JSON form show it
+   * (`xstate.assign`, `xstate.raise` and the others for the built-ins). The engine runs `exec` and
+   * never looks this name up among the implementations.
+   */
   readonly type: string
+  /**
+   * The params `exec` receives when the definition is written in a config. As an implementation it
+   * plays no part: `exec` receives the params of each use instead.
+   */
   readonly params?: TParams
+  /**
+   * Runs the action once per use, with the context the earlier actions of the list left, and gives
+   * the {@link ActionResult} that the engine then carries out. Its type admits no failure: a
+   * failure or a defect at run time stops the macrostep and gives the actor status `error` (SD-4).
+   */
   readonly exec: (
     ctx: ActionContext<TContext, TEvent, TSelfEvent>,
     params: TParams
@@ -913,7 +1033,15 @@ export type DynamicParams<TContext, TEvent extends EventObject, TParams = Action
  * @category Types
  */
 export interface ParameterizedAction<TContext, TEvent extends EventObject> {
+  /**
+   * The name of an implementation in the machine's `actions`. A name without one is no error: the
+   * use runs nothing, as upstream.
+   */
   readonly type: string
+  /**
+   * The params of this use: a value, or a function of `{ context, event }` that the engine calls
+   * each time the action runs.
+   */
   readonly params?: DynamicParams<TContext, TEvent>
 }
 
@@ -1016,6 +1144,10 @@ export type ActionImplementation<TContext, TEvent extends EventObject> =
  * @category Types
  */
 export interface ImplementsParams<TParams> {
+  /**
+   * Type-only slot (never set, never called) that carries the params type of the uses. It is a
+   * method, so its parameter is compared both ways.
+   */
   "~params"?(params: TParams): void
 }
 
@@ -1078,6 +1210,10 @@ export type ActionImplementations<
  * definition made for other names is still accepted.
  */
 interface ImplementsNames<TNames extends ImplementationNames> {
+  /**
+   * Type-only slot (never set, never called) that carries the machine's names. It is a method, so
+   * its parameter is compared both ways.
+   */
   "~names"?(names: TNames): void
 }
 
@@ -1337,7 +1473,16 @@ export interface GuardDefinition<
   TEvent extends EventObject,
   TParams = void
 > {
+  /**
+   * The guard's name, as a transition's JSON form shows it (`xstate.and`, `xstate.stateIn` and the
+   * others for the built-ins). The evaluator runs `predicate` and never looks this name up among
+   * the implementations.
+   */
   readonly type: string
+  /**
+   * The params `predicate` receives when the definition is written in a config. As an
+   * implementation it plays no part: `predicate` receives the params of each use instead.
+   */
   readonly params?: TParams
   /**
    * Decides the guard. It fails with `GuardError` when a guard it evaluates in turn names no
@@ -1362,6 +1507,10 @@ export interface GuardDefinition<
 export interface BuiltInGuardDefinition<TContext, TEvent extends EventObject, TShown, TGuards = never>
   extends GuardDefinition<TContext, TEvent, unknown>
 {
+  /**
+   * The guard's arguments, shown in the JSON form (`{ guards, implementations }` for `and`, `{
+   * stateValue }` for `stateIn`). The predicate decides from its closure and ignores them.
+   */
   readonly params: TShown
   /**
    * The guards this guard names (type only; never set, XState `_out_TGuard`): `{ type, params
@@ -1445,7 +1594,11 @@ type ParamsOfUse<TParams> = TParams extends (...args: never) => infer TResult ? 
  * @category Types
  */
 export interface GuardArgs<TContext, TEvent extends EventObject> {
+  /** The context the guard decides on: the snapshot's context at the point of evaluation. */
   readonly context: TContext
+  /**
+   * The event being handled; the guard of an eventless transition gets the event of its macrostep.
+   */
   readonly event: TEvent
 }
 
@@ -1481,7 +1634,15 @@ export type GuardPredicate<TContext, TEvent extends EventObject, TParams = undef
  * @category Types
  */
 export interface ParameterizedGuard<TContext, TEvent extends EventObject> {
+  /**
+   * The name of an implementation in the machine's `guards`. A name without one fails the
+   * evaluation with `GuardError` (`Guard '<type>' is not implemented.'.`).
+   */
   readonly type: string
+  /**
+   * The params of this use: a value, or a function of `{ context, event }` that the evaluator calls
+   * each time it evaluates the guard.
+   */
   readonly params?: DynamicParams<TContext, TEvent>
 }
 
@@ -1547,9 +1708,19 @@ export type GuardImplementation<TContext, TEvent extends EventObject> =
  * @category Types
  */
 export interface GuardScope<TContext, TEvent extends EventObject> {
+  /** The evaluating actor, which a port `GuardDefinition` receives as `self`. */
   readonly self: ActorRefBase
+  /** The evaluating actor's system, which a port `GuardDefinition` receives as `system`. */
   readonly system: import("./ActorLogic.js").ActorSystemService
+  /**
+   * The implementations that guard names resolve against. Without them, every name fails with
+   * `GuardError`.
+   */
   readonly implementations?: MachineImplementations<TContext, TEvent>
+  /**
+   * The snapshot whose active states `stateIn` checks. Without it no state is active, so `stateIn`
+   * is false.
+   */
   readonly snapshot?: MachineSnapshot<TContext>
 }
 
@@ -1597,7 +1768,12 @@ export type InvokeConfig<
     ErrorActorEvent,
     SnapshotEvent<UpstreamAny>
   > & {
+    /**
+     * One of the machine's actor names, or inline actor logic. An unknown name warns `Actor type
+     * '<src>' not found in machine '<id>'.` on entry and starts nothing.
+     */
     readonly src: TNames["actors"] | AnyActorLogic
+    /** The invoked actor's id; `<index>.<node id>` when none is given. */
     readonly id?: string
   }
   :
@@ -1784,10 +1960,22 @@ export type InvokeTransitionsConfig<
  * @category Types
  */
 export interface InvokeDefinition<TContext, TEvent extends EventObject, TMeta = unknown> {
+  /**
+   * The config's src: an actor name, or inline logic, which the JSON form names
+   * `xstate.invoke.<index>.<node id>`.
+   */
   readonly src: string | AnyActorLogic
+  /**
+   * The invoked actor's id: the config's, or `<index>.<node id>` (upstream `createInvokeId`). The
+   * node's result transitions are listed under the event types built from it.
+   */
   readonly id: string
   /** The invocation's `systemId`, none when the config gives none. */
   readonly systemId: Option.Option<string>
+  /**
+   * The config's input; none when the config gives `undefined` or `null`. A function is called on
+   * entry with the context, the event and `self`, once the src resolves to a logic.
+   */
   readonly input: Option.Option<InvokeInput<TContext, TEvent>>
   /** The transitions the invoked actor's done event takes, as the config writes them. */
   readonly onDone?: InvokeTransitionsConfig<TContext, TEvent, TMeta>
@@ -1871,7 +2059,15 @@ export type DelayConfig<TContext, TEvent extends EventObject> =
  * @category Types
  */
 export interface MachineImplementations<TContext, TEvent extends EventObject> {
+  /**
+   * The action implementations by name, looked up as own properties. A name that a config uses
+   * without an implementation runs nothing; it is no error, as upstream.
+   */
   readonly actions?: Record<string, ActionImplementation<TContext, TEvent>>
+  /**
+   * The guard implementations by name, looked up as own properties. A name that a config uses
+   * without one fails the evaluation with `GuardError`.
+   */
   readonly guards?: Record<string, GuardImplementation<TContext, TEvent>>
   /** The actor logic a string src names in `spawn`, `spawnChild` and `invoke`. */
   readonly actors?: Record<string, AnyActorLogic>
@@ -1914,6 +2110,10 @@ export interface DeclaredImplementations<
    * declared names (its `check` takes the declared guards).
    */
   readonly actions?: ActionImplementations<TContext, TEvent, TAction, DeclaredImplementationNames<TAction, TGuard, TDelay, TActor>>
+  /**
+   * The guard implementations by declared name, each taking the params of its uses (see {@link
+   * GuardImplementations}).
+   */
   readonly guards?: GuardImplementations<TContext, TEvent, TGuard>
   /** The actor logic a string src names in `spawn`, `spawnChild` and `invoke`. */
   readonly actors?: ActorImplementations<TActor>
@@ -2060,9 +2260,17 @@ export interface StateNodeConfig<
    * children keep `<machineId>.<path>` ids.
    */
   readonly id?: string
+  /**
+   * The node's kind. Without it the node is `compound` when `states` has a key, `history` when
+   * `history` is truthy, else `atomic`; `parallel` and `final` must be given.
+   */
   readonly type?: StateNodeType
   /** The initial child's key, or the initial transition with its actions. */
   readonly initial?: string | InitialTransitionConfig<TContext, TEvent, TTransitionMeta, TNames>
+  /**
+   * The child state configs by key. Each key is a segment of the state value and of the child's
+   * default id (`<machine id>.<path>`).
+   */
   readonly states?: Record<string, StateNodeConfig<TContext, TEvent, TStateMeta, TTransitionMeta, TNames>>
   /**
    * The transitions for each event descriptor (XState `TransitionsConfig`): a transition
@@ -2106,6 +2314,11 @@ export interface StateNodeConfig<
   readonly entry?: Action<TContext, NoInfer<TEvent>, TNames> | ReadonlyArray<Action<TContext, NoInfer<TEvent>, TNames>>
   /** The state's exit actions; no inference site of the machine's events either. */
   readonly exit?: Action<TContext, NoInfer<TEvent>, TNames> | ReadonlyArray<Action<TContext, NoInfer<TEvent>, TNames>>
+  /**
+   * The actors the state invokes (XState `invoke`): each one starts when the state is entered,
+   * after its entry actions, and stops when it exits, after its exit actions. Their done, error and
+   * snapshot events take the invocation's `onDone`, `onError` and `onSnapshot`.
+   */
   readonly invoke?:
     | InvokeConfig<TContext, TEvent, TTransitionMeta, TNames>
     | ReadonlyArray<InvokeConfig<TContext, TEvent, TTransitionMeta, TNames>>
@@ -2120,7 +2333,17 @@ export interface StateNodeConfig<
    * the machine config.
    */
   meta?: TStateMeta
+  /**
+   * A note for people and tools (`node.description` and the definition show it); the engine never
+   * reads it.
+   */
   readonly description?: string
+  /**
+   * The output of a final state: a value, or a mapper of the context, the event that entered it and
+   * `self`. It becomes the `output` (an `Option`; none for `undefined`, SD-7) of the parent's
+   * `xstate.done.state.<parent id>` event. A node that is not final ignores it; the root has its
+   * own (see {@link MachineConfigMembers}).
+   */
   readonly output?: OutputDefinition<TContext, TEvent>
   /**
    * The kind of history a history state keeps (XState): `true` means `'shallow'`, and
@@ -2303,8 +2526,8 @@ export type MachineContextConfig<
 
 /**
  * The context of a state machine (upstream `MachineContext`, `Record<string, any>`): an
- * object with any members, upstream's `any` (SD-22 amendment 2026-10-07, goal journal
- * `2026-10-07-11-machinecontext-any.md`). The context type `createMachine` infers is one, so
+ * object with any members, upstream's `any` (SD-22 amendment 2026-10-07, see
+ * docs/decisions.md). The context type `createMachine` infers is one, so
  * a context that is no object is a type error, and a machine whose `types` and config
  * declare none has this context.
  *
@@ -2362,20 +2585,40 @@ export type MachineConfig<
  * @category Types
  */
 export interface StateSchema {
+  /** The node's own id, from which {@link StateId} builds the state ids. */
   readonly id?: string
+  /**
+   * Upstream's member: a node with a `route` and an `id` is routable (see {@link RoutableStateId}).
+   */
   readonly route?: unknown
+  /** The child states by key, each a schema of its own. */
   readonly states?: Readonly<Record<string, StateSchema>>
+  /**
+   * Shape only (upstream): with this member and the ones below, a full state config fits the
+   * schema, which TypeScript would otherwise reject as a weak type.
+   */
   readonly type?: unknown
+  /** Shape only, as `type`. */
   readonly invoke?: unknown
+  /** Shape only, as `type`. */
   readonly on?: unknown
+  /** Shape only, as `type`. */
   readonly entry?: unknown
+  /** Shape only, as `type`. */
   readonly exit?: unknown
+  /** Shape only, as `type`. */
   readonly onDone?: unknown
+  /** Shape only, as `type`. */
   readonly after?: unknown
+  /** Shape only, as `type`. */
   readonly always?: unknown
+  /** Shape only, as `type`. */
   readonly meta?: unknown
+  /** Shape only, as `type`. */
   readonly output?: unknown
+  /** Shape only, as `type`. */
   readonly tags?: unknown
+  /** Shape only, as `type`. */
   readonly description?: unknown
 }
 
@@ -2388,6 +2631,10 @@ export interface StateSchema {
  * @category Types
  */
 export interface StateKeysConfig<TStateKeys, TStateNodeConfig> {
+  /**
+   * The child states by key: the literal keys infer `TStateKeys`, while each child keeps the full
+   * node config type, so its callbacks stay typed.
+   */
   readonly states?: {
     readonly [K in keyof TStateKeys]: TStateNodeConfig & StateKeysConfig<TStateKeys[K], TStateNodeConfig>
   }
@@ -2567,8 +2814,18 @@ export type ToTestStateValue<TStateValue> = [TStateValue] extends [string] ? TSt
  * @category Types
  */
 export interface ProvidedActor {
+  /** The name a config uses for the actor in `invoke.src`, `spawnChild` and `spawn`. */
   readonly src: string
+  /**
+   * The actor logic that the name stands for; it types the input and the result events of an
+   * invocation or a spawn of it.
+   */
   readonly logic: AnyActorLogic
+  /**
+   * The child id the actor declares. An id whose type excludes `undefined` is required in an
+   * invocation or a spawn of the actor; a literal id gives the child its own key in the snapshot's
+   * `children` (see {@link ToChildren}).
+   */
   readonly id?: string | undefined
 }
 
@@ -2617,7 +2874,12 @@ export type ToChildren<TActor extends ProvidedActor> = string extends TActor["sr
  * @category Types
  */
 export interface ParameterizedObject {
+  /** The declared name, which a config writes alone or as `{ type, params }`. */
   readonly type: string
+  /**
+   * The type of the params of each use. When `undefined` fits it, the name may stand alone;
+   * otherwise every use needs `{ type, params }`.
+   */
   readonly params?: unknown
 }
 
@@ -2646,9 +2908,21 @@ export interface ParameterizedObject {
  * @category Types
  */
 export interface ImplementationNames {
+  /**
+   * The actions a config may name, each with the type of its params; the wide `ParameterizedObject`
+   * takes any name and any params.
+   */
   readonly actions: ParameterizedObject
+  /**
+   * The guards a config may name, each with the type of its params; wide by default, as `actions`.
+   */
   readonly guards: ParameterizedObject
+  /**
+   * The delay names that an `after` key, `raise` and `sendTo` may use (an `after` key may always be
+   * a number of milliseconds); any string by default.
+   */
   readonly delays: string
+  /** The actor names that `invoke.src`, `spawnChild` and `spawn` may use; any string by default. */
   readonly actors: string
   /**
    * The logic of each actor name (XState `ProvidedActor['logic']`), which types the events an
@@ -2688,15 +2962,26 @@ export interface MachineTypesNames<
   TEmitted extends EventObject,
   TTag extends string = string
 > extends ImplementationNames {
+  /** The actions `types.actions` declares, or any action while none are known. */
   readonly actions: KnownOr<TAction, ParameterizedObject>
+  /** The guards `types.guards` declares, or any guard while none are known. */
   readonly guards: KnownOr<TGuard, ParameterizedObject>
+  /** The delay names `types.delays` declares, or any string while none are known. */
   readonly delays: KnownOr<TDelay, string>
+  /** The src names of the actors `types.actors` declares, or any string while none are known. */
   readonly actors: KnownOr<TActor, ProvidedActor>["src"]
+  /** The declared logic of each actor name. */
   readonly actorLogic: {
     readonly [K in KnownOr<TActor, ProvidedActor>["src"]]: Extract<KnownOr<TActor, ProvidedActor>, { readonly src: K }>["logic"]
   }
+  /**
+   * The events `types.emitted` declares; any event object while it declares none or only
+   * `EventObject`.
+   */
   readonly emitted: EventObject extends KnownOr<TEmitted, EventObject> ? AnyEventObject : TEmitted
+  /** The tags `types.tags` declares, or any string while none are known. */
   readonly tags: KnownOr<TTag, string>
+  /** The declared actors as one `ProvidedActor` union, or any actor while none are known. */
   readonly providedActor: KnownOr<TActor, ProvidedActor>
 }
 
@@ -2745,8 +3030,14 @@ export interface MachineTypes<
   TActor extends ProvidedActor = ProvidedActor,
   TTag extends string = string
 > {
+  /**
+   * The context type: `createMachine` takes it as the machine's context, and the config's `context`
+   * must fit it.
+   */
   readonly context?: TContext
+  /** The union of the events the machine takes. */
   readonly events?: TEvent
+  /** Not declarable (XState types the key `never`). */
   readonly children?: never
   /** The actors the machine's implementations name: each src with the type of its logic. */
   readonly actors?: TActor
@@ -2758,8 +3049,14 @@ export interface MachineTypes<
   readonly delays?: TDelay
   /** The tags the machine's state configs may set. */
   readonly tags?: TTag
+  /** The input type: what `createActor`'s `input` option and the context factory take. */
   readonly input?: TInput
+  /**
+   * The output type: what the machine's `output` gives, and what `snapshot.output` holds as an
+   * `Option` (D8).
+   */
   readonly output?: TOutput
+  /** The events `emit` may emit, which `actor.on` hands to its listeners. */
   readonly emitted?: TEmitted
   /** The type of each state node's `meta`; also the transition meta type when `transitionMeta` is absent. */
   readonly meta?: TStateMeta
@@ -3051,9 +3348,16 @@ export type AnyStateNodeConfig = StateNodeConfig<UpstreamAny, UpstreamAny, Upstr
 export interface AtomicStateNodeConfig<TContext, TEvent extends EventObject>
   extends StateNodeConfig<TContext, TEvent, UpstreamAny, UpstreamAny>
 {
+  /** None: an atomic node has no initial child. */
   readonly initial?: undefined
+  /**
+   * Upstream's member, kept so that a config typed as upstream's compiles. The engine never reads
+   * it: a parallel node is `type: "parallel"`.
+   */
   readonly parallel?: false | undefined
+  /** None: an atomic node has no child states. */
   readonly states?: undefined
+  /** None: an atomic node never completes, so it has no done transition. */
   readonly onDone?: undefined
 }
 
@@ -3066,7 +3370,13 @@ export interface AtomicStateNodeConfig<TContext, TEvent extends EventObject>
 export interface HistoryStateNodeConfig<TContext, TEvent extends EventObject>
   extends AtomicStateNodeConfig<TContext, TEvent>
 {
+  /** The history kind; `true` stands for `"shallow"`. */
   readonly history: "shallow" | "deep" | true
+  /**
+   * The default target while no history is recorded: a path below the parent, or a `#id`. Without
+   * one, the history state takes the parent's initial transition (the parent itself for a parallel
+   * parent).
+   */
   readonly target: string | undefined
 }
 
@@ -3322,6 +3632,10 @@ export interface RaiseActionParams<
   TEvent extends EventObject,
   TDelay extends string
 > extends RaiseOptions<TContext, TExpressionEvent, TDelay> {
+  /**
+   * The event to raise: a value, or a function of the action arguments and the params that gives
+   * it.
+   */
   readonly event: TEvent | SendExpr<TContext, TExpressionEvent, TParams, TEvent, TEvent>
 }
 
@@ -3353,6 +3667,9 @@ export interface SendToActionParams<
   TEvent extends EventObject,
   TDelay extends string
 > extends SendToOptions<TContext, TExpressionEvent, TDelay, TEvent> {
+  /**
+   * The event to send: a value, or a function of the action arguments and the params that gives it.
+   */
   readonly event: TSentEvent | SendExpr<TContext, TExpressionEvent, TParams, TSentEvent, TEvent>
 }
 
@@ -3363,13 +3680,24 @@ export interface SendToActionParams<
  * @category Types
  */
 export interface StateMachineTypes {
+  /** The context type; {@link InternalMachineImplementations} types the implementations by it. */
   readonly context: MachineContext
+  /** The events the machine takes; they type the implementations' event argument. */
   readonly events: EventObject
+  /** The declared actors (src, logic, id), which type the `actors` record. */
   readonly actors: ProvidedActor
+  /** The declared actions with their params, which type the `actions` record. */
   readonly actions: ParameterizedObject
+  /** The declared guards with their params, which type the `guards` record. */
   readonly guards: ParameterizedObject
+  /** The declared delay names, which key the `delays` record. */
   readonly delays: string
+  /**
+   * The tags the machine's states may carry; {@link InternalMachineImplementations} does not read
+   * them.
+   */
   readonly tags: string
+  /** The events the machine may emit; {@link InternalMachineImplementations} does not read them. */
   readonly emitted: EventObject
 }
 
@@ -3390,13 +3718,21 @@ export interface ResolvedStateMachineTypes<
   TTag extends string,
   TEmitted extends EventObject = EventObject
 > extends StateMachineTypes {
+  /** Narrows the record's context to `TContext`. */
   readonly context: TContext
+  /** Narrows the record's events to `TEvent`. */
   readonly events: TEvent
+  /** Narrows the record's actors to `TActor`. */
   readonly actors: TActor
+  /** Narrows the record's actions to `TAction`. */
   readonly actions: TAction
+  /** Narrows the record's guards to `TGuard`. */
   readonly guards: TGuard
+  /** Narrows the record's delay names to `TDelay`. */
   readonly delays: TDelay
+  /** Narrows the record's tags to `TTag`. */
   readonly tags: TTag
+  /** Narrows the record's emitted events to `TEmitted` (any event by default). */
   readonly emitted: TEmitted
 }
 
@@ -3455,8 +3791,11 @@ export type StateKey = string | AnyMachineSnapshot
  * @category Types
  */
 export interface StateLike<TContext extends MachineContext> {
+  /** The active state value, as `snapshot.value` holds it. */
   readonly value: StateValue
+  /** The context of the state, as `snapshot.context` holds it. */
   readonly context: TContext
+  /** The event that led to the state. */
   readonly event: EventObject
 }
 
@@ -3575,6 +3914,7 @@ export type UnifiedArg<TContext, TExpressionEvent extends EventObject, TEvent ex
  * @category Types
  */
 export interface BaseActorRef<TEvent extends EventObject> {
+  /** Sends an event. It is an Effect (D6): nothing is sent until it runs. */
   readonly send: (event: TEvent) => Effect.Effect<void>
 }
 
@@ -3587,6 +3927,10 @@ export interface BaseActorRef<TEvent extends EventObject> {
  * @category Types
  */
 export interface ActorLike<TCurrent, TEvent extends EventObject> extends BaseActorRef<TEvent> {
+  /**
+   * Runs the observer's Effect for each new value until the caller's `Scope` closes, which ends the
+   * subscription (D6).
+   */
   readonly subscribe: (observer: (value: TCurrent) => Effect.Effect<void>) => Effect.Effect<void, never, Scope.Scope>
 }
 
