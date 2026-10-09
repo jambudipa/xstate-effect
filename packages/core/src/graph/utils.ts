@@ -11,6 +11,11 @@ import type { EventObject } from "../Event.js"
 import type { AnyMachineSnapshot, Snapshot } from "../Snapshot.js"
 import type { SerializationConfig, StatePath, TestPathResult } from "./types.js"
 
+/**
+ * The JSON text of a value through the Schema JSON codec: none for a value that JSON cannot
+ * encode (`undefined`, a function, a `bigint`, a cyclic object), where upstream's
+ * `JSON.stringify` returns `undefined` or throws.
+ */
 const encodeJson = Schema.encodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 /**
@@ -34,9 +39,15 @@ export const simpleStringify = (value: unknown): string => Option.getOrElse(enco
 export const getAllOwnEventDescriptors = (snapshot: AnyMachineSnapshot): Array<string> =>
   Arr.dedupe(snapshot._nodes.flatMap((node) => node.ownEvents))
 
+/** How a path trace writes its states, its events and their pass or fail marks. */
 interface TestResultStringOptions<TSnapshot extends Snapshot, TEvent extends EventObject>
   extends SerializationConfig<TSnapshot, TEvent>
 {
+  /**
+   * Marks a text with a color name (`green`, `greenBright`, `red`, `redBright` or `gray`).
+   * The default returns the text unchanged, and a test model never gives another, so its
+   * traces carry no color.
+   */
   formatColor: (color: string, string: string) => string
 }
 

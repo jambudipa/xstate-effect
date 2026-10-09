@@ -88,6 +88,10 @@ export const serializeSnapshot = (snapshot: Snapshot): SerializedSnapshot => {
   }) as SerializedSnapshot
 }
 
+/**
+ * The default key of an event: its JSON text. Every traversal uses it unless its options give
+ * a `serializeEvent`.
+ */
 const serializeEvent = <TEvent extends EventObject>(event: TEvent): SerializedEvent =>
   simpleStringify(event) as SerializedEvent
 

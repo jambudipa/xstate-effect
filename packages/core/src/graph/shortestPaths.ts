@@ -24,7 +24,9 @@ import type {
   TraversalOptions,
 } from "./types.js"
 
+/** The shortest known path to one state: its length and the step it ends with. */
 interface Weight<TEvent> {
+  /** The number of transitions on the shortest known path from the start state. */
   readonly weight: number
   /**
    * The state the shortest known path comes from, and the event it takes there; none for the

@@ -22,6 +22,11 @@ import { UnsupportedTestMachineError } from "./errors.js"
 const isDelayedAction = (action: Action<unknown, EventObject>): boolean =>
   Predicate.isObject(action) && Option.exists(delayOf(action), (delay) => typeof delay === "number")
 
+/**
+ * Checks one state node, then its children in document order, and fails at the first node
+ * that has an invocation, an `after` transition or a delayed inline action on its entry,
+ * exit or transitions. Eventless (`always`) transitions are not checked, as upstream.
+ */
 const validateState = (state: StateNode<unknown, EventObject>): Effect.Effect<void, UnsupportedTestMachineError> =>
   Effect.gen(function* () {
     if (state.invoke.length > 0) {

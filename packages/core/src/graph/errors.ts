@@ -19,6 +19,7 @@ import { Data } from "effect"
 export class TraversalLimitError extends Data.TaggedError("TraversalLimitError")<{
   readonly message: string
 }> {
+  /** `Error`, so the failure prints as upstream's plain `Error` does. */
   override readonly name = "Error"
 }
 
@@ -32,6 +33,7 @@ export class TraversalLimitError extends Data.TaggedError("TraversalLimitError")
 export class JoinPathsError extends Data.TaggedError("JoinPathsError")<{
   readonly message: string
 }> {
+  /** `Error`, so the failure prints as upstream's plain `Error` does. */
   override readonly name = "Error"
 }
 
@@ -45,6 +47,7 @@ export class JoinPathsError extends Data.TaggedError("JoinPathsError")<{
 export class InvalidEventSequenceError extends Data.TaggedError("InvalidEventSequenceError")<{
   readonly message: string
 }> {
+  /** `Error`, so the failure prints as upstream's plain `Error` does. */
   override readonly name = "Error"
 }
 
@@ -58,5 +61,6 @@ export class InvalidEventSequenceError extends Data.TaggedError("InvalidEventSeq
 export class UnsupportedTestMachineError extends Data.TaggedError("UnsupportedTestMachineError")<{
   readonly message: string
 }> {
+  /** `Error`, so the failure prints as upstream's plain `Error` does. */
   override readonly name = "Error"
 }

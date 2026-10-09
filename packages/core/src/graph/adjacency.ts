@@ -22,9 +22,16 @@ import type {
   TraversalOptions,
 } from "./types.js"
 
+/**
+ * One state waiting in the breadth-first queue, with what its key is computed from. The
+ * start state has no event and no previous state.
+ */
 interface QueueEntry<TSnapshot, TEvent> {
+  /** The state to visit. */
   readonly nextState: TSnapshot
+  /** The event that led to the state, the second argument of `serializeState`. */
   readonly event: Option.Option<TEvent>
+  /** The state the event was sent in, the third argument of `serializeState`. */
   readonly prevState: Option.Option<TSnapshot>
 }
 

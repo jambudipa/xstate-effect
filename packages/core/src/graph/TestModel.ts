@@ -38,6 +38,10 @@ import type {
 import { formatPathTestResult, getAllOwnEventDescriptors, getDescription, simpleStringify } from "./utils.js"
 import { validateMachine } from "./validateMachine.js"
 
+/**
+ * The options of one path query of a test model: traversal options that override the
+ * model's for that query, and whether to keep the paths that a longer path contains.
+ */
 type GetPathOptions<TSnapshot extends Snapshot, TEvent extends EventObject, TInput> = Partial<
   TraversalOptions<TSnapshot, TEvent, TInput>
 > & {
@@ -109,8 +113,21 @@ const formatEvent = (event: EventObject): string => {
  * @category Test model
  */
 export class TestModel<TSnapshot extends Snapshot, TEvent extends EventObject, TInput> {
+  /**
+   * The model's options: {@link getDefaultOptions} under the constructor's options. Each path
+   * query and path test reads them under its own options; `getPathsFromEvents` does not.
+   */
   public options: TestModelOptions<TSnapshot, TEvent, TInput>
+  /**
+   * Traversal options under the model's `options`, for a caller to set on the instance.
+   * Nothing in this package sets it (upstream keeps the same open field).
+   */
   public defaultTraversalOptions?: TraversalOptions<TSnapshot, TEvent, TInput>
+  /**
+   * The defaults for a logic that is not a machine: states and events keyed by their JSON
+   * text, no events, only the `*` state test applies, and a logger that discards.
+   * `createTestModel` replaces the keys, the events and the matcher for a machine.
+   */
   public getDefaultOptions(): TestModelOptions<TSnapshot, TEvent, TInput> {
     return {
       serializeState: (state) => simpleStringify(state),
@@ -128,6 +145,10 @@ export class TestModel<TSnapshot extends Snapshot, TEvent extends EventObject, T
     }
   }
 
+  /**
+   * Builds the model synchronously: it runs no user code, so nothing can fail here. The logic
+   * runs only when a path query or `getAdjacencyMap` runs.
+   */
   constructor(
     public testLogic: ActorLogic<TSnapshot, TEvent, TInput>,
     options?: Partial<TestModelOptions<TSnapshot, TEvent, TInput>>
@@ -194,7 +215,11 @@ export class TestModel<TSnapshot extends Snapshot, TEvent extends EventObject, T
     }
   }
 
-  /** The test path of an event sequence ({@link getPathsFromEvents}). */
+  /**
+   * The test path of an event sequence ({@link getPathsFromEvents}). Unlike the other path
+   * queries it uses the given options only, not the model's (as upstream), so a machine's
+   * states are keyed by the defaults of {@link getPathsFromEvents}, without a transition part.
+   */
   public getPathsFromEvents(
     events: Array<TEvent>,
     options?: GetPathOptions<TSnapshot, TEvent, TInput>
@@ -242,6 +267,11 @@ export class TestModel<TSnapshot extends Snapshot, TEvent extends EventObject, T
     )
   }
 
+  /**
+   * The keys of the state tests that apply to `state`, in the key order of `params.states`:
+   * those `stateMatcher` accepts, else `*` when the params have it. Fails with what a matcher
+   * throws or its Effect fails with.
+   */
   private _getStateTestKeys(
     params: TestParam<TSnapshot, TEvent>,
     state: TSnapshot,
@@ -258,6 +288,7 @@ export class TestModel<TSnapshot extends Snapshot, TEvent extends EventObject, T
     )
   }
 
+  /** The executor of the step's event type in `params.events`; undefined when there is none. */
   private _getEventExec(
     params: TestParam<TSnapshot, TEvent>,
     step: Step<TSnapshot, TEvent>
@@ -273,6 +304,10 @@ export class TestModel<TSnapshot extends Snapshot, TEvent extends EventObject, T
     return eventExec ? runCallback(() => eventExec(step)) : Effect.void
   }
 
+  /**
+   * The options of one call: `defaultTraversalOptions`, then the model's `options`, then the
+   * call's options, each later one winning key by key.
+   */
   private _resolveOptions(
     options?: Partial<TestModelOptions<TSnapshot, TEvent, TInput>>
   ): TestModelOptions<TSnapshot, TEvent, TInput> {
@@ -343,6 +378,10 @@ const testPathOf = <TSnapshot extends Snapshot, TEvent extends EventObject, TInp
     return testPathResult
   })
 
+/**
+ * Whether two state values are equal by structure: the same string, or objects with the same
+ * keys whose values are equal in turn. Key order does not matter.
+ */
 function stateValuesEqual(a: StateValue | undefined, b: StateValue | undefined): boolean {
   if (a === b) {
     return true
@@ -387,8 +426,14 @@ function serializeMachineTransition<TEvent extends EventObject>(
   return ` via ${serializeEvent(event)}${prevStateString}`
 }
 
+/** The snapshot type of a machine, the snapshot type of its test model. */
 type MachineSnapshotOf<TMachine> = ActorLogic.SnapshotOf<TMachine>
+/** The event type of a machine, the event type of its test model. */
 type MachineEventOf<TMachine> = ActorLogic.EventOf<TMachine>
+/**
+ * The input type of a machine, which types the options `createTestModel` takes; the model it
+ * returns takes any input (`unknown`).
+ */
 type MachineInputOf<TMachine> = ActorLogic.InputOf<TMachine>
 
 /**

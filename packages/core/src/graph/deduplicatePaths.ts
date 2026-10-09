@@ -9,8 +9,11 @@ import type { Snapshot } from "../Snapshot.js"
 import type { StatePath } from "./types.js"
 import { simpleStringify } from "./utils.js"
 
+/** A path with the keys of its events, which the subpath check compares. */
 interface PathWithEventSequence<TSnapshot extends Snapshot, TEvent extends EventObject> {
+  /** The path as given; the result returns this same object. */
   readonly path: StatePath<TSnapshot, TEvent>
+  /** The `serializeEvent` key of each step's event, in step order. */
   readonly eventSequence: ReadonlyArray<string>
 }
 
