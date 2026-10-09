@@ -36,6 +36,10 @@ export class InitializationError extends Data.TaggedError("InitializationError")
   readonly input: unknown
   readonly cause?: unknown
 }> {
+  /**
+   * `Error`, not the tag: upstream throws this as a plain `Error`, and its inline snapshots
+   * print the actor's stored error as `[Error: <message>]`. Match on `_tag`, not on `name`.
+   */
   override readonly name = "Error"
 }
 
@@ -53,6 +57,10 @@ export class ActorError extends Data.TaggedError("ActorError")<{
   readonly actorId: string
   readonly cause?: unknown
 }> {
+  /**
+   * `Error`, not the tag: upstream throws these as a plain `Error`, so the error prints as
+   * `[Error: <message>]`. Match on `_tag`, not on `name`.
+   */
   override readonly name = "Error"
 }
 
@@ -70,6 +78,10 @@ export class GuardError extends Data.TaggedError("GuardError")<{
   readonly guard: string
   readonly cause?: unknown
 }> {
+  /**
+   * `Error`, not the tag: upstream throws both guard failures as a plain `Error`, so the
+   * error prints as `[Error: <message>]`. Match on `_tag`, not on `name`.
+   */
   override readonly name = "Error"
 }
 
@@ -110,6 +122,10 @@ export class SerializationError extends Data.TaggedError("SerializationError")<{
   readonly message: string
   readonly cause?: unknown
 }> {
+  /**
+   * `Error`, not the tag: upstream throws the inline-child failure as a plain `Error`, so the
+   * error prints as `[Error: <message>]`. Match on `_tag`, not on `name`.
+   */
   override readonly name = "Error"
 }
 
@@ -127,10 +143,11 @@ export class RestoreError extends Data.TaggedError("RestoreError")<{
 /**
  * A persisted machine snapshot that is not consistent: status `done` on a state that does not
  * complete the machine. Only the opt-in `validateSnapshot` actor option checks it (D11,
- * modelled on eque2 `InvalidPersistedSnapshotError`); by default the snapshot restores as in
- * XState. `createActor` declares no failure channel, so the restored actor has status `error`
- * with this error. `stateValue` is the state value, as JSON when it is not a string;
- * `suggestedFix` names the status that makes the snapshot usable again.
+ * see docs/decisions.md: XState accepts such a snapshot, so the check is an option, not the
+ * default); by default the snapshot restores as in XState. `createActor` declares no failure
+ * channel, so the restored actor has status `error` with this error. `stateValue` is the
+ * state value, as JSON when it is not a string; `suggestedFix` names the status that makes
+ * the snapshot usable again.
  *
  * @since 0.1.0
  * @category Errors
@@ -208,6 +225,10 @@ export class MachineDefinitionError extends Data.TaggedError("MachineDefinitionE
 export class EventAssertionError extends Data.TaggedError("EventAssertionError")<{
   readonly message: string
 }> {
+  /**
+   * `Error`, not the tag: upstream `assertEvent` throws a plain `Error`, so the error prints as
+   * `[Error: <message>]`. Match on `_tag`, not on `name`.
+   */
   override readonly name = "Error"
 }
 
