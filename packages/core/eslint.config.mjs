@@ -194,19 +194,17 @@ export const eslintConfigFor = (pendingRewrites) => tseslint.config(
   // ============================================
   // SECTION: The one scoped block of src (SD-22). It relaxes no canonical Effect rule.
   // ============================================
-  // Every src file resolves every rule of the canonical Effect bundle at error (AC 37; owner,
-  // 2026-10-08, goal journal/2026-10-08-15-no-src-lint-exceptions.md: "Every file ON. All
-  // rules."). The block below turns off @typescript-eslint/no-explicit-any, a rule of the
-  // TypeScript section above and not of the canonical bundle, in one file; CONF-8 pins that
-  // file and that rule.
+  // Every src file resolves every rule of the canonical Effect bundle at error (SD-3 and SD-22,
+  // amended 2026-10-08; see docs/decisions.md). The block below turns off
+  // @typescript-eslint/no-explicit-any, a rule of the TypeScript section above and not of the
+  // canonical bundle, in one file; CONF-8 pins that file and that rule.
   //
-  // SD-22 (amendment 2026-10-06, goal journal/2026-10-06-08-any-event.md): upstream's
+  // SD-22 (amendments 2026-10-06 and 2026-10-07, see docs/decisions.md): upstream's
   // AnyEventObject, the default event type of a machine without declared events, has an
-  // `any` index signature. SD-22 (amendment 2026-10-07, goal
-  // journal/2026-10-07-09-upstream-any.md): `UpstreamAny`, upstream's `any` for an untyped
-  // invocation (done output, snapshot, AnyActorLogic input and event), and (amendment
-  // 2026-10-07, goal journal/2026-10-07-10-anyactorref-any.md) for an AnyActorRef snapshot.
-  // This file holds only those two declarations; no other `any` in src.
+  // `any` index signature; `UpstreamAny` is upstream's `any` for an untyped invocation (done
+  // output, snapshot, AnyActorLogic input and event) and for an AnyActorRef snapshot. Upstream's
+  // type tests assert `IsAny` at those positions. This file holds only those two declarations;
+  // no other `any` in src.
   {
     files: ['src/internal/anyEventObject.ts'],
     rules: {
