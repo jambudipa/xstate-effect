@@ -150,11 +150,17 @@ export interface ActorScopeService {
  * @category Services
  */
 export interface RestoreChildRequest {
+  /** The logic the persisted `src` resolves to; it restores the child's snapshot. */
   readonly logic: AnyActorLogic
+  /** The src as persisted: an implementation name, or the logic itself. The child keeps it. */
   readonly src: string | AnyActorLogic
+  /** The child's id as persisted: the key it has in its parent's `children`. */
   readonly id: string
+  /** The systemId to register while the child's snapshot is active; `None` registers none. */
   readonly systemId: Option.Option<string>
+  /** Whether the child relays its snapshots to its parent as `xstate.snapshot.<id>` events. */
   readonly syncSnapshot: boolean
+  /** The persisted snapshot as stored, before `restoreSnapshot` decodes it. */
   readonly snapshot: Option.Option<unknown>
 }
 
@@ -167,11 +173,17 @@ export interface RestoreChildRequest {
  * @category Services
  */
 export interface SpawnRequest {
+  /** The logic to run, already resolved from `src`. */
   readonly logic: AnyActorLogic
+  /** The src as the spawn named it: an implementation name, or the logic itself. The child keeps it. */
   readonly src: string | AnyActorLogic
+  /** The child's id; `None` gives the session id the system books for it. */
   readonly id: Option.Option<string>
+  /** The systemId to register; one already in use is a defect that errors the parent (SD-4). */
   readonly systemId: Option.Option<string>
+  /** The input the child's logic gets, as the spawn resolved it; it is not resolved again. */
   readonly input: unknown
+  /** Whether the child relays its snapshots to its parent as `xstate.snapshot.<id>` events. */
   readonly syncSnapshot: boolean
 }
 
@@ -185,9 +197,13 @@ export interface SpawnRequest {
  * @category Services
  */
 export interface ExecutableActionInfo {
+  /** The context the earlier actions of the same list left, not the one before the list. */
   readonly context: unknown
+  /** The event the macrostep is processing. */
   readonly event: EventObject
+  /** The actor that runs the action. */
   readonly self: AnyActorRef
+  /** The actor's system. */
   readonly system: ActorSystemService
 }
 
@@ -322,6 +338,7 @@ export interface ActorSystemService {
  * @category Services
  */
 export interface ActorSystemInfo {
+  /** The reference type of each declared actor, by its systemId. */
   readonly actors: Readonly<Record<string, ActorRefBase>>
 }
 
@@ -357,11 +374,20 @@ export interface TypedActorSystem<T extends ActorSystemInfo> extends Omit<ActorS
  * @category Models
  */
 export interface ScheduledEvent {
+  /** The actor that scheduled the event: its session id is part of the event's key. */
   readonly source: ActorRefBase
+  /** The actor the event goes to: the source itself for a delayed `raise`. */
   readonly target: ActorRefBase
+  /** The event to deliver. */
   readonly event: EventObject
+  /** The delay in milliseconds as scheduled; a restored event keeps it (P4). */
   readonly delay: number
+  /**
+   * The action's `id`, or a generated `xstate.scheduled.<n>` for one without: the id that
+   * `cancel` takes.
+   */
   readonly id: string
+  /** The clock's time in milliseconds when the event was scheduled. */
   readonly startedAt: number
 }
 
@@ -373,6 +399,7 @@ export interface ScheduledEvent {
  * @category Models
  */
 export interface SystemSnapshot {
+  /** The pending delayed events, keyed `<sessionId>.<id>`; a copy taken at the read. */
   readonly _scheduledEvents: Readonly<Record<string, ScheduledEvent>>
 }
 
@@ -395,8 +422,16 @@ export interface SchedulerService {
     id: import("effect").Option.Option<string>
   ) => Effect.Effect<void>
 
+  /**
+   * Cancels the pending event `id` of `source` (upstream `cancel`): its timer is cleared and it
+   * never fires. An id that is not pending, because it fired or never existed, changes nothing.
+   */
   readonly cancel: (source: ActorRefBase, id: string) => Effect.Effect<void>
 
+  /**
+   * Cancels every pending event that `actor` scheduled; the actor's end runs it. Events that
+   * other actors scheduled for `actor` are not cancelled.
+   */
   readonly cancelAll: (actor: ActorRefBase) => Effect.Effect<void>
 
   /**
@@ -445,6 +480,7 @@ export interface ActorLogic<
   out TEmitted extends EventObject = EventObject,
   out R = never
 > {
+  /** The type-level variance markers; at run time only its presence marks the object as logic. */
   readonly [ActorLogicTypeId]: Variance.ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>
 
   /**
@@ -583,14 +619,20 @@ export declare namespace ActorLogic {
  * @category Actor Logic
  */
 export interface AnyActorLogic {
+  /** The marker every logic carries; its variance is not checked here. */
   readonly [ActorLogicTypeId]: unknown
+  /** {@link ActorLogic}'s `transition`, with any snapshot and any event. */
   transition(
     snapshot: Snapshot,
     event: UpstreamAny
   ): Effect.Effect<Snapshot & { readonly value?: unknown; readonly context?: unknown }, unknown, unknown>
+  /** {@link ActorLogic}'s `getInitialSnapshot`, with any input. */
   readonly getInitialSnapshot: (input: UpstreamAny) => Effect.Effect<Snapshot, unknown, unknown>
+  /** {@link ActorLogic}'s `getPersistedSnapshot`; `never` admits every logic's snapshot type. */
   readonly getPersistedSnapshot: (snapshot: never) => Effect.Effect<unknown, unknown>
+  /** {@link ActorLogic}'s optional `restoreSnapshot`; absent when the logic cannot restore. */
   readonly restoreSnapshot?: (persisted: never) => Effect.Effect<Snapshot, unknown, unknown>
+  /** {@link ActorLogic}'s optional `start`; absent when the logic needs no start step. */
   readonly start?: (snapshot: never) => Effect.Effect<void, unknown, unknown>
 }
 
@@ -792,7 +834,7 @@ const lookupImplementation = <TContext, TEvent extends EventObject>(
  * then runs the Effect it returns (port extension); any other return value is ignored. What
  * the function throws, and what its Effect fails or dies with, is a defect that carries the
  * original value: the macrostep stops there and the actor's error is that value (SD-4). The
- * engine never catches it; only the actor does (ERR-04). A built-in action creator that the
+ * engine never catches it; only the actor does. A built-in action creator that the
  * function calls logs upstream's custom-action warning (`runCustomAction`).
  */
 const runActionFunction =
@@ -877,12 +919,6 @@ export const resolveAction = <TContext, TEvent extends EventObject>(
 // ============================================================
 
 /**
- * Creates an ActorLogic from a config object.
- *
- * @since 0.1.0
- * @category Constructors
- */
-/**
  * Creates variance markers for ActorLogic TypeId.
  *
  * This helper creates the variance object without using `{} as` casts.
@@ -904,6 +940,14 @@ const makeActorLogicVariance = <
   _R: (_: never): R => _,
 })
 
+/**
+ * Creates an ActorLogic from a config object (exported as `makeActorLogic`): the functions
+ * as given, with the type ID added. An absent optional member (`restoreSnapshot`, `start`,
+ * `config`) stays absent on the result, so an actor treats the logic as one without it.
+ *
+ * @since 0.1.0
+ * @category Constructors
+ */
 export const make = <
   TSnapshot extends Snapshot,
   TEvent extends EventObject,

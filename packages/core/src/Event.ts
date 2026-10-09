@@ -2,7 +2,7 @@
  * @since 0.1.0
  * @module Event
  *
- * Event types and built-in events for xstate-effect.
+ * Event types and built-in events for @jambudipa/xstate-effect.
  */
 import type { Option } from "effect"
 import { Predicate } from "effect"
@@ -18,6 +18,10 @@ import { Predicate } from "effect"
  * @category Event
  */
 export interface EventObject {
+  /**
+   * The event's name: what `on` keys, wildcard descriptors (`*`, `a.*`) and `assertEvent`
+   * match. The `xstate.` prefix is reserved for the built-in events below.
+   */
   readonly type: string
 }
 
@@ -48,9 +52,12 @@ export const isEventObject = (u: unknown): u is EventObject =>
  * @category Built-in Events
  */
 export class InitEvent<TInput = unknown> {
+  /** Always `"xstate.init"`. */
   declare readonly type: "xstate.init"
+  /** The actor input as given to `createActor`; `undefined` when there is none. */
   declare readonly input: TInput
 
+  /** Returns the plain event object in place of an instance (`instanceof` is never true). */
   constructor(args: { readonly input: TInput }) {
     return { type: "xstate.init", input: args.input }
   }
@@ -63,8 +70,10 @@ export class InitEvent<TInput = unknown> {
  * @category Built-in Events
  */
 export class StopEvent {
+  /** Always `"xstate.stop"`. */
   declare readonly type: "xstate.stop"
 
+  /** Returns the plain event object in place of an instance (`instanceof` is never true). */
   constructor() {
     return { type: "xstate.stop" }
   }
@@ -80,10 +89,14 @@ export class StopEvent {
  * @category Built-in Events
  */
 export class DoneActorEvent<TOutput = unknown, TId extends string = string> {
+  /** `xstate.done.actor.<actorId>`: an `onDone` of the invocation with that id matches it. */
   declare readonly type: `xstate.done.actor.${TId}`
+  /** The child's output: `Option.none()` where XState gives `undefined` (D8). */
   declare readonly output: Option.Option<TOutput>
+  /** The id of the child that is done, as its parent knows it. */
   declare readonly actorId: TId
 
+  /** Returns the plain event object in place of an instance (`instanceof` is never true). */
   constructor(args: { readonly actorId: TId; readonly output: Option.Option<TOutput> }) {
     return { type: `xstate.done.actor.${args.actorId}` as const, output: args.output, actorId: args.actorId }
   }
@@ -98,10 +111,14 @@ export class DoneActorEvent<TOutput = unknown, TId extends string = string> {
  * @category Built-in Events
  */
 export class ErrorActorEvent<TErrorData = unknown, TId extends string = string> {
+  /** `xstate.error.actor.<actorId>`: an `onError` of the invocation with that id matches it. */
   declare readonly type: `xstate.error.actor.${TId}`
+  /** The value the child failed with, as given: not wrapped and not an `Option`. */
   declare readonly error: TErrorData
+  /** The id of the child that failed, as its parent knows it. */
   declare readonly actorId: TId
 
+  /** Returns the plain event object in place of an instance (`instanceof` is never true). */
   constructor(args: { readonly actorId: TId; readonly error: TErrorData }) {
     return { type: `xstate.error.actor.${args.actorId}` as const, error: args.error, actorId: args.actorId }
   }
@@ -116,9 +133,12 @@ export class ErrorActorEvent<TErrorData = unknown, TId extends string = string> 
  * @category Built-in Events
  */
 export class DoneStateEvent<TOutput = unknown> {
+  /** `xstate.done.state.<stateId>`: the `onDone` of the state node with that id matches it. */
   declare readonly type: `xstate.done.state.${string}`
+  /** The output the completing final state resolves: `Option.none()` where XState gives `undefined` (D8). */
   declare readonly output: Option.Option<TOutput>
 
+  /** Returns the plain event object in place of an instance (`instanceof` is never true). */
   constructor(args: { readonly stateId: string; readonly output: Option.Option<TOutput> }) {
     return { type: `xstate.done.state.${args.stateId}` as const, output: args.output }
   }
@@ -133,8 +153,10 @@ export class DoneStateEvent<TOutput = unknown> {
  * @category Built-in Events
  */
 export class AfterEvent {
+  /** `xstate.after.<delay>.<stateNodeId>`: only the `after` entry that scheduled it matches it. */
   declare readonly type: `xstate.after.${string}`
 
+  /** Returns the plain event object in place of an instance (`instanceof` is never true). */
   constructor(args: { readonly delay: number | string; readonly stateNodeId: string }) {
     return { type: `xstate.after.${args.delay}.${args.stateNodeId}` as const }
   }
@@ -148,9 +170,12 @@ export class AfterEvent {
  * @category Built-in Events
  */
 export class SnapshotEvent<TSnapshot = unknown> {
+  /** `xstate.snapshot.<actorId>`, with the id of the child that published the snapshot. */
   declare readonly type: `xstate.snapshot.${string}`
+  /** The child's snapshot as it published it. */
   declare readonly snapshot: TSnapshot
 
+  /** Returns the plain event object in place of an instance (`instanceof` is never true). */
   constructor(args: { readonly actorId: string; readonly snapshot: TSnapshot }) {
     return { type: `xstate.snapshot.${args.actorId}` as const, snapshot: args.snapshot }
   }
@@ -165,9 +190,12 @@ export class SnapshotEvent<TSnapshot = unknown> {
  * @internal
  */
 export class ObservableNextEvent<TValue = unknown> {
+  /** Always `"xstate.observable.next"`. */
   declare readonly type: "xstate.observable.next"
+  /** The value the source emitted; a `fromObservable` actor takes it as its context. */
   declare readonly data: TValue
 
+  /** Returns the plain event object in place of an instance (`instanceof` is never true). */
   constructor(args: { readonly data: TValue }) {
     return { type: "xstate.observable.next", data: args.data }
   }
@@ -336,7 +364,12 @@ export const isAfterEvent = (event: EventObject): event is AfterEvent =>
  * @category Matching
  */
 export interface EventDescriptorMatch {
+  /** Whether the descriptor selects the event type. */
   readonly matches: boolean
+  /**
+   * Upstream's warning texts for a malformed wildcard, in upstream order; empty for a
+   * well-formed descriptor. The caller logs them (SD-21); this module never logs.
+   */
   readonly warnings: ReadonlyArray<string>
 }
 

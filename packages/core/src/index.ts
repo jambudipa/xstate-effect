@@ -1,6 +1,6 @@
 /**
  * @since 0.1.0
- * @module @xstate-effect/core
+ * @module @jambudipa/xstate-effect
  *
  * XState rewritten using Effect-TS.
  *

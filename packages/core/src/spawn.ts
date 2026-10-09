@@ -137,7 +137,7 @@ interface AnySpawner {
  *
  * @example
  * ```ts
- * import { assign, createMachine, fromPromise, type ActorRefFrom, type ProvidedActor, type Spawner } from "@xstate-effect/core"
+ * import { assign, createMachine, fromPromise, type ActorRefFrom, type ProvidedActor, type Spawner } from "@jambudipa/xstate-effect"
  *
  * const child = fromPromise(({ input }: { input: number }) => Promise.resolve(input))
  * const spawnChild = (spawn: Spawner<ProvidedActor>) => spawn(child, { input: 42 })
@@ -178,8 +178,11 @@ export type Spawner<TActor extends ProvidedActor> = string extends TActor["src"]
  * @category Models
  */
 export interface SpawningMachine {
+  /** The machine's id, which the error for an unknown src names. */
   readonly id: string
+  /** The machine's implementations; only `actors` is read, and only its own properties. */
   readonly implementations: { readonly actors?: Readonly<Record<string, AnyActorLogic>> }
+  /** The state nodes by node id, with their invoke definitions in config order. */
   readonly idMap: HashMap.HashMap<string, { readonly invoke: ReadonlyArray<{ readonly src: string | AnyActorLogic }> }>
 }
 
@@ -223,7 +226,9 @@ export const resolveReferencedActor = (machine: SpawningMachine, src: string): O
 
 /** One call of a spawn function: the object it handed out, and the child to build into it or why not. */
 interface PendingSpawn {
+  /** The unbuilt object `spawn` returned to the user function; `flush` builds the child into it. */
   readonly child: AnyActorRef
+  /** The child to build, or the unknown-src error that `flush` turns into a defect. */
   readonly request: Result.Result<SpawnRequest, ActorError>
 }
 

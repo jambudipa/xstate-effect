@@ -68,11 +68,17 @@ export interface SetupTypes<
   TGuards extends Record<string, GuardImplementation<TContext, TEvent>> = Record<string, GuardImplementation<TContext, TEvent>>,
   TDelays extends Record<string, DelayConfig<TContext, TEvent>> = Record<string, DelayConfig<TContext, TEvent>>
 > {
+  /** The context type of the setup's machines (type only: no setup function reads this record). */
   readonly context: TContext
+  /** The union of the events the setup's machines take. */
   readonly events: TEvent
+  /** The actor logic by name that a config may invoke or spawn as a src. */
   readonly actors: TActors
+  /** The action implementations by name that a config may name. */
   readonly actions: TActions
+  /** The guard implementations by name that a config may name. */
   readonly guards: TGuards
+  /** The delays by name that `after`, `raise` and `sendTo` may name. */
   readonly delays: TDelays
 }
 
@@ -99,8 +105,17 @@ export interface SetupConfig<
   TChildrenMap extends Record<string, string> = Record<never, never>,
   TTag extends string = string
 > {
+  /**
+   * The phantom types of the setup (XState `types`), conventionally written `{} as { ... }`.
+   * The setup reads none of its values at run time.
+   */
   readonly types?: {
+    /** The context type of each machine of this setup (XState `types.context`). */
     readonly context?: TContext
+    /**
+     * The events each machine of this setup takes (XState `types.events`). Without it the
+     * event type is `AnyEventObject`, as upstream.
+     */
     readonly events?: TEvent
     /**
      * The input each machine of this setup takes (XState `types.input`): what its context
@@ -125,7 +140,15 @@ export interface SetupConfig<
     /** The tags of each machine of this setup (XState `types.tags`): what its snapshots' `hasTag` takes. */
     readonly tags?: TTag
   }
+  /**
+   * The actor logic by name that a machine of this setup may invoke or spawn by its src
+   * name. When `types.children` is given, it must hold every actor that map names.
+   */
   readonly actors?: TActors
+  /**
+   * The setup's actions by name: plain functions or port definitions. A built-in action
+   * written here may name a sibling action and the setup's guards, delays and actors.
+   */
   readonly actions?: TActions
   /**
    * The setup's guards by name. A built-in guard here (`not`, `and`, `or`) names only guards
@@ -614,12 +637,14 @@ export interface SetupHelpers<TContext, TEvent extends EventObject, TNames exten
  * @category Setup
  */
 export interface SetupExtension<TActions, TGuards, TDelays, TAllGuards = TGuards> {
+  /** The actions added; one with the name of a base action replaces it in the new setup. */
   readonly actions?: TActions
   /**
    * The guards added. A built-in guard here (`not`, `and`, `or`) names only guards of
    * `TAllGuards`, the base's with these (see {@link SetupGuardChecks}).
    */
   readonly guards?: TGuards & SetupGuardChecks<TGuards, TAllGuards>
+  /** The delays added; one with the name of a base delay replaces it in the new setup. */
   readonly delays?: TDelays
 }
 
@@ -691,6 +716,10 @@ export type SetupActionImplementation<
 
 /** The names a definition may use, as `ActionDefinition` carries them (type only; never set). */
 interface ImplementsNames<TNames> {
+  /**
+   * Type-only carrier of `TNames`; no code sets or calls it. It is a method, so its parameter
+   * is compared both ways and a definition made for other names is still accepted.
+   */
   "~names"?(names: TNames): void
 }
 
@@ -713,12 +742,19 @@ export interface SetupRecordNames<
   TEmitted extends AnyEventObject,
   TActionNames extends string = never
 > extends ImplementationNames {
+  /** The record's own action names, each with `unknown` params (they are not checked here). */
   readonly actions: ParameterizedObjectsOf<Record<TActionNames, unknown>>
+  /** The setup's guards with their params. */
   readonly guards: TGuards
+  /** The setup's delay names. */
   readonly delays: TDelays
+  /** The setup's actor names. */
   readonly actors: NamesOf<TActorLogic>
+  /** The setup's actor logic by name. */
   readonly actorLogic: TActorLogic
+  /** The events an `emit` written in the record may emit. */
   readonly emitted: TEmitted
+  /** The setup's actors as a `ProvidedActor` union, without the ids of `types.children`. */
   readonly providedActor: SetupProvidedActor<TActorLogic>
 }
 
@@ -828,13 +864,21 @@ export interface SetupNames<
   TTag extends string = string,
   TChildrenMap extends Record<string, string> = Record<never, never>
 > extends ImplementationNames {
+  /** The setup's actions as `{ type, params }`, with the params each implementation declares. */
   readonly actions: ParameterizedObjectsOf<TActions>
+  /** The setup's guards as `{ type, params }`, with the params each implementation declares. */
   readonly guards: ParameterizedObjectsOf<TGuards>
+  /** The setup's delay names; `never` when the setup has no delays. */
   readonly delays: NamesOf<TDelays>
+  /** The setup's actor names; `never` when the setup has no actors. */
   readonly actors: NamesOf<TActors>
+  /** The setup's actor logic by name, which types the events an invocation takes. */
   readonly actorLogic: TActors
+  /** The setup's `types.emitted`, or any event object when it declares none. */
   readonly emitted: DeclaredEmitted<TEmitted>
+  /** The setup's `types.tags`; any string when it declares none. */
   readonly tags: TTag
+  /** The setup's actors as a `ProvidedActor` union, with the ids `types.children` requires. */
   readonly providedActor: SetupProvidedActor<TActors, TChildrenMap>
 }
 
@@ -892,9 +936,11 @@ export type DeclaredEmitted<TEmitted extends EventObject> = EventObject extends 
  * @category Setup
  */
 export interface SetupProvideImplementations<TContext, TEvent extends EventObject, TActors, TActions, TGuards, TDelays> {
+  /** Replacement actions, each with the params of the setup's action of that name. */
   readonly actions?: {
     readonly [K in NamesOf<TActions>]?: NamedActionImplementation<TContext, TEvent, ImplementationParams<TActions[K & keyof TActions]>>
   }
+  /** Replacement guards, each with the params of the setup's guard of that name. */
   readonly guards?: {
     readonly [K in NamesOf<TGuards>]?: NamedGuardImplementation<
       TContext,
@@ -903,7 +949,9 @@ export interface SetupProvideImplementations<TContext, TEvent extends EventObjec
       ParameterizedObjectsOf<TGuards>
     >
   }
+  /** Replacement delays for the setup's delay names. */
   readonly delays?: { readonly [K in NamesOf<TDelays>]?: DelayConfig<TContext, TEvent> }
+  /** Replacement logic for the setup's actor names, each of the type of the setup's logic. */
   readonly actors?: { readonly [K in NamesOf<TActors>]?: TActors[K & keyof TActors] }
 }
 
@@ -946,11 +994,19 @@ const bindHelpers = <TContext, TEvent extends EventObject, TNames extends Implem
     spawnChild<TContext, TEvent, TLogic>(src, options),
 })
 
-/** The implementation records of a setup. */
+/**
+ * The implementation records of a setup, each present: `setup` and `setupWithSchema` give
+ * an absent record as `{}`. They become the machine implementations of every machine the
+ * setup creates.
+ */
 interface SetupImplementations<TActors, TActions, TGuards, TDelays> {
+  /** The actor logic by src name; `extend` keeps it unchanged. */
   readonly actors: TActors
+  /** The action implementations by name. */
   readonly actions: TActions
+  /** The guard implementations by name. */
   readonly guards: TGuards
+  /** The delays by name. */
   readonly delays: TDelays
 }
 
@@ -1266,7 +1322,7 @@ export const when = <TContext, TEvent extends EventObject>(
  *
  * @example
  * ```ts
- * import { setup, type ContextFrom } from "@xstate-effect/core"
+ * import { setup, type ContextFrom } from "@jambudipa/xstate-effect"
  *
  * const machine = setup({ types: {} as { context: { count: number } } }).createMachine({ context: { count: 0 } })
  * type Context = ContextFrom<typeof machine> // { count: number }
@@ -1289,7 +1345,7 @@ type ContextOfSnapshot<TSnapshot> = TSnapshot extends { readonly context: infer 
  *
  * @example
  * ```ts
- * import { setup, type EventFrom } from "@xstate-effect/core"
+ * import { setup, type EventFrom } from "@jambudipa/xstate-effect"
  *
  * const machine = setup({ types: {} as { events: { type: "GO" } | { type: "STOP" } } }).createMachine({})
  * const typeOf = (event: EventFrom<typeof machine>) => event.type // "GO" | "STOP"
@@ -1378,9 +1434,13 @@ export interface SetupSchemaConfig<
    * Use Schema.Union for multiple event types.
    */
   readonly events: TEventSchema
+  /** The actor logic by src name, as in {@link SetupConfig}. */
   readonly actors?: TActors
+  /** The action implementations by name, typed by the decoded context and events. */
   readonly actions?: TActions
+  /** The guard implementations by name, typed by the decoded context and events. */
   readonly guards?: TGuards
+  /** The delays by name, as in {@link SetupConfig}. */
   readonly delays?: TDelays
 }
 

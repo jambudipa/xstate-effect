@@ -49,6 +49,7 @@ export type ActorRefTypeId = typeof ActorRefTypeId
  * @category Actor Ref
  */
 export interface ActorRefBase extends Pipeable.Pipeable, Inspectable.Inspectable {
+  /** The marker an actor reference carries; this base does not check its variance. */
   readonly [ActorRefTypeId]: unknown
 
   /** Unique actor ID */
@@ -142,6 +143,7 @@ export interface ActorRef<
   in TEvent extends EventObject,
   out TEmitted extends EventObject = EventObject,
 > extends ActorRefBase {
+  /** The type-level variance markers; at run time only the key's presence is read. */
   readonly [ActorRefTypeId]: Variance.ActorRef<TSnapshot, TEvent, TEmitted>
 
   /**

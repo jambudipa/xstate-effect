@@ -107,7 +107,7 @@ export type ActorTypeId = typeof ActorTypeId
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { assign, createActor, createMachine } from "@xstate-effect/core"
+ * import { assign, createActor, createMachine } from "@jambudipa/xstate-effect"
  *
  * const machine = createMachine({
  *   types: {} as { context: { count: number }; events: { type: "INC" } },
@@ -173,6 +173,7 @@ export interface Actor<
   in out TEvent extends EventObject,
   out TEmitted extends EventObject = EventObject
 > extends ActorRef<TSnapshot, TEvent, TEmitted> {
+  /** The type-level variance markers; at run time only the key's presence is read (`isActor`). */
   readonly [ActorTypeId]: Types.Variance.Actor<TSnapshot, TEvent, TEmitted>
 
   /** Unique actor ID */
@@ -399,6 +400,7 @@ export interface Actor<
  * @category Actor
  */
 export interface AnyActor extends AR.AnyActorRef {
+  /** The marker every actor carries; its variance is not checked here. */
   readonly [ActorTypeId]: unknown
   /** Unique actor ID */
   readonly id: string
@@ -566,8 +568,11 @@ export const ActorClass: ActorConstructor = class Actor {
 // ACTOR PROTO
 // ============================================================
 
-// The members every actor shares, on top of the class's prototype (so an actor is an
-// instance of `ActorClass`)
+/**
+ * The prototype of every actor object, on top of the class's prototype (so an actor is an
+ * instance of `ActorClass`): the type ID marker, `pipe`, `toJSON`, `toString` and the
+ * inspect hook. `allocateChild` creates objects of it before the build gives them the rest.
+ */
 const ActorProto = Object.assign(Object.create(ActorClass.prototype) as object, {
   [ActorTypeId]: {
     _Snapshot: {},
@@ -644,7 +649,9 @@ const onlyEventObjects = (eventType: string): string =>
  * listener (upstream `observer.error`).
  */
 interface ObserverCounts {
+  /** The running `changes` streams: they receive the actor's error, so it counts as handled. */
   readonly withErrorListener: number
+  /** The `subscribe` callbacks: they never receive the error, so the logger reports it. */
   readonly withoutErrorListener: number
 }
 
@@ -657,7 +664,9 @@ type ObserverKind = keyof ObserverCounts
  * `last`. A stream ends at the last item.
  */
 interface StreamItem<TSnapshot> {
+  /** A committed snapshot, or the snapshot the actor ended with. */
   readonly snapshot: TSnapshot
+  /** True only on the item the actor's end publishes: a stream ends there, without repeating a snapshot it just gave. */
   readonly last: boolean
 }
 
@@ -2091,6 +2100,7 @@ const failureOf = <R>(effect: Effect.Effect<unknown, unknown, R>): Effect.Effect
 
 /** One `on` registration: its own object, so the scope's close removes exactly this one. */
 interface EmitListener<TEmitted> {
+  /** The caller's handler; its failures are isolated and logged (SD-21). */
   readonly handler: (event: TEmitted) => Effect.Effect<void>
 }
 

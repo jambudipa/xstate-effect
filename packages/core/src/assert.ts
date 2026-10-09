@@ -37,7 +37,7 @@ const matchesOneOf = <TEvent extends EventObject, TAssertedDescriptor extends Ev
  *
  * ```ts
  * import { Effect } from "effect"
- * import { assertEvent } from "@xstate-effect/core"
+ * import { assertEvent } from "@jambudipa/xstate-effect"
  *
  * type Events =
  *   | { readonly type: "greet"; readonly message: string }

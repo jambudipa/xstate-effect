@@ -48,7 +48,9 @@ export interface StateMapper<TSnapshot, TResult, TSchema = StateSchema> {
  * @category Models
  */
 export interface MapStateResult<TResult> {
+  /** The active state node whose mapper had a `map`: the snapshot's own node, not a copy. */
   readonly stateNode: StateNode.Any
+  /** What that `map` returned for the snapshot. */
   readonly result: TResult
 }
 

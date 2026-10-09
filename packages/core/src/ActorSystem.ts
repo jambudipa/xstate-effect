@@ -47,7 +47,12 @@ import { SimulatedClock } from "./testing/SimulatedClock.js"
  * @category Models
  */
 export interface Clock {
+  /**
+   * Calls `fn` once after `timeout` milliseconds. The id it gives is opaque: only this
+   * clock's `clearTimeout` reads it.
+   */
   setTimeout(fn: () => void, timeout: number): unknown
+  /** Clears the timer of an id this clock's `setTimeout` gave; a fired or unknown id is ignored. */
   clearTimeout(id: unknown): void
 }
 
@@ -91,11 +96,15 @@ export class Scheduler extends Context.Service<
  * the systemId of each of those by session id (`reverseKeyedActors`).
  */
 interface Registry {
+  /** Every registered actor by session id (upstream `children`). */
   readonly sessions: HashMap.HashMap<string, ActorRefBase>
+  /** The actors that have a systemId, by systemId, in registration order (what `getAll` copies). */
   readonly keyed: Record.ReadonlyRecord<string, ActorRefBase>
+  /** The systemId of each keyed actor by its session id, so `unregister` frees that systemId. */
   readonly systemIds: HashMap.HashMap<string, string>
 }
 
+/** The registry of a new system: no actors and no systemIds. */
 const emptyRegistry: Registry = {
   sessions: HashMap.empty(),
   keyed: Record.empty(),
@@ -156,13 +165,15 @@ type StartTimer = (delayMs: number, fire: (waiting: boolean) => Effect.Effect<vo
  * a scheduled event records as its `startedAt` (P4).
  */
 interface Timers {
+  /** Starts one timer and gives the effect that clears it. */
   readonly start: StartTimer
+  /** The clock's time now, in milliseconds. */
   readonly now: Effect.Effect<number>
 }
 
 /**
- * Timers on the Effect clock (no clock option): each one is a fiber of the system's scope
- * (RES-02), so closing that scope (a root actor's stop) interrupts every timer still
+ * Timers on the Effect clock (no clock option): each one is a fiber of the system's scope,
+ * so closing that scope (a root actor's stop) interrupts every timer still
  * pending, and `TestClock` drives them in tests. The time is the Effect clock's.
  */
 const effectClockTimers = (systemScope: Scope.Scope): Timers => ({
@@ -198,6 +209,7 @@ const clockTimers = (clock: Clock, outbox: Outbox.Outbox): Timers => ({
 
 /** One pending scheduled event (upstream `ScheduledEvent`) and the effect that clears its timer. */
 interface PendingEvent extends ScheduledEvent {
+  /** Clears the event's timer so it never fires; `cancel` runs it after it drops the key. */
   readonly clear: Effect.Effect<void>
 }
 
@@ -330,13 +342,17 @@ const effectClock = (outbox: Outbox.Outbox, systemScope: Scope.Scope): Clock => 
  * the registrations of a system from 0, in registration order.
  */
 interface InspectionRegistration {
+  /** The registration's number in its system: unique, and increasing in registration order. */
   readonly order: number
+  /** The inspection function; its failures are isolated and logged (SD-21). */
   readonly observer: (event: InspectionEvent) => Effect.Effect<void>
 }
 
 /** The registrations of one system, in registration order, and the number of the next one. */
 interface InspectionRegistrations {
+  /** The `order` the next registration gets; it only grows, so a removed number never returns. */
   readonly next: number
+  /** The live registrations, sorted by `order`. */
   readonly registrations: ReadonlyArray<InspectionRegistration>
 }
 
@@ -345,6 +361,10 @@ interface InspectionRegistrations {
  * them, and how the system names its root actor.
  */
 interface Inspection {
+  /**
+   * Registers `observer` until the current scope closes (upstream `inspect`); the close
+   * removes that registration only.
+   */
   readonly add: (
     observer: (event: InspectionEvent) => Effect.Effect<void>
   ) => Effect.Effect<void, never, Scope.Scope>
@@ -357,6 +377,10 @@ interface Inspection {
   readonly booked: (sessionId: string) => Effect.Effect<void>
 }
 
+/**
+ * Builds the inspection of one new system: no registrations, and no root id until the system
+ * books its first session id. Each run gives a separate inspection.
+ */
 const makeInspection: Effect.Effect<Inspection> = Effect.gen(function* () {
   const state = yield* Ref.make<InspectionRegistrations>({ next: 0, registrations: [] })
   const rootId = yield* Ref.make(Option.none<string>())
@@ -433,7 +457,7 @@ const makeSystem = (
 ): Effect.Effect<ActorSystemService> =>
   Effect.gen(function* () {
     // Every registry change is one atomic Ref update, so concurrent actors never see half
-    // of a registration (RES-04)
+    // of a registration
     const registry = yield* Ref.make(emptyRegistry)
 
     // ID counter
