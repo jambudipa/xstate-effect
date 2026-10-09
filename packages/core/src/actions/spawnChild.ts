@@ -82,13 +82,29 @@ type SpawnedInputOf<TLogic> =
  * {@link SpawnedInputOf}, so that an input function keeps its action context type.
  */
 interface DeclaredSpawnChildOptions<TContext, TEvent extends EventObject, TActor extends ProvidedActor> {
+  /**
+   * The child's id: one of the ids `TActor` declares (any string when it declares none),
+   * static or a function of the action context. {@link DeclaredSpawnChildArguments} makes it
+   * required when the actor declares an id.
+   */
   readonly id?:
     | Exclude<DeclaredActorId<TActor>, undefined>
     | ((ctx: ActionContext<TContext, TEvent>) => Exclude<DeclaredActorId<TActor>, undefined>)
+  /**
+   * The input of the actor's logic, static or a function of the action context; required
+   * when that input type does not take `undefined`. The engine calls the function only once
+   * the src resolves to a logic.
+   */
   readonly input?:
     | DeclaredSpawnInput<TActor["logic"]>
     | ((ctx: ActionContext<TContext, TEvent>) => DeclaredSpawnInput<TActor["logic"]>)
+  /**
+   * The id the child registers under in the actor system (`system.get`). It must be free in
+   * that system; a taken one gives upstream's `Actor with system ID '<systemId>' already
+   * exists.`.
+   */
   readonly systemId?: string
+  /** Whether the child sends each active snapshot to its parent as `xstate.snapshot.<id>`; default false. */
   readonly syncSnapshot?: boolean
 }
 
