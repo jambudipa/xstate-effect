@@ -17,6 +17,7 @@ import type { Snapshot } from "../Snapshot.js"
 export class ActorOutputError extends Data.TaggedError("ActorOutputError")<{
   readonly cause: unknown
 }> {
+  /** A fixed text; the actor's error is in `cause`. */
   override get message() {
     return "Actor errored before producing output"
   }
@@ -32,7 +33,12 @@ export class ActorOutputError extends Data.TaggedError("ActorOutputError")<{
  * @category Models
  */
 export interface SnapshotSource<TSnapshot extends Snapshot> {
+  /** The actor's live snapshot, read once `changes` has ended to take its `output`. */
   readonly getSnapshot: Effect.Effect<TSnapshot>
+  /**
+   * The actor's snapshots. It must end when the actor is done or stopped and fail with the
+   * actor's raw error; a stream that never ends keeps `toEffect` waiting for ever.
+   */
   readonly changes: Stream.Stream<TSnapshot, unknown>
 }
 

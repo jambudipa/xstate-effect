@@ -19,6 +19,7 @@ import type { EventObject } from "../Event.js"
 export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")<{
   readonly timeout: number
 }> {
+  /** Upstream's rejection text, with the timeout in milliseconds. */
   override get message() {
     return `Timeout of ${this.timeout} ms exceeded`
   }
@@ -31,6 +32,7 @@ export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")
  * @category Errors
  */
 export class WaitForTerminatedError extends Data.TaggedError("WaitForTerminatedError")<{}> {
+  /** Upstream's rejection text for an actor that is done or stopped before the predicate holds. */
   override get message() {
     return "Actor terminated without satisfying predicate"
   }

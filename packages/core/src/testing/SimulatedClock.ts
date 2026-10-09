@@ -25,21 +25,36 @@ export class TimeTravelError extends Data.TaggedError("TimeTravelError")<{
  * @category Testing
  */
 export interface SimulatedTimeout {
+  /** The id `setTimeout` gave for this timeout; `clearTimeout` takes it. */
   readonly id: number
+  /** The clock's time, in milliseconds, when the timeout was set. */
   readonly start: number
+  /** The delay in milliseconds from `start`: the timeout fires once `now() - start >= timeout`. */
   readonly timeout: number
+  /**
+   * The callback the timeout runs once. The clock removes the timeout before it calls `fn`, so
+   * `fn` may set or clear other timeouts. `fn` must not throw: the throw leaves `increment` or
+   * `set` with the clock still marked as flushing, so `makeSimulatedClock`'s clock fires no
+   * later timeout (upstream's flush behaves the same).
+   */
   readonly fn: () => void
 }
 
 /**
  * Clock interface for time-based operations.
  *
+ * Unlike the `Clock` of the `clock` actor option (`ActorSystem`), this one also tells its time
+ * and gives number ids. `makeSimulatedClock` and the `SimulatedClock` class implement it.
+ *
  * @since 0.1.0
  * @category Testing
  */
 export interface Clock {
+  /** The clock's time in milliseconds; a simulated clock starts at 0. */
   readonly now: () => number
+  /** Starts a timeout that calls `fn` once `timeout` milliseconds have passed; gives its id. */
   readonly setTimeout: (fn: () => void, timeout: number) => number
+  /** Clears the timeout with this id; an id that is unknown or already fired changes nothing. */
   readonly clearTimeout: (id: number) => void
 }
 
@@ -250,9 +265,16 @@ export const makeSimulatedClockEffect: Effect.Effect<SimulatedClockEffect> =
 
 /** One pending timer of a `SimulatedClock`: what firing it runs, and when it was set. */
 interface PendingTimer {
+  /** The id the clock gave; ids rise in set order, so a lower id was set first. */
   readonly id: number
+  /** The clock's `currentTime`, in milliseconds, when the timer was set. */
   readonly start: number
+  /** The delay in milliseconds from `start`; the timer is due once the target reaches the end. */
   readonly timeout: number
+  /**
+   * What firing the timer runs: `Effect.sync(fn)` for `setTimeout`, or the scheduler's delivery
+   * for `_setEffectTimeout`, which the flush waits for before it picks the next timer.
+   */
   readonly fire: Effect.Effect<void>
 }
 

@@ -208,6 +208,10 @@ type TransitionTypes<TLogic> = TLogic extends {
 
 /** A logic's own `transition`, with the types {@link TransitionTypes} reads from it. */
 interface OwnTransition<TLogic> {
+  /**
+   * The logic's `transition`, typed with the snapshot, event, error and requirements the logic
+   * declares; `runTransition` casts the logic to this view to call it.
+   */
   readonly transition: (
     snapshot: TransitionTypes<TLogic>[0],
     event: TransitionTypes<TLogic>[1]
@@ -295,7 +299,12 @@ export type ExecutableActionObject = CustomActionExecution
  * @category Testing
  */
 export interface ExecutableRaiseAction extends CustomActionExecution {
+  /** The built-in type that tells a raise apart from the other executable actions. */
   readonly type: "xstate.raise"
+  /**
+   * The raise as resolved: `id` is the action's `id` option (what `cancel` takes), `undefined`
+   * without one; `delay` is the resolved milliseconds, `undefined` when the delay gave none.
+   */
   readonly params: {
     readonly event: EventObject
     readonly id: string | undefined
@@ -313,7 +322,12 @@ export interface ExecutableRaiseAction extends CustomActionExecution {
  * @category Testing
  */
 export interface ExecutableSendToAction extends CustomActionExecution {
+  /** The built-in type that tells a send apart from the other executable actions. */
   readonly type: "xstate.sendTo"
+  /**
+   * The send as resolved: `id` is the action's `id` option (what `cancel` takes); a `delay` in
+   * milliseconds goes to the scheduler, `undefined` sends at once through the system.
+   */
   readonly params: {
     readonly event: EventObject
     readonly id: string | undefined
@@ -334,7 +348,12 @@ export interface ExecutableSendToAction extends CustomActionExecution {
  * @category Testing
  */
 export interface ExecutableSpawnAction extends CustomActionExecution {
+  /** The built-in type that tells a spawn apart from the other executable actions. */
   readonly type: "xstate.spawnChild"
+  /**
+   * The spawn as resolved. The `exec` of a spawn is `Effect.void`: the actor scope queues the
+   * child's start itself, and in the pure helpers nothing starts `actorRef`.
+   */
   readonly params: {
     readonly id: string
     readonly actorRef: AnyActorRef | undefined
@@ -374,7 +393,9 @@ export type ExecutableActionsFrom<TLogic> = ExecutableActionsOf<SnapshotFrom<TLo
  * @category Testing
  */
 export interface ToExecutableAction<T extends ParameterizedObject> extends Omit<CustomActionExecution, "type" | "params"> {
+  /** The named action's type, narrowed from `string` to the literal of `T`. */
   readonly type: T["type"]
+  /** The params of this use, typed as `T` declares them. */
   readonly params: T["params"]
 }
 
