@@ -147,6 +147,10 @@ export interface StateMachine<
     ActorLogic<MachineSnapshot<TContext, TEvent, TChildren, TStateValue, TTag, TOutput, TStateMeta, TStateSchema>, TEvent, TInput, TEmitted, R>,
     Pipeable.Pipeable,
     Inspectable.Inspectable {
+  /**
+   * The brand {@link isStateMachine} checks, and the carrier of the variance of the type
+   * parameters. Its runtime value holds empty markers only; read nothing from it.
+   */
   readonly [StateMachineTypeId]: Variance.StateMachine<Id, TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>
 
   /** Machine ID */
@@ -458,11 +462,23 @@ export declare namespace StateMachine {
    * @since 0.1.0
    */
   export interface ResolveStateConfig<TContext, TOutput> {
+    /**
+     * The state value; a partial value is completed to a full configuration, and a value that
+     * names no state fails `resolveState` with `MachineDefinitionError`.
+     */
     readonly value: StateValue
+    /** The snapshot's context; a missing or falsy one gives `{}` (upstream `context || {}`). */
     readonly context?: TContext
+    /** The history value, kept as given and not checked against the machine; `{}` when missing. */
     readonly historyValue?: Snapshot.HistoryValue
+    /**
+     * The status when the completed value is not final; `active` when missing. A final value
+     * gives `done`, whatever is given here.
+     */
     readonly status?: Snapshot.SnapshotStatus
+    /** The snapshot's output; `undefined` or a missing key gives `None`. */
     readonly output?: TOutput
+    /** The snapshot's error; `undefined` or a missing key gives `None`. */
     readonly error?: unknown
   }
 }
@@ -487,6 +503,7 @@ export declare namespace StateMachine {
  * @category State Machine
  */
 export interface AnyStateMachine extends AL.AnyActorLogic {
+  /** The brand {@link isStateMachine} checks; `unknown`, so a machine of any types has it. */
   readonly [StateMachineTypeId]: unknown
 
   /** The machine id. */
@@ -633,8 +650,13 @@ export const StateMachineClass: StateMachineConstructor = class StateMachine {
 // STATE MACHINE PROTO
 // ============================================================
 
-// The members every machine shares, on top of the class's prototype (so a machine is an
-// instance of `StateMachineClass`)
+/**
+ * The prototype of every machine: the members every machine shares, on top of the class's
+ * prototype, so a machine is an instance of `StateMachineClass`. It holds the two brands
+ * (machine and actor logic) and `pipe`, `toJSON` (the root's definition, as upstream),
+ * `toString` and inspection; `definition` is a getter, read again on each access. `make`
+ * creates each machine from it with `Object.create`, then assigns the per-machine fields.
+ */
 const StateMachineProto = Object.defineProperties(Object.assign(Object.create(StateMachineClass.prototype) as object, {
   [StateMachineTypeId]: {
     _Id: {},
@@ -695,6 +717,7 @@ type TransitionListInput<TContext, TEvent extends EventObject, TMeta = unknown> 
   | TransitionConfigInput<TContext, TEvent, TMeta>
   | ReadonlyArray<TransitionConfigInput<TContext, TEvent, TMeta>>
 
+/** Whether a single-or-list config value is the list form (`Array.isArray`, so a readonly tuple counts). */
 const isList = <A>(value: A | ReadonlyArray<A>): value is ReadonlyArray<A> => Array.isArray(value)
 
 /** XState `toArray` for a value that is a single item or a list of items. */
@@ -757,7 +780,12 @@ const formatInitialTransition = <TContext, TEvent extends EventObject, TMeta>(
 
 /** A built node with the config it came from, which the transition pass reads. */
 interface BuiltNode<TContext, TEvent extends EventObject, TStateMeta = unknown, TTransitionMeta = TStateMeta> {
+  /**
+   * The node as the tree pass built it: its transitions, `always`, `after`, `invoke`, entry and
+   * exit are still empty or partial until `initializeTransitions` assigns them in place.
+   */
   readonly node: StateNode<TContext, TEvent, TStateMeta, TTransitionMeta>
+  /** The node's own config object, not a copy; the transition and history passes read it. */
   readonly config: StateNodeConfig<TContext, TEvent, TStateMeta, TTransitionMeta>
 }
 
@@ -775,7 +803,12 @@ const givenId = (id: string | undefined): Option.Option<string> =>
 
 /** What the tree pass needs: the machine the nodes link to, and its id (not assigned yet). */
 interface BuildContext<TContext, TEvent extends EventObject> {
+  /**
+   * The machine object each node links to. It is still empty while the tree builds (`make`
+   * fills it afterwards), so the pass must store it and never read from it.
+   */
   readonly machine: SN.StateNode.Machine<TContext, TEvent>
+  /** The machine id (`(machine)` when the config gives none), the prefix of each default node id. */
   readonly machineId: string
 }
 
@@ -874,8 +907,8 @@ const missingInitial = <TContext, TEvent extends EventObject, TStateMeta, TTrans
 /**
  * The targets of a transition config as a list (upstream `normalizeTarget` in `utils.ts`):
  * `undefined` for no target or the empty target (upstream `TARGETLESS_KEY`), else the target
- * list; a target is a string or a state node of any meta (SD-22 amendment, goal journal
- * `2026-10-07-13-node-containers-any.md`).
+ * list; a target is a string or a state node of any meta (SD-22 amendment of 2026-10-07 on
+ * the containers of state nodes, see docs/decisions.md).
  *
  * @example
  * ```ts
@@ -993,8 +1026,14 @@ const formatTransitionList = <TContext, TEvent extends EventObject, TMeta>(
 
 /** One key of a node's `after` map: its delay, the event it waits for, and its transitions. */
 interface DelayedTransitions<TContext, TEvent extends EventObject, TMeta> {
+  /**
+   * The `after` key: a number of milliseconds when the key reads as a number, else the name of
+   * a delay that the machine's implementations resolve when the node is entered.
+   */
   readonly delay: number | string
+  /** The `xstate.after.<delay>.<node id>` event; its type is also the id of the raise and cancel. */
   readonly event: AfterEvent
+  /** The key's transitions in config order, each with its `delay`. */
   readonly transitions: ReadonlyArray<DelayedTransitionDefinition<TContext, TEvent, TMeta>>
 }
 
@@ -1245,6 +1284,7 @@ const checkHistoryTarget = <TContext, TEvent extends EventObject>(
 
 /** A recorded state node of a history value to revive: a `{ id }` entry, or a state node. */
 interface RecordedEntry {
+  /** The state node id; an id that names no node of the machine is dropped with a warning. */
   readonly id: string
 }
 
@@ -1252,19 +1292,33 @@ interface RecordedEntry {
 interface RestorableChild {
   /** The child's persisted snapshot; none gives the logic's initial snapshot. */
   readonly snapshot: Option.Option<unknown>
+  /**
+   * A logic name that `resolveReferencedActor` resolves (an implementation name, or the
+   * `xstate.invoke.<index>.<node id>` name of an inline invocation), or a live child's logic
+   * itself. A name that resolves to no logic leaves the child out of the restore.
+   */
   readonly src: string | AL.AnyActorLogic
+  /** The systemId the restored child registers under; none registers nothing. */
   readonly systemId: Option.Option<string>
+  /** Whether the restored child sends its snapshots to the parent; always `false` for a live child. */
   readonly syncSnapshot: boolean
 }
 
 /** What `restoreSnapshot` reads of a snapshot: the decoded persisted form, or a live snapshot. */
 interface RestorableSnapshot {
+  /** Kept as it is; only the opt-in `validateSnapshot` actor option checks it (D11). */
   readonly status: Snapshot.SnapshotStatus
+  /** The state value; restore completes it and fails with `RestoreError` when it names no state. */
   readonly value: StateValue
+  /** The context with actor-reference markers; restore revives them against the restored children. */
   readonly context: unknown
+  /** Kept as it is, of the machine's output type by assumption (the codec cannot check it). */
   readonly output: Option.Option<unknown>
+  /** Kept as it is. */
   readonly error: Option.Option<unknown>
+  /** The recorded nodes of each history state id, as `{ id }` entries or live state nodes. */
   readonly historyValue: Readonly<Record<string, ReadonlyArray<RecordedEntry>>>
+  /** The children to create again, by child id. */
   readonly children: Readonly<Record<string, RestorableChild>>
 }
 
