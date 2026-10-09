@@ -12,7 +12,7 @@
   "test/verify/verify-xstate-5-33-2-port-DELIVERY-1.spec.ts": "18c3bf1782e4be65b9a7a71c8c6048a88c5a3c5e8e3d5a7055e7c673c9f7110f",
   "test/verify/verify-xstate-5-33-2-port-DELIVERY-2.spec.ts": "5eb9683903410b39c0b9dbe3b009cdb2b892abd26f6cd6a93bd27f676d45c18d",
   "test/verify/verify-xstate-5-33-2-port-HARNESS-1.spec.ts": "d4699b22521c364cd6b8ed6d74bcf500e8c15e726313f9648adec0c6df425141",
-  "test/verify/verify-xstate-5-33-2-port-HARNESS-2.spec.ts": "a5997bedae0d20edca0e47bca7d87f6e09b8f98556f0a94c4d1453c07c189b07",
+  "test/verify/verify-xstate-5-33-2-port-HARNESS-2.spec.ts": "db92c30c2df6484c0c09b03a8a074e169ab66ac586dacfd11a123aaa76480704",
   "test/verify/verify-xstate-5-33-2-port-PARITY-2.spec.ts": "4ef295e39868903fbda3e23ee71af611a3fc87a8c96e6e3a7fa8d9c9d90a2b2c",
   "test/verify/vitest-runs.ts": "bb157a00aee98594b2bba60d2159092e59c499bb8f1580bf1b754be8fd79c60a"
 }

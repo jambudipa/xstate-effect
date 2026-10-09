@@ -999,24 +999,28 @@ describe("HARNESS-2 conformance harness configuration", () => {
       )
       // A specifier that names a pending rewrite or its folder in another letter case: on a disk
       // that ignores letter case it loads the rewrite, and the walk names its canonical path; on
-      // a disk that keeps letter case it names no file. A require that a variable holds is also a
-      // loader reference that the walk reports (CONF-8, the fifth Layer-3 review), and the walk
-      // still follows its calls
+      // a disk that keeps letter case it names no file, and the walk reports that as a problem. A
+      // require that a variable holds is also a loader reference that the walk reports (CONF-8,
+      // the fifth Layer-3 review), and the walk still follows its calls
       const ignoresCase = existsSync(join(pkgRoot, "PACKAGE.JSON"))
-      const otherCaseForms: ReadonlyArray<readonly [string, string, string, ReadonlyArray<string>]> = [
-        ["a static import of the file name in capitals", `import "../upstream/CLOCK.test.js"\n`, "test/upstream/clock.test.ts", []],
+      const otherCaseForms: ReadonlyArray<readonly [string, string, string, string, ReadonlyArray<string>]> = [
+        ["a static import of the file name in capitals", `import "../upstream/CLOCK.test.js"\n`, "../upstream/CLOCK.test.js", "test/upstream/clock.test.ts", []],
         [
           "a createRequire require of the file name in another case",
           `import { createRequire } from "node:module"\nconst require = createRequire(import.meta.url)\nrequire("../upstream/graph/TestUtils.ts")\n`,
+          "../upstream/graph/TestUtils.ts",
           "test/upstream/graph/testUtils.ts",
           [`${probe}:2 createRequire(import.meta.url) is a loader reference that the walk cannot follow`]
         ],
-        ["a dynamic import through the folder name in another case", `await import("../Upstream/history.test.js")\n`, "test/upstream/history.test.ts", []],
+        ["a dynamic import through the folder name in another case", `await import("../Upstream/history.test.js")\n`, "../Upstream/history.test.js", "test/upstream/history.test.ts", []],
       ]
-      for (const [label, source, path, loaderReferences] of otherCaseForms) {
+      for (const [label, source, specifier, path, loaderReferences] of otherCaseForms) {
         assert.deepStrictEqual(
           reach({ [probe]: source }),
-          [...loaderReferences, ...(ignoresCase ? [`${probe} imports ${path}`] : [])],
+          [
+            ...loaderReferences,
+            ignoresCase ? `${probe} imports ${path}` : `${probe}: ${JSON.stringify(specifier)} names no file that the walk can read`
+          ],
           `the walk must name ${path} for ${label}`
         )
       }
