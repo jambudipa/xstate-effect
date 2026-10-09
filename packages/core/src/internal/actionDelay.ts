@@ -11,6 +11,11 @@
  */
 import { Option } from "effect"
 
+/**
+ * The delay of each built-in action definition, keyed by the definition object itself, so an
+ * entry lives no longer than its action. The value is the `delay` option as written (a number,
+ * a name or a function), `undefined` when the action has none.
+ */
 const delays = new WeakMap<object, unknown>()
 
 /**

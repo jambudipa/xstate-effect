@@ -7,6 +7,10 @@
 import { Option, Schema } from "effect"
 import type { EventObject } from "../Event.js"
 
+/**
+ * The JSON encoder, built once; the Effect lint rules replace `JSON.stringify` with Schema. It
+ * gives `None` where `JSON.stringify` throws, for example on a cycle or a `bigint`.
+ */
 const encodeJsonString = Schema.encodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 /**

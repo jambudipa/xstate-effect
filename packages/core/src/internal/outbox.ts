@@ -40,10 +40,16 @@ export interface Outbox {
 
 /** What an outbox holds: whether it is open, the fiber that runs its deliveries, and those waiting. */
 interface OutboxState {
+  /** True until the scope closes; a closed outbox drops every post and never opens again. */
   readonly open: boolean
-  /** Whether a fiber runs the deliveries now; the fiber, once `post` has started it. */
+  /** Whether a run of the waiting deliveries is in progress; set by the `post` that starts it. */
   readonly running: boolean
+  /**
+   * The fiber of the run in progress, kept only while a delivery waits: a run that ends inside
+   * the `post` that started it is never recorded. The close interrupts it.
+   */
   readonly fiber: Option.Option<Fiber.Fiber<void>>
+  /** The deliveries posted from outside a delivery, in post order; the run takes the head first. */
   readonly waiting: ReadonlyArray<Effect.Effect<void>>
 }
 
