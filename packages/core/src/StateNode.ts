@@ -82,7 +82,9 @@ export const make = <TContext, TEvent extends EventObject, TStateMeta = unknown,
 ): StateNode<TContext, TEvent, TStateMeta, TTransitionMeta> => new StateNode(options)
 
 /**
- * The fields of a node built outside a machine: no parent, no machine, nothing to do.
+ * The fields of a node built outside a machine: no parent, no machine, nothing to do. Only
+ * `id` reflects `parentId`: `path` is `[key]` alone, so {@link isAncestor} relates no two
+ * nodes built this way, and a compound or parallel node does not become its children's parent.
  * @internal
  */
 const detached = <TContext, TEvent extends EventObject>(
@@ -209,7 +211,8 @@ export const getChildren = <TContext, TEvent extends EventObject>(
   Chunk.fromIterable(Object.values(node.states))
 
 /**
- * Gets transitions for an event type.
+ * Gets the transitions of one event descriptor, by exact match: a wildcard descriptor (`*`,
+ * `a.*`) that would select the event is not read. Empty when the node has no such entry.
  *
  * @since 0.1.0
  * @category Accessors
@@ -339,7 +342,9 @@ export const isDescendant = <TContext, TEvent extends EventObject>(
 
 /**
  * Updates the transitions of a state node: its `transitions` entries, which its `on` record
- * follows.
+ * follows. `always` and `after` keep their old lists. The result is a new node that the tree
+ * does not link: the parent's `states`, the children's `parent` and the machine's `idMap` still
+ * hold the original.
  *
  * @since 0.1.0
  * @category Transformations
@@ -351,7 +356,9 @@ export const withTransitions = <TContext, TEvent extends EventObject>(
   make({ ...node, transitions })
 
 /**
- * Updates the entry actions of a state node.
+ * Updates the entry actions of a state node: it replaces the whole list, the `raise` of each
+ * delayed transition included. The result is a new node that the tree does not link (see
+ * {@link withTransitions}).
  *
  * @since 0.1.0
  * @category Transformations
@@ -363,7 +370,9 @@ export const withEntry = <TContext, TEvent extends EventObject>(
   make({ ...node, entry })
 
 /**
- * Updates the exit actions of a state node.
+ * Updates the exit actions of a state node: it replaces the whole list, the `cancel` of each
+ * delayed transition included. The result is a new node that the tree does not link (see
+ * {@link withTransitions}).
  *
  * @since 0.1.0
  * @category Transformations
@@ -375,7 +384,9 @@ export const withExit = <TContext, TEvent extends EventObject>(
   make({ ...node, exit })
 
 /**
- * Updates the invocations of a state node.
+ * Updates the invocations of a state node; the `config.invoke` that `definition` reads for
+ * the JSON form stays as it was. The result is a new node that the tree does not link (see
+ * {@link withTransitions}).
  *
  * @since 0.1.0
  * @category Transformations
@@ -387,7 +398,8 @@ export const withInvoke = <TContext, TEvent extends EventObject>(
   make({ ...node, invoke })
 
 /**
- * Updates the tags of a state node.
+ * Updates the tags of a state node. The result is a new node that the tree does not link (see
+ * {@link withTransitions}).
  *
  * @since 0.1.0
  * @category Transformations
@@ -399,7 +411,8 @@ export const withTags = <TContext, TEvent extends EventObject>(
   make({ ...node, tags })
 
 /**
- * Sets the parent reference.
+ * Sets the parent reference of a copy of the node. It changes neither `id` nor `path`, and it
+ * does not add the node to the parent's `states`.
  *
  * @since 0.1.0
  * @category Transformations
@@ -664,11 +677,22 @@ export class StateNode<
    */
   declare readonly config: StateNodeConfig<TContext, TEvent, TStateMeta, TTransitionMeta>
 
+  /**
+   * Copies every option onto the instance as an own enumerable field, unchecked, so a spread
+   * of a node gives its options back (the `with*` functions rely on that). `createMachine`
+   * builds each node with empty `states` and transitions, then writes them once while it
+   * builds the tree; nothing writes a node afterwards.
+   */
   constructor(options: StateNode.Options<TContext, TEvent, TStateMeta, TTransitionMeta>) {
     super()
     Object.assign(this, options)
   }
 
+  /**
+   * The brand {@link isStateNode} checks (with `in`, so the prototype getter counts). It
+   * carries only the variance markers, built on each read, and is not an own field, so a
+   * spread of a node does not copy it.
+   */
   get [StateNodeTypeId](): Variance.StateNode<TContext, TEvent> {
     return makeStateNodeVariance<TContext, TEvent>()
   }
@@ -728,49 +752,85 @@ export class StateNode<
     return this.definition
   }
 
+  /** `StateNode(<id>)`, for string interpolation in log lines and messages. */
   toString(): string {
     return `StateNode(${this.id})`
   }
 
+  /**
+   * What Node's `util.inspect` (and so `console.log`) prints: the {@link toJSON} definition,
+   * in place of the linked instance with its `parent` and `machine`.
+   */
   [Inspectable.NodeInspectSymbol](): unknown {
     return this.toJSON()
   }
 
-  /** Nodes are linked into a graph, so equality is identity (DAT-05). */
+  /** Nodes are linked into a graph, so equality is identity: two nodes of equal fields differ. */
   [Equal.symbol](that: Equal.Equal): boolean {
     return this === that
   }
 
+  /**
+   * A random hash, fixed per instance (`Hash.random`), consistent with identity equality: a
+   * node can key a `HashMap` or `HashSet` without hashing its linked fields.
+   */
   [Hash.symbol](): number {
     return Hash.random(this)
   }
 
+  /** The module's `StateNodeTypeId`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly StateNodeTypeId: StateNodeTypeId = StateNodeTypeId
+  /** The module's `isStateNode`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isStateNode = isStateNode
+  /** The module's `make`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly make = make
+  /** The module's `atomic`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly atomic = atomic
+  /** The module's `compound`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly compound = compound
+  /** The module's `parallel`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly parallel = parallel
+  /** The module's `final`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly final = final
+  /** The module's `historyState`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly historyState = historyState
+  /** The module's `getChild`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly getChild = getChild
+  /** The module's `getChildren`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly getChildren = getChildren
+  /** The module's `getTransitions`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly getTransitions = getTransitions
+  /** The module's `getInitialTarget`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly getInitialTarget = getInitialTarget
+  /** The module's `getLeafStates`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly getLeafStates = getLeafStates
+  /** The module's `isAtomic`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isAtomic = isAtomic
+  /** The module's `isCompound`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isCompound = isCompound
+  /** The module's `isParallel`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isParallel = isParallel
+  /** The module's `isFinal`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isFinal = isFinal
+  /** The module's `isHistory`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isHistory = isHistory
+  /** The module's `isLeaf`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isLeaf = isLeaf
+  /** The module's `isAncestor`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isAncestor = isAncestor
+  /** The module's `isDescendant`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly isDescendant = isDescendant
+  /** The module's `withTransitions`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly withTransitions = withTransitions
+  /** The module's `withEntry`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly withEntry = withEntry
+  /** The module's `withExit`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly withExit = withExit
+  /** The module's `withInvoke`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly withInvoke = withInvoke
+  /** The module's `withTags`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly withTags = withTags
+  /** The module's `withParent`, as the former `StateNode` namespace exposed it (DEV-28). */
   static readonly withParent = withParent
 }
 
@@ -782,7 +842,7 @@ export class StateNode<
  * `AnyStateNode` is a structural supertype instead, as `AnyStateMachine` is: it keeps the
  * members whose types do not depend on the context or the event, and the `StateNodeTypeId`
  * key, so only a real state node is one; its `meta` and its definition's metas are upstream's
- * `any` (SD-22 amendment, goal journal `2026-10-07-12-any-state-node.md`).
+ * `any` (SD-22 amendment, see docs/decisions.md).
  * `AnyStateMachine.root` is one, and `getStateNodes` takes one.
  *
  * @example
@@ -795,6 +855,10 @@ export class StateNode<
  * @category Models
  */
 export interface AnyStateNode {
+  /**
+   * The brand: only a real `StateNode` has it, so a structural look-alike is not an
+   * `AnyStateNode`. It is `unknown` so that the variance markers of any context and event fit.
+   */
   readonly [StateNodeTypeId]: unknown
   /** Type of state node */
   readonly type: StateNodeType
@@ -835,7 +899,7 @@ export interface AnyStateNode {
  * The definition of any state node (upstream `AnyStateNodeDefinition`,
  * `StateNodeDefinition<any, any, any, any>`): {@link StateNode.Definition} of upstream's
  * `any` context, events, state meta and transition meta, so its `meta` and the `meta` of its
- * transitions stay `any` (SD-22 amendment, goal journal `2026-10-07-12-any-state-node.md`).
+ * transitions stay `any` (SD-22 amendment, see docs/decisions.md).
  * `AnyStateNode.definition` is one.
  *
  * @example
@@ -852,7 +916,7 @@ export type AnyStateNodeDefinition = StateNode.Definition<UpstreamAny, UpstreamA
 /**
  * A history state node (upstream `HistoryStateNode<TContext>`, a `StateNode<TContext,
  * EventObject, any, any>` whose `history` is set): its state and transition meta are
- * upstream's `any` (SD-22 amendment, goal journal `2026-10-07-13-node-containers-any.md`).
+ * upstream's `any` (SD-22 amendment, see docs/decisions.md).
  * Its `history` is the history kind, as upstream types it; its `target` is the port's
  * `Option` field of every state node (DEV-28).
  *
@@ -865,6 +929,11 @@ export type AnyStateNodeDefinition = StateNode.Definition<UpstreamAny, UpstreamA
  * @category Models
  */
 export interface HistoryStateNode<TContext> extends StateNode<TContext, EventObject, UpstreamAny, UpstreamAny> {
+  /**
+   * The history kind, as upstream types it. The type is a promise, not a check: a `type:
+   * "history"` node whose config gives no `history` holds `false` at run time, and the engine
+   * treats it as shallow.
+   */
   readonly history: HistoryType
 }
 
@@ -910,7 +979,7 @@ export declare namespace StateNode {
   /**
    * Any StateNode type: a node of unknown context and event types whose state and transition
    * meta are upstream's `any` (`StateNode<any, any, any, any>`), as a snapshot's `_nodes` hold
-   * them (SD-22 amendment, goal journal `2026-10-07-13-node-containers-any.md`).
+   * them (SD-22 amendment, see docs/decisions.md).
    *
    * @since 0.1.0
    */
@@ -954,11 +1023,21 @@ export declare namespace StateNode {
    * @since 0.1.0
    */
   export interface Machine<TContext, TEvent extends EventObject> {
+    /** The machine's id: its config `id`, or `(machine)` when that is missing or empty. */
     readonly id: string
     /** The machine's own version (XState `machine.version`), which definitions carry. */
     readonly version: string | undefined
+    /** The root state node, whose id is the machine id. */
     readonly root: StateNode<TContext, TEvent>
+    /**
+     * Every state node of the machine by its id (the config `id` where one is given, else
+     * `<machineId>.<path>`): what a `#id` target and `getStateNodeById` resolve through.
+     */
     readonly idMap: HashMap.HashMap<string, StateNode<TContext, TEvent>>
+    /**
+     * The named actions, guards, actors and delays the machine was given (`createMachine`'s
+     * second argument, or `provide`); `{}` when it has none.
+     */
     readonly implementations: MachineImplementations<TContext, TEvent>
     /** The machine's run-time options, `maxIterations` resolved (default `Infinity`). */
     readonly options: MachineOptions
@@ -971,6 +1050,7 @@ export declare namespace StateNode {
    * @since 0.1.0
    */
   export interface SerializableAction {
+    /** The action's name: the string, the function's `name`, or the object's own `type`. */
     readonly type: string
   }
 
@@ -983,13 +1063,27 @@ export declare namespace StateNode {
    * @since 0.1.0
    */
   export interface InitialTransitionDefinition<TContext, TEvent extends EventObject, TTransitionMeta = unknown> {
+    /**
+     * The child nodes the `initial` keys name; empty when the node has no `initial` or a key
+     * names no child.
+     */
     readonly target: ReadonlyArray<StateNode<TContext, TEvent>>
+    /** The node that owns the initial transition. */
     readonly source: StateNode<TContext, TEvent>
+    /** The actions of `initial: { target, actions }`, in config order; empty otherwise. */
     readonly actions: ReadonlyArray<Action<TContext, TEvent>>
+    /** Always `null`: an initial transition has no event (upstream writes `null`). */
     readonly eventType: null
+    /** Always `false`. */
     readonly reenter: false
+    /** The `meta` of the object form of `initial`; `undefined` otherwise. */
     readonly meta: TTransitionMeta | undefined
+    /** The `description` of the object form of `initial`; `undefined` otherwise. */
     readonly description: string | undefined
+    /**
+     * The JSON form: these fields, with `source` and each target as a `#<id>` string, so
+     * serialising never walks into the linked nodes.
+     */
     readonly toJSON: () => unknown
   }
 
@@ -1002,13 +1096,24 @@ export declare namespace StateNode {
    * @since 0.1.0
    */
   export interface InitialDefinition<TContext, TEvent extends EventObject, TTransitionMeta = unknown> {
+    /** The target nodes, as {@link InitialTransitionDefinition.target}. */
     readonly target: ReadonlyArray<StateNode<TContext, TEvent>>
+    /** The node that owns the initial transition. */
     readonly source: StateNode<TContext, TEvent>
+    /** The actions of the object form of `initial`, each as `{ type }` or its own object. */
     readonly actions: ReadonlyArray<SerializableAction>
+    /** Always `null`: an initial transition has no event. */
     readonly eventType: null
+    /** Always `false`; the JSON form leaves it out, as upstream. */
     readonly reenter: false
+    /** The `meta` of the object form of `initial`; `undefined` otherwise. */
     readonly meta: TTransitionMeta | undefined
+    /** The `description` of the object form of `initial`; `undefined` otherwise. */
     readonly description: string | undefined
+    /**
+     * The JSON form: target and source as `#<id>` strings, the actions, `eventType`, `meta` and
+     * `description`; no `reenter`.
+     */
     readonly toJSON: () => unknown
   }
 
@@ -1044,22 +1149,42 @@ export declare namespace StateNode {
    * @since 0.1.0
    */
   export interface Definition<TContext, TEvent extends EventObject, TStateMeta = unknown, TTransitionMeta = TStateMeta> {
+    /** The node's id: its config `id`, else `<machineId>.<path>`. */
     readonly id: string
+    /** The node's key in its parent; the machine id for the root. */
     readonly key: string
+    /** The machine's `version`; `undefined` when it has none or the node has no machine. */
     readonly version: string | undefined
+    /** The node type. */
     readonly type: StateNodeType
+    /** The initial transition, on every node; its target is empty where there is none. */
     readonly initial: InitialDefinition<TContext, TEvent, TTransitionMeta>
+    /** The history kind, or `false` (also for a `type: "history"` node without one). */
     readonly history: false | HistoryType
+    /** The children's definitions, keyed by child key, in document order. */
     readonly states: Readonly<Record<string, Definition<TContext, TEvent, TStateMeta, TTransitionMeta>>>
+    /**
+     * The node's `on` record as it is: the live transition definitions, whose actions are not
+     * made serialisable (upstream `on: this.on`).
+     */
     readonly on: Readonly<Record<string, ReadonlyArray<TransitionDefinition<TContext, TEvent, TTransitionMeta>>>>
+    /** Every transition of every descriptor, in declaration order, with serialisable actions. */
     readonly transitions: ReadonlyArray<DefinitionTransition<TContext, TEvent, TTransitionMeta>>
+    /** The entry actions, the delayed transitions' `raise` included, in serialisable form. */
     readonly entry: ReadonlyArray<SerializableAction>
+    /** The exit actions, the delayed transitions' `cancel` included, in serialisable form. */
     readonly exit: ReadonlyArray<SerializableAction>
+    /** The config's meta; `undefined` when it has none. */
     readonly meta: TStateMeta | undefined
+    /** Document order, except that the root's `0` is `-1` (upstream `this.order || -1`). */
     readonly order: number
+    /** The config's output on a final node and the root; `undefined` elsewhere or without one. */
     readonly output: unknown
+    /** The invocations, each with the JSON form {@link DefinitionInvoke} describes. */
     readonly invoke: ReadonlyArray<DefinitionInvoke<TContext, TEvent, TTransitionMeta>>
+    /** The config's description; `undefined` when it has none. */
     readonly description: string | undefined
+    /** The tags, in config order. */
     readonly tags: ReadonlyArray<string>
   }
 }
