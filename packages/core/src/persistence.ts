@@ -92,18 +92,31 @@ export const ACTOR_REF_TYPE = 1
  * @category Models
  */
 export interface PersistedActorRef {
+  /**
+   * Always {@link ACTOR_REF_TYPE}: this key with this value marks a reference. Restore treats
+   * any context object that carries them as a marker, also one the user wrote.
+   */
   readonly xstate$$type: typeof ACTOR_REF_TYPE
+  /**
+   * The referenced actor's own `id`. Restore revives the marker to the child with this id in
+   * `snapshot.children`; a reference to an actor that is not a child revives to `undefined`.
+   */
   readonly id: string
 }
 
 /** A path into the context, for the failure message. */
 type ContextPath = ReadonlyArray<string | number>
 
+/** The path as the failure message prints it: `context.a[0].b`, or `the context itself` for the root. */
 const describePath = (path: ContextPath): string =>
   Arr.isReadonlyArrayEmpty(path)
     ? "the context itself"
     : `context${Arr.join(Arr.map(path, (segment) => (Predicate.isNumber(segment) ? `[${segment}]` : `.${segment}`)), "")}`
 
+/**
+ * The schema issue for a context value JSON cannot hold; `what` names the kind of value (for
+ * example `a function`). The encoder turns the issue into a `SerializationError`.
+ */
 const notPersistable = (value: unknown, path: ContextPath, what: string): SchemaIssue.Issue =>
   new SchemaIssue.InvalidValue(
     { message: `${describePath(path)} is ${what}: a persisted context holds JSON values and actor references only` },
@@ -116,6 +129,7 @@ const isPlainObject = (value: object): boolean => {
   return prototype === Object.prototype || Predicate.isNull(prototype) || Predicate.isNull(Object.getPrototypeOf(prototype))
 }
 
+/** The class name of a non-plain object, for the failure message; `Object` when the prototype has no constructor. */
 const constructorName = (value: object): string => {
   const prototype: unknown = Object.getPrototypeOf(value)
   return Predicate.hasProperty(prototype, "constructor") && Predicate.isFunction(prototype.constructor)
@@ -424,24 +438,39 @@ export type DecodedMachineSnapshot = (typeof MachineSnapshotCodec)["Type"]
 /** The text of upstream's error for a child whose `src` is a logic (`src/State.ts`). */
 const inlineChildCannotBePersisted = "An inline child actor cannot be persisted."
 
+/**
+ * The encoder of a codec, with the codec's issue mapped to `SerializationError` (the issue
+ * text as `message`, the schema error as `cause`).
+ */
 const encoderOf = <S extends Schema.ConstraintCodec<unknown, unknown>>(codec: S) => {
   const encode = Schema.encodeEffect(codec)
   return (value: S["Type"]): Effect.Effect<S["Encoded"], SerializationError> =>
     Effect.mapError(encode(value), (error) => new SerializationError({ message: error.message, cause: error }))
 }
 
+/**
+ * The decoder of a codec for an untrusted value (`JSON.parse` output), with the codec's issue
+ * mapped to `RestoreError` (the issue text as `message`, the schema error as `cause`).
+ */
 const decoderOf = <S extends Schema.ConstraintCodec<unknown, unknown>>(codec: S) => {
   const decode = Schema.decodeUnknownEffect(codec)
   return (persisted: unknown): Effect.Effect<S["Type"], RestoreError> =>
     Effect.mapError(decode(persisted), (error) => new RestoreError({ message: error.message, cause: error }))
 }
 
+/** The machine snapshot codec's encoder; {@link persistMachineSnapshot} persists the children first. */
 const encodeMachine = encoderOf(MachineSnapshotCodec)
+/** The promise, callback and effect snapshot codec's encoder. */
 const encodeLogic = encoderOf(LogicSnapshotCodec)
+/** The observable and stream snapshot codec's encoder. */
 const encodeObservable = encoderOf(ObservableSnapshotCodec)
+/** The transition logic snapshot codec's encoder. */
 const encodeTransition = encoderOf(TransitionSnapshotCodec)
+/** The promise, callback and effect snapshot codec's decoder. */
 const decodeLogic = decoderOf(LogicSnapshotCodec)
+/** The observable and stream snapshot codec's decoder. */
 const decodeObservable = decoderOf(ObservableSnapshotCodec)
+/** The transition logic snapshot codec's decoder. */
 const decodeTransition = decoderOf(TransitionSnapshotCodec)
 
 /** The systemId of a child actor (upstream `child.systemId`). */
@@ -696,9 +725,19 @@ export const PersistedScheduledEvents = Schema.Array(PersistedScheduledEvent).an
  * @category Models
  */
 export interface ScheduledEventScope {
+  /**
+   * The actor whose snapshot persists or restores the events. Only the events whose `source`
+   * is this actor persist; the events of other actors in the system are theirs to persist.
+   */
   readonly self: ActorRefBase
+  /** The actor's parent; none for a root actor, so a `parent` target then resolves to none. */
   readonly parent: Option.Option<ActorRefBase>
+  /**
+   * The actor's `snapshot.children` by child id, or `{}` for logic without children. A value
+   * that is not an actor reference never names a target.
+   */
   readonly children: Readonly<Record<string, unknown>>
+  /** The system's systemId registry: the actor registered under a systemId, if any. */
   readonly lookup: (systemId: string) => Option.Option<ActorRefBase>
 }
 
@@ -753,7 +792,9 @@ export const resolveEventTarget = (target: PersistedEventTarget, scope: Schedule
   }
 }
 
+/** The pending delayed events codec's encoder. */
 const encodeScheduledEvents = encoderOf(PersistedScheduledEvents)
+/** The pending delayed events codec's decoder; {@link decodeScheduledEvents} picks the key first. */
 const decodeScheduledEventList = decoderOf(PersistedScheduledEvents)
 
 /**
@@ -833,9 +874,10 @@ const encodeJsonString = Schema.encodeUnknownOption(Schema.fromJsonString(Schema
 
 /**
  * Checks a machine snapshot restored from a persisted form (the opt-in validation of D11,
- * modelled on eque2 `Actor.ts`): status `done` on a configuration that does not complete the
- * machine (no final child of the root is active; for a parallel root, not every region is
- * complete) fails with {@link InvalidPersistedSnapshotError}. A live snapshot (`persisted` is a
+ * see docs/decisions.md; XState itself restores such a snapshot unchecked): status `done` on
+ * a configuration that does not complete the machine (no final child of the root is active;
+ * for a parallel root, not every region is complete) fails with
+ * {@link InvalidPersistedSnapshotError}. A live snapshot (`persisted` is a
  * `MachineSnapshot`, for example from `resolveState`), a snapshot of other logic and any
  * other status pass as they are.
  *
