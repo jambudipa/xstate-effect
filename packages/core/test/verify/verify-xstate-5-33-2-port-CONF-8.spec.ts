@@ -313,6 +313,11 @@ const ALLOWED_LOADER_TEXTS: ReadonlyArray<string> = [
  * test module reaches (`assertAllowedWalkProblems` asserts it), so the default run never runs it:
  * - the cleanup CLI (`pnpm clean`, `scripts/clean.ts`) loads the user's `clean.config.ts` from
  *   the working folder by a path it builds, so no literal can name it;
+ * - the docs gate (`pnpm run docs:audit`, `scripts/docs-audit.mjs`, a byte-identical copy of the
+ *   enforce-code-docs skill's asset) loads the audited repository's own TypeScript through a
+ *   `createRequire` of that repository's `package.json`, a path it builds from its root argument,
+ *   so no literal can name it; only its own `node --test` file (`scripts/docs-audit.test.mjs`)
+ *   imports it, and Vitest collects neither;
  * - the TEA enforcement hook of the BMad skills (`tea-enforce.cjs`, in `.claude/skills/` and its
  *   copy in `.agents/skills/`) runs its main function only when Node runs it as the main module
  *   (`require.main === module`), as Claude Code runs a hook;
@@ -324,11 +329,13 @@ const ALLOWED_LOADER_TEXTS: ReadonlyArray<string> = [
  * reads holds that file (`allowedWalkProblems`), not where the file merely exists on disk: git's
  * file list leaves out a file that git ignores, so the walk reads it only when a module of the
  * list reaches it. A public clone holds no `.claude/`, `.agents/` or `_bmad-output/` folder, and
- * a checkout whose `.gitignore` ignores them lists none of their files, so there the cleanup
- * CLI's allowance is the only one. A file that the list holds must show exactly its allowed
- * problems, and no allowance covers a file it does not name.
+ * a checkout whose `.gitignore` ignores them lists none of their files, so there the allowances
+ * of the package's own scripts (the cleanup CLI's and the docs gate's) are the only ones. A file
+ * that the list holds must show exactly its allowed problems, and no allowance covers a file it
+ * does not name.
  */
 const CLEAN_CLI = "scripts/clean.ts"
+const DOCS_GATE = "scripts/docs-audit.mjs"
 const TEA_HOOKS = [".claude", ".agents"].map((folder) => `../../${folder}/skills/bmad-testarch-framework/resources/hooks/tea-enforce.cjs`)
 const DRAFT_SCRIPT = "../../_bmad-output/goals/xstate-5-33-2-port.goal/orchestrator/draft-rewrite.mts"
 const WALK_PROBLEM_ALLOWANCES: ReadonlyArray<readonly [file: string, problems: ReadonlyArray<string>]> = [
@@ -340,7 +347,8 @@ const WALK_PROBLEM_ALLOWANCES: ReadonlyArray<readonly [file: string, problems: R
     `${DRAFT_SCRIPT}:14 createRequire(ROOT + "/package.json") is a loader reference that the walk cannot follow`,
     `${DRAFT_SCRIPT}: "typescript" names a package that no node_modules folder holds`
   ]],
-  [CLEAN_CLI, [`${CLEAN_CLI}:296 import(configPath) names a module the walk cannot read`]]
+  [CLEAN_CLI, [`${CLEAN_CLI}:296 import(configPath) names a module the walk cannot read`]],
+  [DOCS_GATE, [`${DOCS_GATE}:77 createRequire(join(root, 'package.json')) is a loader reference that the walk cannot follow`]]
 ]
 
 /** The allowed walk problems of a list: the allowances whose files the list holds. */
@@ -377,7 +385,7 @@ const inGeneratedProgram = (found: string): boolean =>
  * module that holds an allowed problem or a generated program.
  */
 const assertAllowedWalkProblems = (list: ModuleList, root: string = PKG_ROOT): void => {
-  const allowedFiles = [...GENERATED_PROGRAMS, ...TEA_HOOKS, DRAFT_SCRIPT, CLEAN_CLI]
+  const allowedFiles = [...GENERATED_PROGRAMS, ...TEA_HOOKS, DRAFT_SCRIPT, CLEAN_CLI, DOCS_GATE]
   assert.deepStrictEqual(list.problems.filter((problem) => !inGeneratedProgram(problem)).sort(), [...allowedWalkProblems(list)].sort())
   const repository = repositoryScriptModules(root).paths
   assert.includeMembers([...list.paths], allowedFiles.filter((path) => repository.includes(path)))
@@ -1906,6 +1914,8 @@ it.effect("x", () => retryUntil(Effect.void))
       const files = lintedFiles()
       assert.isAbove(files.filter((path) => path.startsWith("src/")).length, 50)
       assert.include(files, PINNED_EXCEPTION.path)
+      // The docs gate's .mjs scripts are in the list, so each must resolve the relaxed scripts block
+      assert.includeMembers([...files], [DOCS_GATE, "scripts/docs-audit.test.mjs"])
       const eslint = new ESLint({ cwd: PKG_ROOT })
       assert.deepStrictEqual(yield* lintExceptions(eslint, files, canonical), [])
 

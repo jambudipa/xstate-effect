@@ -268,14 +268,16 @@ export const eslintConfigFor = (pendingRewrites) => tseslint.config(
   // ============================================
   // SECTION: Scripts - Relaxed Rules
   // ============================================
+  // The .mjs scripts are the docs gate (docs-audit.mjs and its node:test file), byte-identical
+  // copies of the enforce-code-docs skill's assets; they resolve the same block as the .ts ones.
   {
-    files: ['scripts/**/*.ts'],
+    files: ['scripts/**/*.ts', 'scripts/**/*.mjs'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
         projectService: {
           // scripts/upstream/ holds the T1.2 freeze script (the glob may not use **)
-          allowDefaultProject: ['scripts/*.ts', 'scripts/upstream/*.ts'],
+          allowDefaultProject: ['scripts/*.ts', 'scripts/*.mjs', 'scripts/upstream/*.ts'],
         },
         tsconfigRootDir: import.meta.dirname,
       },

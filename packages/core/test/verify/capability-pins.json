@@ -8,7 +8,7 @@
   "test/verify/skip-scan.ts": "830d1571fa42e364fdb4e60ad8604cd50e38332dcf2980bb4345c814abd34dd7",
   "test/verify/verify-xstate-5-33-2-port-BASELINE-1.spec.ts": "09ca4cf637ca5d16b7dad8fca3d111431e3e73e6effcb171a68d576c7c16347f",
   "test/verify/verify-xstate-5-33-2-port-COMPAT-1.spec.ts": "2636edf5e6d78b693087ac18d7c193ba12d0cc61b47077ed5c6b44dba3a4b5e1",
-  "test/verify/verify-xstate-5-33-2-port-CONF-8.spec.ts": "02c87e856251f3fe417d2aa594a5b31246e3529ba3776e58fae0100b32b1dffa",
+  "test/verify/verify-xstate-5-33-2-port-CONF-8.spec.ts": "a7b718a39dd037580c709b65d06a869e4ed5cbad68bb96e06c1a54100a139064",
   "test/verify/verify-xstate-5-33-2-port-DELIVERY-1.spec.ts": "18c3bf1782e4be65b9a7a71c8c6048a88c5a3c5e8e3d5a7055e7c673c9f7110f",
   "test/verify/verify-xstate-5-33-2-port-DELIVERY-2.spec.ts": "5eb9683903410b39c0b9dbe3b009cdb2b892abd26f6cd6a93bd27f676d45c18d",
   "test/verify/verify-xstate-5-33-2-port-HARNESS-1.spec.ts": "d4699b22521c364cd6b8ed6d74bcf500e8c15e726313f9648adec0c6df425141",
