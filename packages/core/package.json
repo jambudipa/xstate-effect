@@ -1,7 +1,7 @@
 {
   "name": "@jambudipa/xstate-effect",
   "version": "0.1.0",
-  "description": "Effect-native port of XState 5.33.2 for TypeScript — state machines, statecharts and actors on effect 4, checked against the 74 upstream test files",
+  "description": "Effect-native port of XState 5.33.2 for TypeScript \u2014 state machines, statecharts and actors on effect 4, checked against the 74 upstream test files",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -65,7 +65,8 @@
     "prepublishOnly": "rm -rf dist && pnpm build && pnpm typecheck",
     "prepack": "pnpm build",
     "changeset": "changeset",
-    "version": "changeset version"
+    "version": "changeset version",
+    "docs:audit": "node scripts/docs-audit.mjs --exclude eslint-rules"
   },
   "keywords": [
     "xstate",
