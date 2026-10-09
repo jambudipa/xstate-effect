@@ -16,6 +16,12 @@ import { PendingRewriteGuard } from "./test/verify/pending-rewrite-guard.js"
 // Vite, its setup file the loads through Node's own loader (and refuses the builtins that load
 // or spawn code to each importer outside the dependency store). Every Vitest config of the
 // package gives the flakyTest guard (vitest.upstream.config.ts too).
+/**
+ * The one pending-rewrite guard of the default run. The same instance must sit in `plugins`
+ * (as `.plugin`) and in `reporters`: only its own plugin fills the set of blocked paths that
+ * the reporter names at the end of the run, so with two instances the report would miss each
+ * load that the plugin blocked.
+ */
 const pendingRewriteGuard = new PendingRewriteGuard()
 
 /** The guard's setup file, by absolute path, so a run with another root finds it too. */

@@ -13,6 +13,12 @@ import { effectLintConfig } from './eslint-rules/effect-eslint-config.mjs';
  */
 const PENDING_REWRITES_FILE = new URL('./test/upstream/pending.json', import.meta.url);
 
+/**
+ * The entries of `test/upstream/pending.json`, read at each call: the paths, relative to this
+ * package, that the default export passes to `eslintConfigFor` as ignores. Throws when the file
+ * is missing or is not valid JSON, so ESLint fails to load its config rather than lint a
+ * pending rewrite.
+ */
 export const readPendingRewrites = () => JSON.parse(readFileSync(PENDING_REWRITES_FILE, 'utf8'));
 
 /**
