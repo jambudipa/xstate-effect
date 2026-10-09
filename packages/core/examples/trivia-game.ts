@@ -23,10 +23,15 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Character type (simplified from Rick & Morty API).
  */
 export interface Character {
+  /** The character id; a user.selectAnswer is correct when its `answer` equals the id of the current character. */
   id: number
+  /** The display name. */
   name: string
+  /** The image URL for the view; empty in the mock data. */
   image: string
+  /** Clue text for the view; the machine does not read it. */
   species: string
+  /** Clue text for the view (for example "Alive"); the machine does not read it. */
   status: string
 }
 
@@ -34,13 +39,27 @@ export interface Character {
  * Context for the trivia game.
  */
 export interface TriviaContext {
+  /** The characters for the home page, from the first load. */
   homePageCharacters: Character[]
+  /** True when the data of the current page or question is loaded; each question load sets it to false first. */
   hasLoaded: boolean
+  /**
+   * The character to identify in the current question; null before the first question and after
+   * a new game starts. With null, every answer counts as wrong.
+   */
   currentCharacter: Character | null
+  /**
+   * The answer options of the current question. The mock always gives the first four
+   * characters, so the current character (id 1 to 5) is not always among them.
+   */
   randomCharacters: Character[]
+  /** True while the clue shows; user.toggleClue flips it, and a new game does not reset it. */
   isClueOpened: boolean
+  /** The score: 10 for each correct answer. The game is won at 100. */
   points: number
+  /** The number of the current question in this game; each question load adds 1. */
   question: number
+  /** The lives left (the upstream spelling): 3 at the start, 1 less for each wrong answer. The game is lost at 0. */
   lifes: number
 }
 

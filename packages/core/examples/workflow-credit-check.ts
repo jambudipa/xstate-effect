@@ -19,11 +19,17 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Customer information.
  */
 export interface Customer {
+  /** The customer id; the credit check result repeats it. */
   id: string
+  /** The full name. */
   name: string
+  /** The social security number, as a number. */
   SSN: number
+  /** The yearly income; the mock service does not read it. */
   yearlyIncome: number
+  /** The postal address. */
   address: string
+  /** The employer name. */
   employer: string
 }
 
@@ -31,9 +37,13 @@ export interface Customer {
  * Credit check result.
  */
 export interface CreditCheckResult {
+  /** The id of the customer that was checked. */
   id: string
+  /** The credit score; the mock always gives 700. */
   score: number
+  /** The decision that routes the workflow: "Approved" starts the application, "Denied" sends the rejection email. */
   decision: "Approved" | "Denied"
+  /** The reason for the decision, as text. */
   reason: string
 }
 
@@ -41,6 +51,7 @@ export interface CreditCheckResult {
  * Input type for the credit check workflow.
  */
 export interface CreditCheckInput {
+  /** The customer to check. Required: the context factory copies it without a check. */
   customer: Customer
 }
 
@@ -48,7 +59,9 @@ export interface CreditCheckInput {
  * Context type for the credit check workflow.
  */
 export interface CreditCheckContext {
+  /** The customer from the input; nothing changes it. */
   customer: Customer
+  /** The result of the credit check; null until it finishes. Anything but "Approved", null included, leads to rejection. */
   creditCheck: CreditCheckResult | null
 }
 

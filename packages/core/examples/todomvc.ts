@@ -17,8 +17,14 @@ import { setup, assign } from "../src/index.js"
  * Todo item type.
  */
 export interface TodoItem {
+  /**
+   * The key that todo.commit, todo.delete and todo.mark match on. New todos get a random
+   * base-36 string, which is not checked for uniqueness; the seed todo has "1".
+   */
   id: string
+  /** The todo text. A todo.commit with a blank title deletes the todo instead of saving it. */
   title: string
+  /** True when the todo is done; todo.mark and todo.markAll set it, todos.clearCompleted removes such todos. */
   completed: boolean
 }
 
@@ -31,8 +37,14 @@ export type TodosFilter = "all" | "active" | "completed"
  * Context for todos.
  */
 export interface TodosContext {
+  /**
+   * The text of the new-todo input, set by newTodo.change. newTodo.commit clears it, but the
+   * new todo takes its title from the commit event, not from this field.
+   */
   todo: string
+  /** The todos in the order they were added. */
   todos: TodoItem[]
+  /** The view filter. Only the view applies it: the machine keeps every todo in `todos`. */
   filter: TodosFilter
 }
 

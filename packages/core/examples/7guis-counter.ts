@@ -17,6 +17,7 @@ import { createMachine, assign } from "../src/index.js"
  * Context type for the counter.
  */
 export interface CounterContext {
+  /** The number of INCREMENT events so far; starts at 0 and never goes down. */
   count: number
 }
 

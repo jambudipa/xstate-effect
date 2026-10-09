@@ -31,14 +31,25 @@ const getTomorrow = (): string => {
   return d.toISOString().split("T")[0]!
 }
 
+/**
+ * The first bookable departure date, as a `YYYY-MM-DD` string. It is computed once, when the
+ * module loads, from the UTC date (`toISOString`), so a long-lived process keeps the old date
+ * after midnight. The guards compare dates as strings, which works because of this fixed format.
+ */
 export const TODAY = getToday()
+/** The default return date: the day after `TODAY`, in the same UTC `YYYY-MM-DD` form, fixed at module load. */
 export const TOMORROW = getTomorrow()
 
 /**
  * Flight data context.
  */
 export interface FlightData {
+  /** The departure date as `YYYY-MM-DD`; a booking needs it on or after `TODAY`. */
   departDate: string
+  /**
+   * The return date as `YYYY-MM-DD`. Only the round-trip mode can change it or reads it: a
+   * round-trip booking needs it strictly after `departDate`.
+   */
   returnDate: string
 }
 

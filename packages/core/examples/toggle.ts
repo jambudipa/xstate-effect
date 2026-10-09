@@ -70,14 +70,24 @@ export const toggleMachine = createMachine({
 /**
  * Enhanced toggle with context.
  *
- * This variant tracks how many times the toggle has been activated.
+ * This variant is meant to track how many times the toggle has been activated; see
+ * `toggleCount` for what it does today.
  */
 export interface ToggleWithCountContext {
+  /**
+   * Meant to count the activations. No transition of `toggleWithCountMachine` assigns it, so it
+   * stays 0; the tests check only its initial value.
+   */
   toggleCount: number
 }
 
+/** The events of `toggleWithCountMachine`: toggle flips the state, reset returns to "inactive" from either state. */
 export type ToggleWithCountEvent = { type: "toggle" } | { type: "reset" }
 
+/**
+ * Toggle machine with a context and a reset event. It starts "inactive"; toggle switches
+ * between "inactive" and "active", and reset goes to "inactive" from either state.
+ */
 export const toggleWithCountMachine = createMachine({
   types: {} as { context: ToggleWithCountContext; events: ToggleWithCountEvent },
   id: "toggleWithCount",

@@ -15,6 +15,7 @@ import { createMachine, setup, assign, fromPromise } from "../src/index.js"
  * Data returned by the fetch operation.
  */
 export interface FetchResult<T> {
+  /** The payload of a successful fetch. No machine here reads this wrapper; the index re-exports it as a type only. */
   data: T
 }
 
@@ -22,9 +23,17 @@ export interface FetchResult<T> {
  * Context type for the fetch machine.
  */
 export interface FetchContext<T> {
+  /** The name to greet. `fetchMachine` starts with "World" and changes it with SET_NAME, only while idle. */
   name: string
+  /** The payload of the last SUCCESS event, or null before the first success and after RESET. */
   data: T | null
+  /** The error of the last ERROR event; a SUCCESS or a RESET clears it to null. */
   error: unknown | null
+  /**
+   * The RETRY count of `fetchMachine`: each RETRY adds 1. Each ERROR also sets it back to 0, so
+   * it shows 1 while a retry loads and 0 again after the retry fails; it does not total the
+   * retries. The other two machines never change it.
+   */
   retryCount: number
 }
 
@@ -43,6 +52,7 @@ export type FetchEvent<T> =
  * Greeting result type.
  */
 export interface Greeting {
+  /** The greeting text, `Hello, <name>!`. */
   greeting: string
 }
 

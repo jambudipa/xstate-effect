@@ -18,8 +18,11 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Patient information.
  */
 export interface PatientInfo {
+  /** The owner's name. */
   name: string
+  /** The pet, as free text. */
   pet: string
+  /** The reason for the visit. */
   reason: string
 }
 
@@ -27,7 +30,9 @@ export interface PatientInfo {
  * Appointment information.
  */
 export interface AppointmentInfo {
+  /** The booking id; the mock always gives "1234". */
   appointmentId: string
+  /** The appointment time as an ISO 8601 UTC string; the mock gives the time of booking. */
   appointmentDate: string
 }
 
@@ -35,7 +40,9 @@ export interface AppointmentInfo {
  * Context for the vet appointment workflow.
  */
 export interface VetAppointmentContext {
+  /** The patient of the last MakeVetAppointment event; null before the first one. */
   patientInfo: PatientInfo | null
+  /** The last booked appointment; null until the first booking finishes. A new request keeps the old value until it is booked. */
   appointmentInfo: AppointmentInfo | null
 }
 

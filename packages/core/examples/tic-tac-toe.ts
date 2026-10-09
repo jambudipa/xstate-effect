@@ -28,9 +28,16 @@ export type Board = Array<Player | null>
  * Context type for tic-tac-toe.
  */
 export interface TicTacToeContext {
+  /** The nine cells in row order (0 to 2 is the top row); null marks an empty cell. A PLAY needs an empty cell. */
   board: Board
+  /** The number of valid moves so far; 9 with no winner is a draw. */
   moves: number
+  /**
+   * The player who moves next. Each valid move flips it, so after a winning move it names the
+   * loser; `setWinner` therefore records the other player.
+   */
   player: Player
+  /** The player who won; undefined while playing, after a draw, and after RESET. */
   winner: Player | undefined
 }
 

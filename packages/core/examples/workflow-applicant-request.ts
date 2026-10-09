@@ -18,9 +18,13 @@ import { setup, fromPromise } from "../src/index.js"
  * Applicant information.
  */
 export interface Applicant {
+  /** The first name. */
   fname: string
+  /** The last name. */
   lname: string
+  /** The age in years; 18 or more starts the application, less sends the rejection email. */
   age: number
+  /** The address for the rejection email. */
   email: string
 }
 
@@ -28,6 +32,7 @@ export interface Applicant {
  * Input type for the applicant request workflow.
  */
 export interface ApplicantRequestInput {
+  /** The applicant to decide on. Required: the context factory copies it without a check. */
   applicant: Applicant
 }
 
@@ -35,6 +40,7 @@ export interface ApplicantRequestInput {
  * Context type for the applicant request workflow.
  */
 export interface ApplicantRequestContext {
+  /** The applicant from the input; nothing changes it. */
   applicant: Applicant
 }
 

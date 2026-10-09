@@ -18,7 +18,9 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Friend type.
  */
 export interface Friend {
+  /** The friend's identifier, unique in the list (the mock data uses "1", "2", "3"). */
   id: string
+  /** The display name. */
   name: string
 }
 
@@ -26,7 +28,12 @@ export interface Friend {
  * Context type for friends list.
  */
 export interface FriendsListContext {
+  /**
+   * The friends from the last load that succeeded. A failed load keeps the old list, and a done
+   * event without output also keeps it.
+   */
   friends: Friend[]
+  /** The error of the last failed load; a load that succeeds clears it to null. */
   error: Error | null
 }
 

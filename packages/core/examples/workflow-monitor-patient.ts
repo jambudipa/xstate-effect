@@ -18,6 +18,7 @@ import { setup } from "../src/index.js"
  * Input type for the patient monitoring workflow.
  */
 export interface PatientMonitorInput {
+  /** The patient to monitor. Required: the context factory reads it without a check. */
   patientId: string
 }
 
@@ -25,6 +26,7 @@ export interface PatientMonitorInput {
  * Context type for the patient monitoring workflow.
  */
 export interface PatientMonitorContext {
+  /** The monitored patient from the input; every action names it. */
   patientId: string
 }
 
@@ -32,10 +34,15 @@ export interface PatientMonitorContext {
  * Base CloudEvent structure.
  */
 interface CloudEventBase {
+  /** The CloudEvent source; always "monitoringSource". */
   source: "monitoringSource"
+  /** The CloudEvent id. */
   id: string
+  /** The time of the reading, as a timestamp string. */
   time: string
+  /** The patient the reading is for. The machine does not compare it with the monitored patient. */
   patientId: string
+  /** The reading, as text; the actions do not read it. */
   data: { value: string }
 }
 

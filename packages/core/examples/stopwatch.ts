@@ -16,6 +16,11 @@ import type { EventObject } from "../src/index.js"
  * Context type for the stopwatch machine.
  */
 export interface StopwatchContext {
+  /**
+   * The number of TICK events while running, not a time. The ticks actor sends one TICK every
+   * `intervalMs` (10 ms by default), but no machine here invokes it: the caller sends TICK.
+   * Stop and pause keep the value; only reset sets it back to 0.
+   */
   elapsed: number
 }
 

@@ -18,8 +18,11 @@ import { setup, fromPromise } from "../src/index.js"
  * Order information.
  */
 export interface Order {
+  /** The order id. An empty id makes the provision step fail and leads to the missing-id handler. */
   id: string
+  /** The ordered item. An empty item leads to the missing-item handler; the id is checked first. */
   item: string
+  /** The quantity, as text. An empty quantity leads to the missing-quantity handler; it is checked last. */
   quantity: string
 }
 
@@ -27,6 +30,7 @@ export interface Order {
  * Input type for the provision orders workflow.
  */
 export interface ProvisionOrdersInput {
+  /** The order to provision. Required: the context factory copies it without a check. */
   order: Order
 }
 
@@ -34,6 +38,7 @@ export interface ProvisionOrdersInput {
  * Context type for the provision orders workflow.
  */
 export interface ProvisionOrdersContext {
+  /** The order from the input; nothing changes it. */
   order: Order
 }
 

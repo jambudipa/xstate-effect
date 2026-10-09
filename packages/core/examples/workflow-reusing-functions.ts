@@ -20,14 +20,19 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Payment received event.
  */
 export interface PaymentReceivedEvent {
+  /** The event type; the only event either machine accepts. */
   type: "PaymentReceivedEvent"
+  /** The account to check the funds of. */
   accountId: string
+  /** The payment; the mock fund check approves an amount below 1000. */
   payment: {
     amount: number
   }
+  /** The customer who receives the confirmation email. */
   customer: {
     name: string
   }
+  /** The availability that the sender claims. The fund check overwrites it before the decision. */
   funds: {
     available: boolean
   }
@@ -37,9 +42,13 @@ export interface PaymentReceivedEvent {
  * Context type for the payment confirmation workflow.
  */
 export interface PaymentConfirmationContext {
+  /** The payment of the received event; null while Pending. The fund check reads it with a non-null assertion. */
   payment: { amount: number } | null
+  /** The customer of the received event; null while Pending. */
   customer: { name: string } | null
+  /** The result of the fund check (first the claim of the event); the success email needs `available` true. */
   funds: { available: boolean } | null
+  /** The account of the received event; null while Pending. */
   accountId: string | null
 }
 

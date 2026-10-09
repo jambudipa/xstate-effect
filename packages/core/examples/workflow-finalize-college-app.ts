@@ -18,6 +18,7 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Input type for the college application workflow.
  */
 export interface CollegeAppInput {
+  /** The applicant whose application to finalize. Required: the context factory reads it without a check. */
   applicantId: string
 }
 
@@ -25,9 +26,13 @@ export interface CollegeAppInput {
  * Context type for the college application workflow.
  */
 export interface CollegeAppContext {
+  /** The applicant from the input; the finalize actor receives it. */
   applicantId: string
+  /** Set by ApplicationSubmitted. The application is finalized when all three flags are true, in any order. */
   applicationSubmitted: boolean
+  /** Set by SATScoresReceived; one of the three flags that finalization needs. */
   satScoresReceived: boolean
+  /** Set by RecommendationLetterReceived; one of the three flags that finalization needs. */
   recommendationLetterReceived: boolean
 }
 

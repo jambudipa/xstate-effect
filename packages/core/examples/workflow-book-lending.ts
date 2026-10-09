@@ -20,8 +20,11 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Lender information.
  */
 export interface Lender {
+  /** The lender's name. */
   name: string
+  /** The lender's postal address. */
   address: string
+  /** The lender's phone number. */
   phone: string
 }
 
@@ -29,8 +32,14 @@ export interface Lender {
  * Book information.
  */
 export interface Book {
+  /** The title, used in the on-loan message to the lender. */
   title: string
+  /** The book id that every actor of the workflow receives as `bookid`. */
   id: string
+  /**
+   * The lending status. A new request sets "unknown" until the status check finishes;
+   * "onloan" leads to the hold decision, "available" to checkout, and "unknown" ends the workflow.
+   */
   status: "onloan" | "available" | "unknown"
 }
 
@@ -38,7 +47,12 @@ export interface Book {
  * Context type for the book lending workflow.
  */
 export interface BookLendingContext {
+  /**
+   * The requested book; null until the bookLendingRequest event. Every state after the request
+   * reads it with a non-null assertion.
+   */
   book: Book | null
+  /** The lender who asked for the book; null until the bookLendingRequest event. */
   lender: Lender | null
 }
 

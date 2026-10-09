@@ -19,7 +19,9 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Result of solving a math problem.
  */
 export interface MathResult {
+  /** The expression as it was given. */
   problem: string
+  /** The answer as text; the mock gives "Solved <problem>" and does not evaluate anything. */
   result: string
 }
 
@@ -27,6 +29,7 @@ export interface MathResult {
  * Context type for the math problem workflow.
  */
 export interface MathProblemContext {
+  /** The answers in the order of the input expressions; undefined until the batch finishes. The final output repeats it. */
   results: string[] | undefined
 }
 

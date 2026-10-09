@@ -28,7 +28,9 @@ export type Dir = "Up" | "Left" | "Down" | "Right"
  * Point in 2D space.
  */
 export interface Point {
+  /** The column, in grid cells; 0 is the left edge. */
   x: number
+  /** The row, in grid cells; 0 is the top edge, and "Up" decreases it. */
   y: number
 }
 
@@ -36,6 +38,7 @@ export interface Point {
  * Snake body part with direction.
  */
 export interface BodyPart extends Point {
+  /** The direction of the move that made this part the head; later moves do not change it. */
   dir: Dir
 }
 
@@ -48,11 +51,20 @@ export type Snake = BodyPart[]
  * Context for the snake game.
  */
 export interface SnakeContext {
+  /** The snake, head first. It always has at least one part: the guards read the head without a check. */
   snake: Snake
+  /** The grid width (`x`) and height (`y`) in cells; 25 by 15. A head outside it ends the game. */
   gridSize: Point
+  /**
+   * The direction of the next move. An ARROW_KEY sets it, except a key for the opposite
+   * direction, which the machine ignores so that the snake cannot reverse into itself.
+   */
   dir: Dir
+  /** The apple cell. A new apple never appears on a snake part. */
   apple: Point
+  /** The apples eaten in this game; NEW_GAME sets it back to 0. */
   score: number
+  /** The best score since the machine started; NEW_GAME keeps it. */
   highScore: number
 }
 

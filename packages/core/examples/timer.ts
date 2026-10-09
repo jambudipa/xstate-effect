@@ -18,6 +18,10 @@ import type { EventObject } from "../src/index.js"
  * Context type for the timer.
  */
 export interface TimerContext {
+  /**
+   * The seconds left. "minute" and "second" add 60 and 1 while stopped; each TICK while running
+   * takes 1 away, and the machine stops at 0. start needs it above 0.
+   */
   seconds: number
 }
 

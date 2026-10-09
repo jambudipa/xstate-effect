@@ -18,7 +18,9 @@ import { createMachine, assign } from "../src/index.js"
  * Input type for the filling water workflow.
  */
 export interface FillingWaterInput {
+  /** The water already in the glass, in fill steps. Without an input the machine starts at 0 of 10. */
   current: number
+  /** The capacity of the glass in fill steps; the workflow ends when `current` reaches it. */
   max: number
 }
 
@@ -26,6 +28,7 @@ export interface FillingWaterInput {
  * Context type for the filling water workflow.
  */
 export interface FillingWaterContext {
+  /** The fill level and capacity; the context takes the input object as it is. Each fill step adds 1 to `current`. */
   counts: {
     current: number
     max: number

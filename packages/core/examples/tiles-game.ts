@@ -28,8 +28,14 @@ function range(num: number): number[] {
  * Tile with position info.
  */
 export interface Tile {
+  /** The position of the tile in `TilesContext.tiles`; the swap exchanges the values at two positions. */
   index: number
+  /**
+   * The column of the position. The sender of the event computes `x` and `y`; the machine does
+   * not check them against `index`, and the adjacency guard reads only `x` and `y`.
+   */
   x: number
+  /** The row of the position; see `x`. */
   y: number
 }
 
@@ -37,8 +43,17 @@ export interface Tile {
  * Context for the tiles game.
  */
 export interface TilesContext {
+  /**
+   * The tile number at each of the 16 positions. The puzzle is solved when each position holds
+   * its own number; the machine starts solved, in "start", until the first shuffle.
+   */
   tiles: number[]
+  /**
+   * The tile the player selected. A swap or a cancel clears it; a tile.move to a tile that is
+   * not adjacent leaves it set.
+   */
   selected: Tile | undefined
+  /** The last tile the pointer passed over while a tile was selected; the swap target. Cleared with `selected`. */
   hovered: Tile | undefined
 }
 

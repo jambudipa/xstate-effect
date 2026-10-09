@@ -19,6 +19,7 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Job information.
  */
 export interface Job {
+  /** The job name that the submit actor receives. */
   name: string
 }
 
@@ -26,6 +27,7 @@ export interface Job {
  * Input type for the job monitoring workflow.
  */
 export interface MonitorJobInput {
+  /** The job to submit. Required: the context factory copies it without a check. */
   job: Job
 }
 
@@ -33,8 +35,14 @@ export interface MonitorJobInput {
  * Context type for the job monitoring workflow.
  */
 export interface MonitorJobContext {
+  /** The job from the input; nothing changes it. */
   job: Job
+  /** The id that the submit actor returned; undefined until the submit finishes. The status check receives it as `name`. */
   jobuid: string | undefined
+  /**
+   * The status of the last check; undefined until a check finishes. Any value other than
+   * "SUCCEEDED" or "FAILED" makes the machine check again.
+   */
   jobStatus: "SUCCEEDED" | "FAILED" | undefined
 }
 

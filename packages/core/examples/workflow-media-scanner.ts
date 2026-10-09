@@ -18,14 +18,26 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Context for the media scanner.
  */
 export interface MediaScannerContext {
+  /** The library root to scan; fixed at "/media". */
   basePath: string
+  /** The folder that qualifying directories move to; fixed at "/media/4k". */
   destinationPath: string
+  /** The directories the scan found; the permission check reads them. */
   directoriesToCheck: string[]
+  /** The directories that passed the permission check; the file evaluation reads them. */
   dirsToEvaluate: string[]
+  /** The directories that the evaluation selected to move. */
   dirsToMove: string[]
+  /** Not used: no state reads or writes it. */
   filesToEmail: string[]
+  /**
+   * The directories to report: those that failed the permission check. A rejected permission
+   * check must reject with an object that has `dirsToReport`; the error handler reads it without a check.
+   */
   dirsToReport: string[]
+  /** Not used: no state reads or writes it. */
   processedFiles: string[]
+  /** The file extensions (without the dot) that the evaluation accepts; the mock evaluation ignores them. */
   acceptedFileTypes: string[]
 }
 
@@ -33,7 +45,12 @@ export interface MediaScannerContext {
  * Input for the media scanner.
  */
 export interface MediaScannerInput {
+  /**
+   * The library root. The machine does not read an input: its context starts with the fixed
+   * paths, so this type only records the input shape.
+   */
   basePath: string
+  /** The destination folder; not read, like `basePath`. */
   destinationPath: string
 }
 

@@ -18,6 +18,7 @@ import { setup, assign, fromPromise, createMachine } from "../src/index.js"
  * Context type for the onboarding subflow.
  */
 export interface OnboardingContext {
+  /** The answer to the name prompt; undefined until the Welcome prompt finishes. */
   name: string | undefined
 }
 

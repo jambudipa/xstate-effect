@@ -19,6 +19,7 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Vital reading.
  */
 export interface VitalReading {
+  /** The measured value; the mock checks always report 100, and no unit is defined. */
   value: number
 }
 
@@ -26,9 +27,16 @@ export interface VitalReading {
  * Context type for the vitals check workflow.
  */
 export interface VitalsCheckContext {
+  /**
+   * The tire pressure reading; null until the check finishes. The machine ends when all four
+   * readings are set, and its output is this context.
+   */
   tirePressure: VitalReading | null
+  /** The oil pressure reading; the port fills it in with the tire result (see the note on CheckVitals). */
   oilPressure: VitalReading | null
+  /** The coolant level reading; filled in with the tire result, like `oilPressure`. */
   coolantLevel: VitalReading | null
+  /** The battery reading; filled in with the tire result, like `oilPressure`. */
   battery: VitalReading | null
 }
 

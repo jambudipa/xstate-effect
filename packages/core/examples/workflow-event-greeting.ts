@@ -18,6 +18,7 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Context type for the event greeting workflow.
  */
 export interface EventGreetingContext {
+  /** The greeting from the greeting function; undefined until it finishes. The final output repeats it. */
   greeting: string | undefined
 }
 

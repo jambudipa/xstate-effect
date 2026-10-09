@@ -19,7 +19,9 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Patient information.
  */
 export interface Patient {
+  /** The patient's name. */
   name: string
+  /** The condition the patient comes in with, as free text. */
   condition: string
 }
 
@@ -27,6 +29,10 @@ export interface Patient {
  * Context type for the patient onboarding workflow.
  */
 export interface PatientOnboardingContext {
+  /**
+   * The patient being onboarded; null before the NewPatientEvent and again after onboarding
+   * succeeds. A failed step ends the workflow with the patient still set.
+   */
   patient: Patient | null
 }
 

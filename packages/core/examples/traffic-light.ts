@@ -16,6 +16,7 @@ import { createMachine, assign } from "../src/index.js"
  * Context for the traffic light.
  */
 export interface TrafficLightContext {
+  /** The completed green, yellow, red cycles: the TIMER from red to green adds 1. */
   cycles: number
 }
 

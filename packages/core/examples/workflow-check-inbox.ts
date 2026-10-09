@@ -20,7 +20,9 @@ import type { EventObject } from "../src/index.js"
  * Message in the inbox.
  */
 export interface Message {
+  /** The message subject. */
   subject: string
+  /** The priority. The workflow texts the high-priority messages; the mock text actor only waits, 10 ms for "high" and 50 ms for "low". */
   priority: "high" | "low"
 }
 
@@ -28,6 +30,7 @@ export interface Message {
  * Context type for the check inbox workflow.
  */
 export interface CheckInboxContext {
+  /** The messages of the last inbox check; each check replaces the list, and the text actor receives it. */
   messages: Message[]
 }
 

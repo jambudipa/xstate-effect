@@ -20,6 +20,7 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Input type for the greeting workflow.
  */
 export interface GreetingInput {
+  /** The person to greet. Without an input the machine greets "World". */
   person: {
     name: string
   }
@@ -29,6 +30,7 @@ export interface GreetingInput {
  * Context type for the greeting workflow.
  */
 export interface GreetingContext {
+  /** The greeting from the greeting function; undefined until it finishes. The final output repeats it. */
   greeting: string | undefined
 }
 

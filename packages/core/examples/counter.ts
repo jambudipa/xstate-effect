@@ -14,6 +14,7 @@ import { createMachine, assign } from "../src/index.js"
  * Context type for the counter machine.
  */
 export interface CounterContext {
+  /** The current count: starts at 0, may go negative on decrement, and `set` replaces it. */
   count: number
 }
 

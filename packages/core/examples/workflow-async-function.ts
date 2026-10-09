@@ -17,6 +17,7 @@ import { setup, fromPromise } from "../src/index.js"
  * Input type for the async function workflow.
  */
 export interface AsyncFunctionInput {
+  /** The customer email address. Without an input the machine uses "unknown@example.com". */
   customer: string
 }
 
@@ -24,6 +25,7 @@ export interface AsyncFunctionInput {
  * Context type for the async function workflow.
  */
 export interface AsyncFunctionContext {
+  /** The customer email address that the email actor receives. */
   customer: string
 }
 

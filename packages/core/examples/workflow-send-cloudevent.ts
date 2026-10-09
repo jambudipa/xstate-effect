@@ -19,8 +19,11 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Order information.
  */
 export interface Order {
+  /** The order id; the provisioned result repeats it. */
   id: string
+  /** The ordered item. */
   item: string
+  /** The quantity, as text. */
   quantity: string
 }
 
@@ -28,7 +31,9 @@ export interface Order {
  * Provisioned order result.
  */
 export interface ProvisionedOrder {
+  /** The id of the order this result is for. */
   id: string
+  /** The provisioning outcome; the mock always gives "SUCCESS". */
   outcome: string
 }
 
@@ -36,6 +41,7 @@ export interface ProvisionedOrder {
  * Input type for the send cloud event workflow.
  */
 export interface SendCloudEventInput {
+  /** The orders to provision. Required: the context factory copies it without a check. */
   orders: Order[]
 }
 
@@ -43,7 +49,9 @@ export interface SendCloudEventInput {
  * Context type for the send cloud event workflow.
  */
 export interface SendCloudEventContext {
+  /** The orders from the input; nothing changes them. */
   orders: Order[]
+  /** One result for each order, in input order; undefined until provisioning finishes. The final output repeats it. */
   provisionedOrders: ProvisionedOrder[] | undefined
 }
 

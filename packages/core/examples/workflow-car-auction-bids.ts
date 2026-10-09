@@ -18,8 +18,11 @@ import { createMachine, assign } from "../src/index.js"
  * Bid information.
  */
 export interface Bid {
+  /** The car the bid is for. The machine does not check it: all bids compete as one auction. */
   carid: string
+  /** The bid amount. The highest amount wins; on a tie the later bid wins. */
   amount: number
+  /** The person who placed the bid. */
   bidder: {
     id: string
     firstName: string
@@ -31,6 +34,7 @@ export interface Bid {
  * Context type for the car auction workflow.
  */
 export interface CarAuctionContext {
+  /** Every bid in the order of arrival. The final output picks the winner from it, or null when it is empty. */
   bids: Bid[]
 }
 

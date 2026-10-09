@@ -18,7 +18,12 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Context type for the room readings workflow.
  */
 export interface RoomReadingsContext {
+  /**
+   * The last temperature reading of this cycle, or null before one arrives. Entering
+   * ConsumeReading clears it; GENERATE_REPORT needs it and `humidity` both set.
+   */
   temperature: number | null
+  /** The last humidity reading of this cycle, or null before one arrives; cleared like `temperature`. */
   humidity: number | null
 }
 
