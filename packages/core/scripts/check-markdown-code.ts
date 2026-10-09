@@ -15,28 +15,77 @@ import { execSync, spawnSync } from "node:child_process"
 // TYPES
 // ============================================
 
+/** One fenced `ts` or `typescript` block that `extractCodeBlocks` found in a markdown file. */
 interface CodeBlock {
+  /**
+   * Path of the markdown file that holds the block, absolute because the walk starts at `ROOT_DIR`.
+   */
   file: string
+  /** 1-based line of the first code line: the line after the opening fence. */
   lineStart: number
+  /**
+   * 1-based line of the last code line: the line before the closing fence. For an empty block it is
+   * one less than `lineStart`.
+   */
   lineEnd: number
+  /** The lines between the fences, joined with `\n`; the fences are not included. */
   code: string
+  /**
+   * The fence tag in lower case, `ts` or `typescript`. No check reads it; only `report.json`
+   * carries it.
+   */
   language: string
 }
 
+/**
+ * The outcome for one block. `main` creates it with empty lists and fills them after the type check
+ * and the lint.
+ */
 interface CheckResult {
+  /**
+   * The block the result describes; its `file` and line range locate the result in the markdown.
+   */
   block: CodeBlock
+  /**
+   * Absolute path of the `.ts` file that holds the block under `EXTRACTED_DIR`. `main` looks up the
+   * findings of `runTypeCheck` and `runLint` by this path, so their keys must equal it exactly.
+   */
   extractedFile: string
+  /**
+   * Compiler errors, each `Line l:c - TSnnnn: message`.
+   *
+   * The line refers to the extracted file, which starts with a four-line header, so the markdown
+   * line is `lineStart + l - 5`.
+   */
   typeErrors: string[]
+  /**
+   * ESLint findings, each `Line l:c - error|warning [rule]: message`, with the same extracted-file
+   * line numbers as `typeErrors`. A warning counts as a finding.
+   */
   lintErrors: string[]
 }
 
+/**
+ * The result of one run. `formatReport` prints it, and `main` saves it as `report.txt` and
+ * `report.json` in `TEMP_DIR`.
+ */
 interface Report {
+  /** ISO 8601 time, in UTC, at which the run built the report. */
   timestamp: string
+  /** Markdown files scanned, those with no TypeScript block included. */
   totalFiles: number
+  /** TypeScript blocks found across all scanned files. */
   totalBlocks: number
+  /** Blocks with at least one compiler error. */
   blocksWithTypeErrors: number
+  /**
+   * Blocks with at least one ESLint error or warning. A block can count here and in
+   * `blocksWithTypeErrors`.
+   */
   blocksWithLintErrors: number
+  /** Blocks with no compiler error and no ESLint finding. */
   blocksClean: number
+  /** One entry per block, in the order the walk found them. */
   results: CheckResult[]
 }
 
@@ -44,15 +93,35 @@ interface Report {
 // CONFIGURATION
 // ============================================
 
+/**
+ * The package root, found from the script's own location, so the result does not depend on the
+ * working folder.
+ */
 const ROOT_DIR = path.resolve(import.meta.dirname, "..")
+/** The `docs/` folder. Unused: `main` scans all of `ROOT_DIR`, not only `docs/`. */
 const DOCS_DIR = path.join(ROOT_DIR, "docs")
+/**
+ * Scratch folder of the run (gitignored). `main` deletes it and creates it again at the start of
+ * every run, so keep nothing there.
+ */
 const TEMP_DIR = path.join(ROOT_DIR, ".markdown-code-check")
+/**
+ * Where each block becomes its own `.ts` file. The generated tsconfig and ESLint config cover only
+ * this folder.
+ */
 const EXTRACTED_DIR = path.join(TEMP_DIR, "extracted")
 
 // ============================================
 // MARKDOWN PARSING
 // ============================================
 
+/**
+ * Lists every `.md` file under `dir`, at any depth, as paths joined onto `dir`.
+ *
+ * Only folders named `node_modules` or `.git` are skipped. Gitignored folders such as `.upstream/`
+ * are scanned too, so a markdown file there adds its blocks to the check. Symbolic links are not
+ * followed. A folder that cannot be read throws, which ends the run.
+ */
 function findMarkdownFiles(dir: string): string[] {
   const files: string[] = []
 
@@ -76,6 +145,14 @@ function findMarkdownFiles(dir: string): string[] {
   return files
 }
 
+/**
+ * Finds the fenced blocks tagged `ts` or `typescript`, in any case, in one markdown file.
+ *
+ * An opening fence counts only at the start of a line, so a fence indented inside a list item is
+ * not checked; nor is a `tsx` block or a `~~~` fence. Any later line that starts with three
+ * backticks closes the block, whatever follows them. A block left open at the end of the file is
+ * dropped.
+ */
 function extractCodeBlocks(filePath: string): CodeBlock[] {
   const content = fs.readFileSync(filePath, "utf-8")
   const lines = content.split("\n")
@@ -105,7 +182,7 @@ function extractCodeBlocks(filePath: string): CodeBlock[] {
         blocks.push({
           file: filePath,
           lineStart: blockStart + 1, // Line after the opening ```
-          lineEnd: i, // Line of the closing ```
+          lineEnd: i, // Last code line (1-based): the closing fence's 0-based index
           code: blockLines.join("\n"),
           language: blockLanguage
         })
@@ -122,6 +199,14 @@ function extractCodeBlocks(filePath: string): CodeBlock[] {
 // FILE GENERATION
 // ============================================
 
+/**
+ * Builds a flat file name for one extracted block from its markdown path relative to the package
+ * root.
+ *
+ * `blockIndex` is the block's index across the whole run, not within its file, which keeps the
+ * names unique even when two markdown paths sanitize to the same text. `lineStart` only makes the
+ * name readable.
+ */
 function sanitizeFilename(filePath: string, blockIndex: number, lineStart: number): string {
   const relativePath = path.relative(ROOT_DIR, filePath)
   const safePath = relativePath
@@ -132,6 +217,12 @@ function sanitizeFilename(filePath: string, blockIndex: number, lineStart: numbe
   return `${safePath}_block${blockIndex + 1}_line${lineStart}.ts`
 }
 
+/**
+ * Writes one block to `EXTRACTED_DIR` as a `.ts` file and returns its absolute path.
+ *
+ * The file starts with a four-line header that names the markdown source and the line range, so the
+ * code begins on line 5. `EXTRACTED_DIR` must exist; `main` creates it.
+ */
 function generateExtractedFile(block: CodeBlock, blockIndex: number): string {
   const filename = sanitizeFilename(block.file, blockIndex, block.lineStart)
   const outputPath = path.join(EXTRACTED_DIR, filename)
@@ -149,6 +240,13 @@ function generateExtractedFile(block: CodeBlock, blockIndex: number): string {
   return outputPath
 }
 
+/**
+ * Writes the strict `tsconfig.json` that type-checks the extracted blocks.
+ *
+ * It maps `@jambudipa/xstate-effect` and the `@/*` alias onto `src/`, so the samples compile
+ * against the source, not against a build. A subpath import such as
+ * `@jambudipa/xstate-effect/graph` has no mapping here.
+ */
 function generateTsConfig(): void {
   const tsconfig = {
     compilerOptions: {
@@ -181,6 +279,13 @@ function generateTsConfig(): void {
   )
 }
 
+/**
+ * Writes the ESLint flat config that lints the extracted blocks.
+ *
+ * The rule set is small on purpose, because samples are excerpts: floating promises and awaits of
+ * non-thenables are errors, explicit `any` and unused bindings are warnings. ESLint finds this file
+ * first from `TEMP_DIR`, so the package's own `eslint.config.mjs` does not apply to the samples.
+ */
 function generateEslintConfig(): void {
   const eslintConfig = `
 import tseslint from 'typescript-eslint';
@@ -223,6 +328,14 @@ export default tseslint.config(
 // TYPE CHECKING
 // ============================================
 
+/**
+ * Runs `tsc` over the extracted files and returns its errors keyed by extracted-file path.
+ *
+ * Only lines of the form `extracted/<file>(line,col): error TSnnnn: message` are kept. A failure
+ * with no file position, such as a bad tsconfig or a missing `tsc`, matches nothing and leaves the
+ * map empty, so the report shows every block as type-clean. Read the console output when the counts
+ * look too good.
+ */
 function runTypeCheck(): Map<string, string[]> {
   const errors = new Map<string, string[]>()
 
@@ -264,6 +377,13 @@ function runTypeCheck(): Map<string, string[]> {
 // LINTING
 // ============================================
 
+/**
+ * Runs ESLint over the extracted files and returns its findings keyed by the absolute path that
+ * ESLint reports.
+ *
+ * Warnings count as findings, the same as errors. When ESLint cannot run or prints something that
+ * is not JSON, the function returns an empty map, and every block counts as lint-clean.
+ */
 function runLint(): Map<string, string[]> {
   const errors = new Map<string, string[]>()
 
@@ -322,6 +442,10 @@ function runLint(): Map<string, string[]> {
 // REPORTING
 // ============================================
 
+/**
+ * Renders the plain-text report: the totals, then each file with findings and its failing blocks,
+ * then the clean files with their block counts. Paths are relative to the package root.
+ */
 function formatReport(report: Report): string {
   const lines: string[] = []
 
@@ -418,6 +542,14 @@ function formatReport(report: Report): string {
 // MAIN
 // ============================================
 
+/**
+ * Runs the whole check, as `pnpm check-docs`.
+ *
+ * It rebuilds `TEMP_DIR`, extracts every TypeScript block of every markdown file in the package,
+ * type-checks and lints the blocks, prints the report and saves it as `report.txt` and
+ * `report.json`. The process exits with code 1 when any block has a compiler error or any ESLint
+ * finding (a warning included), and with code 0 when every block is clean or no block exists.
+ */
 async function main(): Promise<void> {
   console.log("Markdown TypeScript Code Block Checker")
   console.log("======================================")

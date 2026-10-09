@@ -3,18 +3,23 @@
  * Code Cleanup Script (clean.ts)
  *
  * An automated code cleanup tool that identifies TypeScript and ESLint issues
- * across the monorepo and repairs them using the Claude Agent SDK.
+ * across the package and repairs them using the Claude Agent SDK.
  *
  * Usage:
- *   npx tsx scripts/clean.ts                    # Full repo analysis and repair
+ *   npx tsx scripts/clean.ts                    # Full package analysis and repair
  *   npx tsx scripts/clean.ts --analyze-only    # Analysis only (no repairs)
- *   npx tsx scripts/clean.ts apps/api libs/database  # Target specific paths
+ *   npx tsx scripts/clean.ts src/Actor.ts test # Target specific paths
  *   npx tsx scripts/clean.ts --verbose         # Show agent prompts and tool calls
  *   npx tsx scripts/clean.ts --quiet           # Statistics only
  *   npx tsx scripts/clean.ts --dry-run         # Preview changes without writing
  *   npx tsx scripts/clean.ts --max-files 10    # Limit files processed
  *   npx tsx scripts/clean.ts --fail-fast       # Stop on first unresolved file
  *   npx tsx scripts/clean.ts --json            # JSON output for CI integration
+ *
+ * Run it from the package root: it reads `tsconfig.json`, `clean.config.ts` and `code-style/`
+ * from the working folder. The repair agent runs with `bypassPermissions` (except with
+ * `--dry-run`), so it can edit any file and run any command without a prompt. Run it only on a
+ * checkout you trust, with your own work committed, and review its diff.
  */
 
 import * as ts from 'typescript';
@@ -26,95 +31,229 @@ import { program } from 'commander';
 import cliProgress from 'cli-progress';
 
 // Terminal color utilities (reusing existing patterns)
+/**
+ * ANSI reset: ends the color and weight that the codes below start.
+ *
+ * The script writes these codes whatever the output is: it does not check for a terminal or for
+ * `NO_COLOR`, so redirected console output keeps them.
+ */
 const RESET = '\x1b[0m';
+/** ANSI green foreground. */
 const GREEN = '\x1b[32m';
+/** ANSI yellow foreground. */
 const YELLOW = '\x1b[33m';
+/** ANSI red foreground. */
 const RED = '\x1b[31m';
+/** ANSI blue foreground. */
 const BLUE = '\x1b[34m';
+/** ANSI cyan foreground; also frames the report and the progress bar. */
 const CYAN = '\x1b[36m';
+/** ANSI bold weight. */
 const BOLD = '\x1b[1m';
+/** ANSI dim weight. */
 const DIM = '\x1b[2m';
+/** ANSI magenta foreground. Only the unused `_magenta` helper reads it. */
 const MAGENTA = '\x1b[35m';
 
+/** Green text: fixed files, zero counts and success messages. */
 const success = (text: string): string => `${GREEN}${text}${RESET}`;
+/** Yellow text: warning counts, issues that remain, and the permissive pass. */
 const warning = (text: string): string => `${YELLOW}${text}${RESET}`;
+/** Red text: error counts, failed repairs and fatal errors. */
 const errorColor = (text: string): string => `${RED}${text}${RESET}`;
+/** Blue text: progress messages. */
 const info = (text: string): string => `${BLUE}${text}${RESET}`;
+/** Bold cyan text: the scanned-file count and the banner of each later global iteration. */
 const highlight = (text: string): string => `${BOLD}${CYAN}${text}${RESET}`;
+/** Dim text: secondary detail such as prompts, rule names and paths. */
 const dim = (text: string): string => `${DIM}${text}${RESET}`;
+/** Bold text: section headings and file names. */
 const bold = (text: string): string => `${BOLD}${text}${RESET}`;
+/** Magenta text. Unused; the leading underscore keeps the unused-binding lint rule quiet. */
 const _magenta = (text: string): string => `${MAGENTA}${text}${RESET}`;
+/** Cyan text: the agent's tool calls in verbose mode. */
 const cyan = (text: string): string => `${CYAN}${text}${RESET}`;
 
 // ============================================================================
 // Types
 // ============================================================================
 
+/**
+ * One compiler diagnostic that `analyzeTypeScript` kept, in the form the repair prompt and the
+ * reports use.
+ */
 interface TypeScriptDiagnostic {
+  /**
+   * Absolute path as the compiler reports it. `mergeIssues` groups by this string, so it equals
+   * ESLint's path for the same file only where both use forward slashes (POSIX).
+   */
   file: string;
+  /** 1-based line. */
   line: number;
+  /** 1-based column. */
   column: number;
+  /** The TypeScript error number without the `TS` prefix; the prompt and the reports add it. */
   code: number;
+  /** The message text, with a nested message chain flattened onto separate lines. */
   message: string;
+  /**
+   * `error` for a compiler error; every other category (warning, suggestion, message) becomes
+   * `warning`.
+   */
   severity: 'error' | 'warning';
 }
 
+/** One ESLint message, from the analysis or from the re-check after a repair. */
 interface ESLintIssue {
+  /** Absolute path as ESLint reports it. */
   file: string;
+  /** 1-based line. */
   line: number;
+  /** 1-based column. */
   column: number;
+  /**
+   * The rule that fired, or `unknown` for a message with no rule, such as a parse error.
+   * `loadCodeStyleGuidance` derives a guidance file name from it.
+   */
   ruleId: string;
+  /** ESLint's message text. */
   message: string;
+  /** `error` for ESLint severity 2, `warning` otherwise. */
   severity: 'error' | 'warning';
+  /**
+   * ESLint's autofix, when the rule offers one. Nothing applies it: the prompt leaves it out, and
+   * only `repairs.json` carries it.
+   */
   fix?: Rule.Fix;
 }
 
+/** All issues of one file, split by source. The repair prompt lists both kinds. */
 interface FileIssues {
+  /** Compiler diagnostics of the file. */
   typescript: TypeScriptDiagnostic[];
+  /** ESLint messages of the file, warnings included. */
   eslint: ESLintIssue[];
 }
 
+/**
+ * Issues keyed by absolute file path.
+ *
+ * The order is insertion order: files with compiler diagnostics first, then files with ESLint
+ * messages only. `--max-files` takes the first entries in this order.
+ */
 type FileIssueMap = Map<string, FileIssues>;
 
+/** The totals of one analysis pass, for the console report, the JSON report and `analysis.json`. */
 interface AnalysisResult {
+  /** Files that ESLint linted outside the excluded paths. The compiler pass adds no count. */
   filesScanned: number;
+  /** Files with at least one compiler diagnostic or ESLint message. */
   filesWithIssues: number;
+  /** Compiler diagnostics by severity. */
   typescript: {
     errors: number;
     warnings: number;
   };
+  /** ESLint messages by severity. */
   eslint: {
     errors: number;
     warnings: number;
   };
+  /** The ten most frequent ESLint rules and `TSnnnn` codes, most frequent first. */
   topViolations: Array<{ rule: string; count: number }>;
+  /**
+   * Every file with issues and its issue count, most issues first. Paths are absolute; the console
+   * shows the first 15.
+   */
   filesByIssueCount: Array<{ file: string; count: number }>;
 }
 
+/** The counts of the repair passes, and the files they could not fix. */
 interface RepairResult {
+  /** Files that the strict pass fixed, with no suppression comment. */
   success: number;
+  /**
+   * Files that only the permissive pass fixed; they may now hold suppression comments with a
+   * reason.
+   */
   partial: number;
+  /**
+   * Files that neither pass fixed. `main` keeps the count of the last global iteration, not a sum.
+   */
   failed: number;
+  /**
+   * The unfixed files, each with the issues that the strict pass left. The permissive pass reports
+   * no list, so these can be out of date.
+   */
   unresolved: Array<{ file: string; issues: FileIssues }>;
 }
 
+/**
+ * The settings that `clean.config.ts` can override: its default export, merged over
+ * `DEFAULT_CONFIG`.
+ *
+ * No field takes effect yet. The repair loop ignores the config: it repairs one file at a time,
+ * passes no model to the agent, applies no time limit, and filters paths with fixed rules instead
+ * of `exclude`.
+ */
 interface CleanConfig {
+  /** Glob patterns of paths to skip. Not applied. */
   exclude?: string[];
+  /** The number of agents to run at once. Not applied: files are repaired one at a time. */
   maxConcurrentAgents?: number;
+  /** Model id of the repair agent. Not applied: the agent uses the default model of the SDK. */
   agentModel?: string;
+  /** Time limit for one file, in milliseconds. Not applied. */
   timeoutPerFile?: number;
 }
 
+/** The parsed command-line flags, as commander returns them from `program.opts()`. */
 interface CliOptions {
+  /** `--analyze-only`: report, then exit with code 0 without a repair, even when issues exist. */
   analyzeOnly: boolean;
+  /**
+   * `--verbose`: print each prompt, the agent's text and its tool calls. Turns off the progress
+   * bar.
+   */
   verbose: boolean;
+  /**
+   * `--quiet`: hide the banner, the progress messages, the file list and the progress bar. The
+   * totals, the top rules and the repair status lines still print.
+   */
   quiet: boolean;
+  /**
+   * `--dry-run`: run the agent in the SDK's `default` permission mode instead of
+   * `bypassPermissions`, and skip the re-check, so every file counts as fixed. The script itself
+   * does not block writes.
+   */
   dryRun: boolean;
+  /** `--max-files`: repair at most this many files in each global iteration. */
   maxFiles?: number;
+  /**
+   * `--fail-fast`: end the current iteration at the first file that neither pass fixes. The next
+   * global iteration still runs, so this does not end the run.
+   */
   failFast: boolean;
+  /**
+   * `--json`: print one JSON report instead of the console report.
+   *
+   * The repair status lines still go to stdout, so only the output of an analysis-only run (or one
+   * that finds no issue) is pure JSON.
+   */
   json: boolean;
+  /**
+   * `--report <dir>`: also write `analysis.json`, and after a repair `repairs.json` and
+   * `unresolved.json`, to this folder.
+   */
   report?: string;
+  /**
+   * `--timeout <ms>`: unused.
+   *
+   * Its parser `parseInt` receives the default `600_000` as its radix, so a value given on the
+   * command line becomes `NaN`.
+   */
   timeout: number;
+  /** `--debug`: unused. */
   debug: boolean;
 }
 
@@ -122,8 +261,17 @@ interface CliOptions {
 // Configuration
 // ============================================================================
 
+/**
+ * The working folder, not the script's folder. The CLI reads `tsconfig.json`, `clean.config.ts` and
+ * `code-style/` from it and starts the agent in it, so run the CLI from the package root, as the
+ * `pnpm clean` scripts do.
+ */
 const ROOT_DIR = process.cwd();
 
+/**
+ * The settings used when no `clean.config.ts` exists or it fails to load. None of them takes effect
+ * yet (see `CleanConfig`).
+ */
 const DEFAULT_CONFIG: CleanConfig = {
   exclude: ['**/node_modules/**', '**/dist/**', '**/out-tsc/**', '**/.nx/**', '**/tmp/**'],
   maxConcurrentAgents: 1,
@@ -131,6 +279,15 @@ const DEFAULT_CONFIG: CleanConfig = {
   timeoutPerFile: 600_000, // 10 minutes
 };
 
+/**
+ * Loads `clean.config.ts` from the working folder and merges its default export over
+ * `DEFAULT_CONFIG`.
+ *
+ * A config that fails to import is ignored without a message, and the defaults apply. The import
+ * takes a computed path that the static module walk of CONF-8 cannot follow, so
+ * `test/verify/verify-xstate-5-33-2-port-CONF-8.spec.ts` allows this one dynamic import by its
+ * line number: a change that moves that line must update the allowance there.
+ */
 async function loadConfig(): Promise<CleanConfig> {
   const configPath = path.join(ROOT_DIR, 'clean.config.ts');
   if (fs.existsSync(configPath)) {
@@ -149,6 +306,16 @@ async function loadConfig(): Promise<CleanConfig> {
 // TypeScript Compiler API Analysis
 // ============================================================================
 
+/**
+ * Type-checks the program of `tsconfig.json` in the working folder and returns its file
+ * diagnostics.
+ *
+ * The argument is ignored: every call checks the whole program, which in this package is `src/`
+ * only, so the re-check after each repair costs a full type check. Diagnostics with no file (option
+ * and config errors) and those in `node_modules`, `out-tsc` or a `/scripts/` path are dropped. A
+ * missing or unreadable `tsconfig.json` prints an error and returns an empty list, so the run then
+ * sees no compiler issue.
+ */
 function analyzeTypeScript(_targetPaths: string[]): TypeScriptDiagnostic[] {
   const diagnostics: TypeScriptDiagnostic[] = [];
 
@@ -215,11 +382,25 @@ function analyzeTypeScript(_targetPaths: string[]): TypeScriptDiagnostic[] {
 // ESLint Node.js API Analysis
 // ============================================================================
 
+/**
+ * ESLint's issues and the number of files it linted, which the totals use as the scanned-file
+ * count.
+ */
 interface ESLintAnalysisResult {
+  /** Every ESLint message outside the excluded paths, warnings included. */
   issues: ESLintIssue[];
+  /** Linted files outside the excluded paths, with or without messages. */
   filesScanned: number;
 }
 
+/**
+ * Lints `targetPaths`, or `src` and `test` when the list is empty, with the package's ESLint
+ * config.
+ *
+ * Results whose path contains `node_modules`, `out-tsc`, `dist` or `/scripts/` are dropped. The
+ * `dist` test is a plain substring match, so it also drops a file such as `src/distance.ts`. ESLint
+ * throws for a target that matches no file, and that error ends the run.
+ */
 async function analyzeESLint(targetPaths: string[]): Promise<ESLintAnalysisResult> {
   const issues: ESLintIssue[] = [];
 
@@ -271,6 +452,10 @@ async function analyzeESLint(targetPaths: string[]): Promise<ESLintAnalysisResul
 // Issue Merging and Statistics
 // ============================================================================
 
+/**
+ * Groups compiler diagnostics and ESLint messages by file path into one map. The compiler's files
+ * enter the map first, which sets the repair order.
+ */
 function mergeIssues(
   tsDiagnostics: TypeScriptDiagnostic[],
   eslintIssues: ESLintIssue[]
@@ -294,6 +479,10 @@ function mergeIssues(
   return map;
 }
 
+/**
+ * Computes the report totals from the merged issues. `totalFiles` is ESLint's scanned-file count,
+ * because the compiler pass reports no count of its own.
+ */
 function calculateStatistics(issueMap: FileIssueMap, totalFiles: number): AnalysisResult {
   let tsErrors = 0;
   let tsWarnings = 0;
@@ -348,6 +537,10 @@ function calculateStatistics(issueMap: FileIssueMap, totalFiles: number): Analys
 // Reporting
 // ============================================================================
 
+/**
+ * Prints the boxed analysis summary: the totals, the top rules and, except with `--quiet`, up to 15
+ * files by issue count. Prints nothing with `--json`.
+ */
 function displayAnalysisReport(result: AnalysisResult, options: CliOptions): void {
   if (options.json) return; // Skip console output in JSON mode
 
@@ -406,6 +599,10 @@ ${dim(thinLine)}
   }
 }
 
+/**
+ * Prints the machine-readable report as one JSON document on stdout: the totals and, after a
+ * repair, the repair counts and the unresolved files with relative paths.
+ */
 function displayJsonReport(
   analysisResult: AnalysisResult,
   repairResult?: RepairResult
@@ -441,6 +638,16 @@ function displayJsonReport(
 // Code Style Guidance Loading
 // ============================================================================
 
+/**
+ * Collects the project's fix guidance for each ESLint rule and TypeScript code in `issues`, for the
+ * repair prompt.
+ *
+ * A rule maps to `code-style/linting-recommendations/<file>.md`, where the file name is the rule id
+ * with its first `@` removed and its first `/` turned into `_`
+ * (`@typescript-eslint/no-explicit-any` becomes `typescript-eslint_no-explicit-any.md`). A
+ * TypeScript code maps to `code-style/typecheck-recommendations/TS<code>.md`; this package has no
+ * such folder yet. A missing file is skipped without a message. Each guide is added once.
+ */
 function loadCodeStyleGuidance(issues: FileIssues): string {
   const guidanceLines: string[] = [];
   const loadedRules = new Set<string>();
@@ -492,7 +699,11 @@ function loadCodeStyleGuidance(issues: FileIssues): string {
 // Agent Repair Functions
 // ============================================================================
 
-// Wrap text at specified width
+/**
+ * Splits text into lines of at most `width` characters at single spaces, for the verbose console
+ * output. A word longer than `width` gets a line of its own and is not split; leading spaces are
+ * lost.
+ */
 function wrapText(text: string, width: number): string[] {
   const words = text.split(' ');
   const lines: string[] = [];
@@ -510,6 +721,17 @@ function wrapText(text: string, width: number): string[] {
   return lines;
 }
 
+/**
+ * Asks a Claude agent to fix the issues of one file without suppressions, then re-checks the file.
+ *
+ * The prompt forbids `eslint-disable`, `@ts-ignore` and `@ts-expect-error` and adds the matching
+ * `code-style/` guidance. The agent runs in the working folder with the project's Claude Code
+ * settings and, except in a dry run, with `bypassPermissions`: it can edit any file and run any
+ * command without a prompt, and no time limit applies. When the agent ends, ESLint and the compiler
+ * re-check this file only; success means that no message remains, warnings included.
+ * `remainingIssues` holds what the permissive pass must still fix, or the original issues when the
+ * agent call throws. `fileIndex` and `totalFiles` only label the console line.
+ */
 async function repairFileStrict(
   filePath: string,
   issues: FileIssues,
@@ -739,6 +961,13 @@ Read the file, make the necessary fixes, validate with linting, and fix any rema
   }
 }
 
+/**
+ * The second attempt at a file that the strict pass left unfixed: the same agent run, but the
+ * prompt allows `eslint-disable` and `@ts-expect-error` comments that give a reason.
+ *
+ * It re-checks the file the same way but returns no remaining issues, so the caller keeps the list
+ * of the strict pass. The permission and time-limit notes of `repairFileStrict` apply here too.
+ */
 async function repairFilePermissive(
   filePath: string,
   issues: FileIssues,
@@ -947,6 +1176,14 @@ Read the file, make the necessary fixes, validate with linting and type checking
 // Main Repair Loop
 // ============================================================================
 
+/**
+ * Repairs each file of `issueMap` in turn: the strict pass, then the permissive pass when the
+ * strict pass leaves issues.
+ *
+ * Files are repaired one at a time. `--max-files` caps the count, and `--fail-fast` ends this
+ * iteration at the first file that both passes leave unfixed. The config argument is ignored. A
+ * progress bar shows unless `--quiet`, `--json` or `--verbose` is set.
+ */
 async function runRepairLoop(
   issueMap: FileIssueMap,
   options: CliOptions,
@@ -1045,6 +1282,13 @@ async function runRepairLoop(
 // Report Writing
 // ============================================================================
 
+/**
+ * Writes the report files to `reportDir`, which it creates when needed, over any earlier files.
+ *
+ * `analysis.json` is always written; `repairs.json` after a repair, and `unresolved.json` when some
+ * files stay unfixed. `analysis.json` and `repairs.json` hold absolute paths; `unresolved.json`
+ * holds paths relative to the working folder.
+ */
 async function writeReport(
   reportDir: string,
   analysisResult: AnalysisResult,
@@ -1091,6 +1335,20 @@ async function writeReport(
 // Main Entry Point
 // ============================================================================
 
+/**
+ * The CLI: parses the flags, analyses, then repairs in up to three global iterations, each followed
+ * by a fresh analysis.
+ *
+ * The process exits with code 0 after an analysis-only run or when no issue exists, even if the
+ * analysis found issues. After repairs it exits with code 1 when the last iteration left an unfixed
+ * file, and with code 0 otherwise, even when the final analysis still finds issues. A thrown error
+ * exits with code 1.
+ *
+ * Every analysis after the first checks the default scope (`src` and `test`), not the paths given
+ * on the command line, so a targeted run can go on to repair other files. When a dry run writes
+ * nothing, the same issues remain, so each file goes to the agent once in each of the three
+ * iterations.
+ */
 async function main(): Promise<void> {
   // Parse CLI arguments
   program
