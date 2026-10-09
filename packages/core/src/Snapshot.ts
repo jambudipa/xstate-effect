@@ -67,9 +67,22 @@ export type SnapshotTypeId = typeof SnapshotTypeId
  * @category Snapshot
  */
 export interface Snapshot<out TOutput = unknown> {
+  /**
+   * The brand {@link isSnapshot} checks. The constructors write it as an own enumerable
+   * field, so a spread of a snapshot keeps it.
+   */
   readonly [SnapshotTypeId]: SnapshotTypeId
+  /** Where the actor is in its life: running, finished with output, failed, or stopped. */
   readonly status: SnapshotStatus
+  /**
+   * The output (upstream `output`, an `Option` here: D8, DEV-7), set together with status
+   * `done`. An `undefined` output is none, so `Some(undefined)` never exists (SD-7).
+   */
   readonly output: Option.Option<TOutput>
+  /**
+   * The raw error that ended the actor (upstream `error`, an `Option` here: D8, DEV-7), set
+   * together with status `error`. An `undefined` error is none (SD-7).
+   */
   readonly error: Option.Option<unknown>
 }
 
@@ -261,25 +274,35 @@ export type AnyHistoryValue = HistoryValue
 /**
  * What a machine snapshot is made from (upstream `StateConfig`): the context, the history
  * value, the active state nodes (`_nodes`, of upstream's `any` meta), the children, the
- * status, the output and error (`Option`s, D8) and the machine.
+ * status, the output and error (`Option`s, D8) and the machine. It is exported for parity
+ * with upstream's type exports: no port function takes one, and {@link makeMachineSnapshot}
+ * takes its own options.
  *
  * @since 0.1.0
  * @category Snapshot
  */
 export interface StateConfig<TContext, TEvent extends EventObject> {
+  /** The machine context. */
   readonly context: TContext
+  /** The configurations the history states recorded; optional, as upstream. */
   readonly historyValue?: HistoryValue
+  /** The active state nodes; their metas are upstream's `any` (SD-22 amendment). */
   readonly _nodes: ReadonlyArray<StateNode<TContext, TEvent, UpstreamAny, UpstreamAny>>
+  /** The child actors, keyed by actor id. */
   readonly children: Readonly<Record<string, AnyActorRef>>
+  /** The status the snapshot has. */
   readonly status: SnapshotStatus
+  /** The output as an `Option` (D8); optional, as upstream's `output?`. */
   readonly output?: Option.Option<unknown>
+  /** The raw error as an `Option` (D8); optional, as upstream's `error?`. */
   readonly error?: Option.Option<unknown>
+  /** The machine the snapshot belongs to; optional, as upstream. */
   readonly machine?: AnyStateMachine
 }
 
 /**
  * The config of any machine snapshot (upstream `AnyStateConfig`, `StateConfig<any,
- * AnyEventObject>`; SD-22 amendment, goal journal `2026-10-07-13-node-containers-any.md`).
+ * AnyEventObject>`; SD-22 amendment, see docs/decisions.md).
  *
  * @since 0.1.0
  * @category Snapshot
@@ -322,6 +345,10 @@ export interface MachineSnapshot<
   out TMeta = unknown,
   _TStateSchema extends StateSchema = StateSchema
 > extends Snapshot<TOutput> {
+  /**
+   * The brand {@link isMachineSnapshot} checks; {@link withStatus} reads it to rebuild a
+   * machine snapshot through {@link makeMachineSnapshot} instead of spreading it.
+   */
   readonly [MachineSnapshotTypeId]: MachineSnapshotTypeId
 
   /** Current state value */
@@ -476,6 +503,7 @@ export declare namespace MachineSnapshot {
    * @since 0.1.0
    */
   export interface Machine {
+    /** The machine's id: its config `id`, or `(machine)` when that is missing or empty. */
     readonly id: string
     /** What the snapshot queries read of the machine (internal, not XState API). */
     readonly _snapshotQueries: Queries
