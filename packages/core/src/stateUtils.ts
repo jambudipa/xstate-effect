@@ -66,29 +66,36 @@ export type ActionLike<TContext, TEvent extends EventObject> = Action<TContext, 
 
 /**
  * A transition the engine takes: its source node, its target nodes (empty for a targetless
- * transition), whether it has a target list at all, whether it re-enters, and its actions.
+ * transition), the definition it came from, whether it re-enters, and its actions.
  *
  * @since 0.1.0
  * @category Models
  */
 export interface MicrostepTransition<TContext, TEvent extends EventObject> {
+  /**
+   * The node that defines the transition (the root for the initial transition). The
+   * transition domain, and so the exit and entry sets, are computed from it.
+   */
   readonly source: StateNode<TContext, TEvent>
+  /**
+   * The resolved target nodes, in the order the config lists them. Empty for a targetless
+   * transition, which exits and enters nothing and runs its actions only.
+   */
   readonly target: ReadonlyArray<StateNode<TContext, TEvent>>
   /**
    * The transition definition selection took the transition from (upstream selects the
    * definitions themselves); none for the initial transition, which no node defines.
    */
   readonly definition: Option.Option<TransitionDefinition<TContext, TEvent>>
+  /**
+   * Whether the source exits and enters again when every target lies inside it (upstream
+   * `reenter`); `true` for the initial transition. A re-entering root transition has no domain.
+   */
   readonly reenter: boolean
+  /** The transition's own actions, which run after the exit actions and before the entry actions. */
   readonly actions: ReadonlyArray<ActionLike<TContext, TEvent>>
 }
 
-/**
- * The plan of one microstep (SCXML microstep procedure).
- *
- * @since 0.1.0
- * @category Models
- */
 /**
  * A range of a microstep's `actions`, `from` included and `to` not, and the actor ids whose
  * `sendTo` in it resolves after it.
@@ -97,11 +104,25 @@ export interface MicrostepTransition<TContext, TEvent extends EventObject> {
  * @category Models
  */
 export interface DeferredActorIds {
+  /** The index in `Microstep.actions` of the first action of the entered node's entry list. */
   readonly from: number
+  /** The index in `Microstep.actions` after the last action of that list (exclusive end). */
   readonly to: number
+  /**
+   * The ids of the node's invocations. A `sendTo` in the range that names one of them
+   * resolves its target after the range has run, once the invoked child exists.
+   */
   readonly ids: ReadonlyArray<string>
 }
 
+/**
+ * The plan of one microstep (SCXML microstep procedure): the next configuration, the exit
+ * and entry sets, the ordered action list with the completions placed in it, and the next
+ * history value. Planning runs no action and no guard; `runMicrostep` executes the plan.
+ *
+ * @since 0.1.0
+ * @category Models
+ */
 export interface Microstep<TContext, TEvent extends EventObject> {
   /**
    * Every active node after the microstep, in the order they became active (upstream
@@ -149,7 +170,12 @@ export interface Microstep<TContext, TEvent extends EventObject> {
  * @category Models
  */
 export interface DoneState<TContext, TEvent extends EventObject> {
+  /** The node that completes; its done event is `xstate.done.state.<this node's id>`. */
   readonly stateNode: StateNode<TContext, TEvent>
+  /**
+   * The final child whose output the done event carries, for a compound node; none for a
+   * parallel node, whose done event has no output.
+   */
   readonly finalStateNode: Option.Option<StateNode<TContext, TEvent>>
 }
 
@@ -162,6 +188,10 @@ export interface DoneState<TContext, TEvent extends EventObject> {
  * @category Models
  */
 export interface Completion<TContext, TEvent extends EventObject> {
+  /**
+   * How many of the microstep's `actions` run before this completion applies: an index into
+   * `actions`, the exclusive end of the range before it. Completions come in ascending order.
+   */
   readonly afterActions: number
   /** The nodes that complete, bottom-up, in the order their done events are raised. */
   readonly doneStates: ReadonlyArray<DoneState<TContext, TEvent>>
@@ -190,17 +220,31 @@ export type ResolvedHistoryValue<TContext, TEvent extends EventObject> = Readonl
  * error instead, and the entry points return the first one.
  */
 interface Walk {
+  /**
+   * The errors in the order the walk met them, pushed in place. The entry points report the
+   * first only (`firstError`); the walk itself goes on past each error.
+   */
   readonly errors: Array<MachineDefinitionError>
 }
 
+/** A walk with no error yet. Make a new one per entry-point call; a shared walk leaks errors across calls. */
 const newWalk = (): Walk => ({ errors: [] })
 
 /** What the exit and entry set computations read: the recorded history and the walk. */
 interface SetContext<TContext, TEvent extends EventObject> {
+  /**
+   * The history value the history states read: the one the microstep starts from for the
+   * conflict and exit sets, the one after the exits recorded for the entry set.
+   */
   readonly historyValue: ResolvedHistoryValue<TContext, TEvent>
+  /** Where a missing initial child or history default target is recorded. */
   readonly walk: Walk
 }
 
+/**
+ * Sorts state nodes into ascending document order by their `order`. Only nodes of one
+ * machine compare meaningfully: each machine numbers its own nodes from 0.
+ */
 const byDocumentOrder = <TContext, TEvent extends EventObject>(
   a: StateNode<TContext, TEvent>,
   b: StateNode<TContext, TEvent>
@@ -228,6 +272,10 @@ const distinct = <A>(items: Iterable<A>): ReadonlyArray<A> => Array.from(items).
 export const isAtomicStateNode = <TContext, TEvent extends EventObject>(stateNode: StateNode<TContext, TEvent>): boolean =>
   stateNode.type === "atomic" || stateNode.type === "final"
 
+/**
+ * Whether the node is a history state (`type: 'history'`). The entry set never adds such a
+ * node itself: entering it enters its record, or its default target.
+ */
 const isHistoryNode = <TContext, TEvent extends EventObject>(stateNode: StateNode<TContext, TEvent>): boolean =>
   stateNode.type === "history"
 
@@ -450,6 +498,11 @@ const getInitialStateNodesWithTheirAncestors = <TContext, TEvent extends EventOb
   )
 }
 
+/**
+ * {@link getAllStateNodes} with the walk that records each `initial` key that names no child
+ * (that compound node then stays without a child). The members come once each, in the
+ * insertion order of upstream's `Set`: the index walks visit the members they add.
+ */
 const completeConfiguration = <TContext, TEvent extends EventObject>(
   stateNodes: Iterable<StateNode<TContext, TEvent>>,
   walk: Walk
@@ -553,8 +606,8 @@ const getValueFromAdj = <TContext, TEvent extends EventObject>(
  * The state value of a configuration, completed first (upstream `getStateValue`): a
  * compound node with an atomic active child gives the child's key, any other node gives
  * an object of its active children, and an atomic child of a parallel node gives `{}`. The
- * nodes are of any meta, as upstream's `AnyStateNode`s (SD-22 amendment, goal journal
- * `2026-10-07-13-node-containers-any.md`).
+ * nodes are of any meta, as upstream's `AnyStateNode`s (SD-22 amendment of 2026-10-07 on
+ * the containers of state nodes, see docs/decisions.md).
  *
  * @since 0.1.0
  * @category Configuration
@@ -569,7 +622,8 @@ export const getStateValue = <TContext, TEvent extends EventObject>(
  * builds them from the node's config when the node is created): the node's
  * {@link StateNode.transitions} as a new list of `[descriptor, transitions]` entries with new
  * arrays, in declaration order, with the same definition objects, of any meta (SD-22
- * amendment, goal journal `2026-10-07-13-node-containers-any.md`). Upstream gives a native
+ * amendment of 2026-10-07 on the containers of state nodes, see docs/decisions.md). Upstream
+ * gives a native
  * `Map`; the port gives that `Map`'s entries in its order (SD-22, amended 2026-10-08). The
  * port formats them when it builds the machine.
  *
@@ -585,7 +639,8 @@ export const formatTransitions = <TContext, TEvent extends EventObject>(
  * The delayed transitions of a state node (upstream `getDelayedTransitions`, whose result
  * upstream keeps as the node's `after`): the node's {@link StateNode.after} as a new array,
  * one entry per transition of each `after` key in key order, each with its delay, of any
- * meta (SD-22 amendment, goal journal `2026-10-07-13-node-containers-any.md`). The port builds
+ * meta (SD-22 amendment of 2026-10-07 on the containers of state nodes, see
+ * docs/decisions.md). The port builds
  * them, and the `raise`/`cancel` entry and exit actions they need, when it builds the machine,
  * so a call adds no action (upstream's call pushes them on the node each time).
  *
@@ -766,8 +821,11 @@ export const configurationOfValue = <TContext, TEvent extends EventObject>(
  * @category Models
  */
 export interface ResolvedState<TContext, TEvent extends EventObject> {
+  /** The full configuration, in the order a snapshot holds it as `_nodes`. */
   readonly configuration: ReadonlyArray<StateNode<TContext, TEvent>>
+  /** The full state value, every node the partial value left open completed by default entry. */
   readonly value: StateValue
+  /** Whether the root is complete in the configuration; `resolveState` then gives status `done`. */
   readonly done: boolean
 }
 
@@ -827,7 +885,12 @@ export const resolveStateValue = <TContext, TEvent extends EventObject>(
  * @category Models
  */
 export interface NodeLookup<TContext, TEvent extends EventObject> {
+  /** The machine id, which the upstream "does not exist on machine" messages name. */
   readonly id: string
+  /**
+   * Every state node of the machine by its id, without the `#`. Empty for a node outside a
+   * machine, so only key paths resolve there and every `#id` lookup fails.
+   */
   readonly idMap: HashMap.HashMap<string, StateNode<TContext, TEvent>>
 }
 
@@ -959,7 +1022,9 @@ export const resolveTarget = <TContext, TEvent extends EventObject>(
 /**
  * Reads a snapshot's history value as the machine's own nodes: each recorded node is
  * looked up by id in the machine, so only nodes of this machine are restored. A recorded
- * id that names no node of the machine is left out (T2.54 warns about it on restore).
+ * id that names no node of the machine is left out here, silently; the machine's
+ * `restoreSnapshot` drops such an id earlier, with the upstream warning
+ * `Could not resolve StateNode for id: <id>`.
  *
  * @since 0.1.0
  * @category History
@@ -986,6 +1051,10 @@ const lookupOf = <TContext, TEvent extends EventObject>(stateNode: StateNode<TCo
 
 /** The default a history state takes when it has no record. */
 interface HistoryDefault<TContext, TEvent extends EventObject> {
+  /**
+   * The nodes the history state enters. Empty for a history state without a parent, and when
+   * the default names no node (the walk records that error).
+   */
   readonly target: ReadonlyArray<StateNode<TContext, TEvent>>
   /** Whether the default is the parent's initial transition, whose actions then run. */
   readonly isParentInitial: boolean
@@ -1191,6 +1260,7 @@ const removeConflictingTransitions = <TContext, TEvent extends EventObject>(
  * `statesForDefaultEntry` is read for membership only.
  */
 interface EntrySets<TContext, TEvent extends EventObject> extends SetContext<TContext, TEvent> {
+  /** Every node the microstep enters; the plan sorts it into document order before use. */
   readonly statesToEnter: MutableHashSet.MutableHashSet<StateNode<TContext, TEvent>>
   /** The nodes entered by default, whose initial transition's actions run. */
   readonly statesForDefaultEntry: MutableHashSet.MutableHashSet<StateNode<TContext, TEvent>>
@@ -1278,6 +1348,11 @@ const addAncestorStatesToEnter = <TContext, TEvent extends EventObject>(
   }
 }
 
+/**
+ * Adds the proper ancestors of `stateNode` below `toStateNode` (up to the root for none),
+ * each one, as no reentrancy domain limits them, with the missing regions of each parallel
+ * one (upstream `addProperAncestorStatesToEnter`).
+ */
 const addProperAncestorStatesToEnter = <TContext, TEvent extends EventObject>(
   stateNode: StateNode<TContext, TEvent>,
   toStateNode: Option.Option<StateNode<TContext, TEvent>>,
@@ -1320,6 +1395,10 @@ const computeEntrySet = <TContext, TEvent extends EventObject>(
 // MICROSTEP
 // ============================================================
 
+/**
+ * The walk's result: the first definition error it recorded, else `value`. The value is
+ * computed in full before this check, so a plan with an error is discarded, never returned.
+ */
 const firstError = <A>(walk: Walk, value: A): Result.Result<A, MachineDefinitionError> =>
   Option.match(Option.fromNullishOr(walk.errors[0]), {
     onNone: () => Result.succeed(value),
@@ -1563,9 +1642,16 @@ export const initialMicrostep = <TContext, TEvent extends EventObject>(
  * @category Models
  */
 export interface EngineContext<TContext, TEvent extends EventObject> {
+  /** The machine as the engine reads it: its root, id map, implementations and options. */
   readonly machine: StateNode.Machine<TContext, TEvent>
+  /**
+   * The snapshot that guards read, `stateIn` included. In an action list it is the snapshot
+   * at the start of the list; each action gets the current snapshot separately.
+   */
   readonly snapshot: MachineSnapshot<TContext, EventObject, Record<string, ActorRefBase>>
+  /** The event the macrostep handles at this point: the external event, or an internal one. */
   readonly event: TEvent
+  /** The actor's scope; a pure helper passes an inert one, whose action executor runs nothing. */
   readonly actorScope: ActorScopeService
 }
 
@@ -1625,7 +1711,7 @@ const matchCandidates = <TContext, TEvent extends EventObject>(
  * (upstream `getCandidates`): the exact descriptor's transitions first, then those of each
  * other descriptor that matches the event (`matchEventDescriptor`: `*` or a partial
  * descriptor such as `a.*`), longest first. Synchronous and of any transition meta, as
- * upstream's (SD-22 amendment, goal journal `2026-10-07-14-candidates-any.md`). It logs
+ * upstream's (SD-22 amendment of 2026-10-07 on `getCandidates`, see docs/decisions.md). It logs
  * nothing: the selection step (`next`) logs the warnings upstream prints for an invalid
  * partial descriptor, once per node and event type (see `memoizedCandidates`).
  *
@@ -1858,7 +1944,8 @@ const selectFromNode = <TContext, TEvent extends EventObject>(
  * The transitions that `stateNode` and its active descendants select for the event
  * (upstream `transitionNode`): the transition definitions of the selection, in selection
  * order, of any transition meta, or `undefined` when nothing is selected, as upstream's
- * (SD-22 amendment, goal journal `2026-10-07-14-candidates-any.md`). Guards run, so the
+ * (SD-22 amendment of 2026-10-07 on `getCandidates` and `transitionNode`, see
+ * docs/decisions.md). Guards run, so the
  * result is an Effect (SD-13); the guard errors are those of the microstep's selection.
  *
  * @since 0.1.0
@@ -2018,10 +2105,15 @@ const deferTarget = (name: string, params: SendToParams): Effect.Effect<Deferred
  * already (`@xstate.action`).
  */
 interface ExecutedAction {
+  /** What the engine must do for the action (assign, send, raise, ...); `NoOp` for a custom action. */
   readonly result: ActionResult
+  /** The children the action's spawn function created, by id; they join `children` before `result` applies. */
   readonly spawned: Readonly<Record<string, ActorRefBase>>
+  /** The params of this use, resolved against the context before the action; none when it has none. */
   readonly params: Option.Option<unknown>
+  /** The action type that the `@xstate.action` inspection event reports. */
   readonly type: string
+  /** Whether the action executor has reported the action already, so the engine must not report it again. */
   readonly custom: boolean
 }
 
@@ -2065,7 +2157,12 @@ const executeLog = (actorScope: ActorScopeService, entry: Types.Log): Effect.Eff
  * the name, and the cell the send reads its target from once the list resolves it.
  */
 interface DeferredTarget {
+  /** The target name as the send gave it: one of the list's deferred actor ids. */
   readonly name: string
+  /**
+   * Filled once, after the list: the actor the name resolves to, or the defect of a name that
+   * still resolves to nothing. The deferred send awaits it after the macrostep commits.
+   */
   readonly target: Deferred.Deferred<ActorRefBase>
   /** The params of the send's execution, whose `to` gets the resolved actor (upstream `retryResolveSendTo`) */
   readonly params: SendToParams
@@ -2078,10 +2175,18 @@ interface DeferredTarget {
  * `retryResolveSendTo` replaces it in the same object.
  */
 interface SendToParams {
+  /**
+   * Mutable on purpose: `runActions` writes the resolved actor here after the list, so the
+   * params object the action executor already holds shows it, as upstream's does.
+   */
   to: string | ActorRefBase | undefined
+  /** The target as the action gave it, when it gave a string; `undefined` for an actor reference. */
   readonly targetId: string | undefined
+  /** The event as the action gave it; delivery turns an `xstate.error` event into the sender's error event. */
   readonly event: EventObject
+  /** The send id that `cancel` names; `undefined` when the action gave none. */
   readonly id: string | undefined
+  /** The resolved delay in milliseconds; `undefined` for an immediate send. */
   readonly delay: number | undefined
 }
 
@@ -2090,7 +2195,9 @@ interface SendToParams {
  * `extra`): the internal queue and the actor ids whose `sendTo` resolves after the list.
  */
 interface ActionListExtra<TEvent extends EventObject> {
+  /** The macrostep's own queue, shared, not copied: a `raise` without a delay pushes onto it in place. */
   readonly internalQueue: InternalQueue<TEvent>
+  /** The invocation ids of the node whose entry list this is; empty for any other list. */
   readonly deferredActorIds: ReadonlyArray<string>
 }
 
@@ -2100,7 +2207,9 @@ interface ActionListExtra<TEvent extends EventObject> {
  * collected included, made them.
  */
 interface ActionListResult<TContext> {
+  /** The snapshot after the last action; the input snapshot itself when no action changed it. */
   readonly snapshot: MachineSnapshot<TContext, EventObject, Record<string, ActorRefBase>>
+  /** The sends whose target names the caller must resolve against `snapshot`, in action order. */
   readonly retries: ReadonlyArray<DeferredTarget>
 }
 
@@ -2397,7 +2506,9 @@ export type MicrostepWithActions<TSnapshot> = readonly [snapshot: TSnapshot, act
  * @category Macrostep
  */
 export interface MicrostepRecording {
+  /** The helper's inert scope. Only a macrostep that runs with this same object records. */
   readonly actorScope: ActorScopeService
+  /** The recorded microsteps, in order. The engine pushes onto it in place; the helper reads it afterwards. */
   readonly steps: Array<MicrostepWithActions<MachineSnapshot>>
 }
 
@@ -2767,7 +2878,9 @@ const runMicrostep = <TContext, TEvent extends EventObject>(
  * snapshot after each of its microsteps, in order.
  */
 interface MacrostepResult<TContext> {
+  /** The snapshot the macrostep ends with: stable, `done`, `stopped` or `error`. */
   readonly snapshot: EngineSnapshot<TContext>
+  /** The snapshot after each microstep, the first one included even when it selected nothing. */
   readonly microsteps: ReadonlyArray<EngineSnapshot<TContext>>
 }
 
