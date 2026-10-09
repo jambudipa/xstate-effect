@@ -340,7 +340,7 @@ const WALK_PROBLEM_ALLOWANCES: ReadonlyArray<readonly [file: string, problems: R
     `${DRAFT_SCRIPT}:14 createRequire(ROOT + "/package.json") is a loader reference that the walk cannot follow`,
     `${DRAFT_SCRIPT}: "typescript" names a package that no node_modules folder holds`
   ]],
-  [CLEAN_CLI, [`${CLEAN_CLI}:139 import(configPath) names a module the walk cannot read`]]
+  [CLEAN_CLI, [`${CLEAN_CLI}:296 import(configPath) names a module the walk cannot read`]]
 ]
 
 /** The allowed walk problems of a list: the allowances whose files the list holds. */
@@ -402,7 +402,7 @@ const git = (cwd: string, args: readonly ["init", "-q"] | readonly ["add", strin
 }
 
 /** The cleanup CLI's walk problem, which its allowance names by exact text. */
-const CLEAN_ALLOWANCE = `${CLEAN_CLI}:139 import(configPath) names a module the walk cannot read`
+const CLEAN_ALLOWANCE = `${CLEAN_CLI}:296 import(configPath) names a module the walk cannot read`
 
 /**
  * A fixture repository with the layout of the public repository: the package in packages/core/
