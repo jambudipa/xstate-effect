@@ -17,6 +17,19 @@ The package lives in [`packages/core`](./packages/core). Its
 from XState, the tests and the development commands. Run every command in `packages/core`,
 which holds the package's own lockfile.
 
+## Documentation
+
+The [documentation](./packages/core/docs/index.md) of the package is in four parts:
+
+- [Tutorials](./packages/core/docs/tutorials/index.md) — learn the package step by step, from a
+  first machine to child actors and tests.
+- [How-to guides](./packages/core/docs/how-to/index.md) — get a task done: persist an actor, give
+  a machine Effect services, test delayed transitions, port XState code, and more.
+- [Reference](./packages/core/docs/reference/index.md) — every entry point, function, option and
+  type.
+- [Explanation](./packages/core/docs/explanation/index.md) — the design: actors and scopes, how
+  events are processed, how failures surface, and how the package differs from XState.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE), which also reproduces the MIT notice of XState, from which the

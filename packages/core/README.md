@@ -102,10 +102,12 @@ XState's examples.
 |---|---|
 | `@jambudipa/xstate-effect` | `createMachine`, `setup`, `createActor`, the actions, guards and actor logic creators, the pure functions (`transition`, `initialTransition`, `getNextSnapshot`, `getInitialSnapshot`, `getMicrosteps`, `getNextTransitions`), `waitFor`, `toEffect`, `toPromise`, `SimulatedClock`, the built-in events and the types |
 | `@jambudipa/xstate-effect/actions` | `assign`, `sendTo`, `sendParent`, `raise`, `forwardTo`, `emit`, `cancel`, `log`, `spawnChild`, `stopChild`, `enqueueActions` and the port's extras |
-| `@jambudipa/xstate-effect/actors` | `fromPromise`, `fromCallback`, `fromObservable`, `fromEventObservable`, `fromTransition`, `createEmptyActor`, and the Effect-based `fromEffect` and `fromStream` |
-| `@jambudipa/xstate-effect/guards` | `stateIn`, `and`, `or`, `not`, `evaluateGuard` |
-| `@jambudipa/xstate-effect/graph` | `createTestModel`, `TestModel`, `getShortestPaths`, `getSimplePaths`, `getPathsFromEvents`, `getAdjacencyMap`, `toDirectedGraph`, `joinPaths`, `serializeSnapshot` |
+| `@jambudipa/xstate-effect/actors` | `fromPromise`, `fromCallback`, `fromObservable`, `fromEventObservable`, `fromTransition`, `fromTransitionWithInput`, `createEmptyActor`, and the Effect-based `fromEffect`, `fromEffectBackground`, `fromEffectRetry` and `fromStream` |
+| `@jambudipa/xstate-effect/guards` | `stateIn`, `stateNotIn`, `and`, `or`, `not`, `evaluateGuard` |
+| `@jambudipa/xstate-effect/graph` | `createTestModel`, `TestModel`, `getShortestPaths`, `getSimplePaths`, `getPathsFromEvents`, `getAdjacencyMap`, `adjacencyMapToArray`, `toDirectedGraph`, `getStateNodes`, `joinPaths`, `serializeSnapshot`, `createShortestPathsGen`, `createSimplePathsGen` and the traversal errors |
 | `@jambudipa/xstate-effect/dev` | `devToolsAdapter`, `registerService`, `getGlobal` |
+
+The [entry points reference](./docs/reference/entry-points.md) lists every name each one exports.
 
 ## How it differs from XState
 
@@ -125,8 +127,9 @@ main differences:
   `Subscription` objects; scoped Effects and Streams replace them (D6, SD-18).
 - **`Option` for absent values** — `snapshot.output`, `snapshot.error`, `event.output` of done
   events and the context of `fromObservable` (D8, SD-17).
-- **Unhandled errors** go to the actor's logger (`Effect.logError` by default) instead of being
-  rethrown asynchronously (SD-21).
+- **Unhandled errors** are logged with `Effect.logError`, through the program's Effect `Logger`,
+  instead of being rethrown asynchronously (SD-21); the actor's `logger` option receives only the
+  output of `log` actions.
 - **`SimulatedClock`** keeps upstream's method names, but `increment` and `set` return Effects
   (SD-28).
 - **An actor that errors** closes its scope, so its children stop too (SD-27).
@@ -158,9 +161,8 @@ the gate, the hook and where a new test goes.
 
 ## Documentation
 
-- [`docs/`](./docs/README.md) — tutorials, how-to guides, reference and explanation pages. Some
-  code samples there predate the port; `pnpm check-docs` type-checks and lints them and reports
-  the ones that fail.
+- [`docs/`](./docs/index.md) — tutorials, how-to guides, reference and explanation pages. Every
+  code sample there compiles and lints; `pnpm check-docs` checks them.
 - [`test/upstream/CONFORMANCE.md`](./test/upstream/CONFORMANCE.md) — the conformance ledger.
 - [`docs/decisions.md`](./docs/decisions.md) — the decisions D1–D20 and SD-1–SD-28.
 - [`llms.txt`](./llms.txt) — a short summary of the package for language models.
