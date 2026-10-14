@@ -23,9 +23,10 @@
  *   a transition to the root without `reenter` re-enters the root's initial child (an `initial`
  *   key that names no child keeps the upstream message: INV-1 asserts it, 433c4de2); the
  *   helpers on node lists, paths and history defaults; the node transformations and predicates.
+ * - Emitted events (`src/Actor.ts`): the `emissions` stream ends when the actor ends.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Chunk, Deferred, Effect, Equal, Exit, HashMap, Inspectable, Option, Predicate, Result, Stream } from "effect"
+import { Cause, Chunk, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ActorClass, allocateChild, buildChild, createSpawnFunction, restoreChild } from "../../src/Actor.js"
 import { ActorScope, type ActorScopeService, createGuardContext } from "../../src/ActorLogic.js"
@@ -35,6 +36,7 @@ import {
   assign,
   createActor,
   createMachine,
+  emit,
   Errors,
   type EventObject,
   fromTransition,
@@ -1047,4 +1049,35 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
     })
   )
 
+  it.effect("[COV-1] the emissions stream ends when the actor stops or is done, after the last event it gives; a stream run after the end ends at once", () =>
+    Effect.gen(function* () {
+      const machine = createMachine({
+        types: {} as { events: { type: "PING" } | { type: "FINISH" }; emitted: { type: "pong"; n: number } },
+        initial: "on",
+        states: {
+          on: { on: { PING: { actions: emit({ type: "pong", n: 1 }) }, FINISH: { target: "done", actions: emit({ type: "pong", n: 2 }) } } },
+          done: { type: "final" },
+        },
+      })
+
+      const stopped = yield* createActor(machine)
+      const stoppedStream = yield* Effect.forkChild(Stream.runCollect(stopped.emissions), { startImmediately: true })
+      yield* stopped.start
+      yield* stopped.send({ type: "PING" })
+      yield* stopped.stop
+      const fromStopped = yield* Fiber.join(stoppedStream)
+
+      const finished = yield* createActor(machine)
+      const finishedStream = yield* Effect.forkChild(Stream.runCollect(finished.emissions), { startImmediately: true })
+      yield* finished.start
+      yield* finished.send({ type: "PING" })
+      yield* finished.send({ type: "FINISH" })
+      const fromFinished = yield* Fiber.join(finishedStream)
+      const afterEnd = yield* Stream.runCollect(finished.emissions)
+
+      assert.deepStrictEqual(Chunk.toReadonlyArray(Chunk.fromIterable(fromStopped)).map((event) => event.n), [1])
+      assert.deepStrictEqual(Chunk.toReadonlyArray(Chunk.fromIterable(fromFinished)).map((event) => event.n), [1, 2])
+      assert.strictEqual(Chunk.size(Chunk.fromIterable(afterEnd)), 0)
+    })
+  )
 })

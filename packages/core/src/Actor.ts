@@ -336,10 +336,14 @@ export interface Actor<
   ) => Readable<TSelected>
 
   /**
-   * Stream of emitted events.
+   * Stream of emitted events: each event the actor emits after the stream starts to run,
+   * after the macrostep that emits it commits. The stream ends when the actor ends (stop,
+   * done or error), after the last event it gives; a stream run after the end ends at once.
    *
    * This is the Effect-idiomatic way to observe emitted events,
-   * allowing use of all Stream combinators.
+   * allowing use of all Stream combinators. The stream subscribes when it runs, not when it is
+   * built: a stream forked with `Effect.forkScoped` starts later, after the sends that follow
+   * the fork. Fork it with `{ startImmediately: true }` to receive the events of those sends.
    *
    * @example
    * ```ts
@@ -1085,8 +1089,13 @@ const build = <
     // runs twice (upstream adds `handler.bind(undefined)`)
     const eventListeners = yield* Ref.make(HashMap.empty<string, ReadonlyArray<EmitListener<TEmitted>>>())
 
-    // Create PubSub for emissions (Effect-idiomatic API)
-    const emissionsPubSub = yield* PubSub.unbounded<TEmitted>()
+    // The emitted events of the `emissions` streams, each after the macrostep that emits it
+    // commits; `Option.none()` follows the last one once the actor has ended
+    const emissionsPubSub = yield* PubSub.unbounded<Option.Option<TEmitted>>()
+
+    // Set when the actor has ended, before the end of the `emissions` streams is published: a
+    // stream that runs after it ends at once
+    const emissionsEnded = yield* Ref.make(false)
 
     // Create deferred effects queue
     const deferredEffects = yield* Ref.make(Chunk.empty<Effect.Effect<void>>())
@@ -1354,6 +1363,10 @@ const build = <
         yield* Scope.close(lifetime, Exit.void)
         // The last item ends every `changes` stream, and a stream run later gives its snapshot
         yield* SubscriptionRef.set(streamItems, { snapshot: yield* SubscriptionRef.get(snapshotRef), last: true })
+        // The end of every `emissions` stream, after the last event it gives (upstream
+        // `_complete` drops the `on` listeners); a stream run later ends at once
+        yield* Ref.set(emissionsEnded, true)
+        yield* PubSub.publish(emissionsPubSub, Option.none())
         const waiting = yield* Ref.getAndSet(pendingSends, [])
         yield* Effect.forEach(waiting, (processed) => Deferred.done(processed, Exit.void), { discard: true })
         yield* Deferred.done(ended, Exit.void)
@@ -1613,7 +1626,7 @@ const build = <
       getPersistedSnapshot,
 
       get emissions(): Stream.Stream<TEmitted> {
-        return Stream.fromPubSub(emissionsPubSub)
+        return makeEmissions()
       },
 
       send,
@@ -1888,8 +1901,8 @@ const build = <
       // of a macrostep, so the listeners run after the commit and read the new snapshot (A6)
       emit: (event) =>
         Effect.gen(function* () {
-          // Publish to PubSub (Effect-idiomatic API)
-          yield* PubSub.publish(emissionsPubSub, event as TEmitted)
+          // The `emissions` streams first
+          yield* PubSub.publish(emissionsPubSub, Option.some(event as TEmitted))
 
           // Then the `on` listeners, as upstream's loop calls them: one at a time, each to its
           // end, the listeners of the event's type first and then the "*" ones, each in the order
@@ -2059,6 +2072,23 @@ const build = <
           Stream.takeUntil((snapshot) => snapshot.status === "done")
         )
       )
+    )
+
+    // The events the actor emits from the time the stream runs, each after the macrostep that
+    // emits it commits; the stream ends when the actor ends (stop, done or error), after the
+    // last event it gives, and a stream run after the end ends at once. The subscription comes
+    // before the check, and `finish` sets the flag before it publishes the end, so a stream
+    // that finds the flag unset receives the end. Each read of the getter builds a new stream.
+    const makeEmissions = (): Stream.Stream<TEmitted> => Stream.unwrap(
+      Effect.gen(function* () {
+        const subscription = yield* PubSub.subscribe(emissionsPubSub)
+        return (yield* Ref.get(emissionsEnded))
+          ? Stream.empty
+          : Stream.fromSubscription(subscription).pipe(
+              Stream.takeWhile(Option.isSome),
+              Stream.map((emitted) => emitted.value)
+            )
+      })
     )
 
     /**
