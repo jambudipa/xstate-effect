@@ -1651,7 +1651,9 @@ export interface ParameterizedGuard<TContext, TEvent extends EventObject> {
  * a `{ type, params }` use of one, an inline function, or a port `GuardDefinition` of any
  * params type (D15), which the built-in `and`, `or`, `not`, `stateIn` and `when` return.
  * `TNames` holds the guards a name may name, with their params (see
- * {@link ImplementationNames}; any name and any params by default).
+ * {@link ImplementationNames}; any name and any params by default). With named guards, a
+ * built-in `and`, `or` or `not` written inline names only those guards, each with params of
+ * its type, as in a setup's `guards` record (XState `_out_TGuard`).
  *
  * @since 0.1.0
  * @category Types
@@ -1659,7 +1661,16 @@ export interface ParameterizedGuard<TContext, TEvent extends EventObject> {
 export type Guard<TContext, TEvent extends EventObject, TNames extends ImplementationNames = ImplementationNames> =
   | GuardReference<TContext, TEvent, TNames["guards"]>
   | GuardPredicate<TContext, TEvent>
-  | Pick<GuardDefinition<TContext, TEvent, never>, "type" | "predicate">
+  | (Pick<GuardDefinition<TContext, TEvent, never>, "type" | "predicate"> & ReferencedGuardsCheck<TNames["guards"]>)
+
+/**
+ * The check an inline built-in guard passes in a config with named guards: the guards it
+ * names (its `"~guards"`, see {@link ReferencedGuards}) are among `TGuards`. With the wide
+ * default any guard passes.
+ */
+type ReferencedGuardsCheck<TGuards extends ParameterizedObject> = string extends TGuards["type"]
+  ? unknown
+  : { readonly "~guards"?: TGuards }
 
 /**
  * A use of a named guard as a config writes it (as {@link ActionReference} for actions):

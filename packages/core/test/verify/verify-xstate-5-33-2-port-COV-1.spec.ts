@@ -31,6 +31,8 @@
  * - Requirements (`src/Types.ts`, `src/setup.ts`, `src/StateMachine.ts`, SD-8): a setup
  *   machine requires the services of its config's inline actions and inline logic, and
  *   `provide` adds the services of the given implementations.
+ * - Guard names (`src/Types.ts`): an inline `and`, `or` or `not` in a setup machine's config
+ *   names only the setup's guards, each with params of its type.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Chunk, Context, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
@@ -60,6 +62,7 @@ import {
   spawnChild,
   stopChild,
 } from "../../src/index.js"
+import { and, not, or } from "../../src/guards/index.js"
 import * as Persistence from "../../src/persistence.js"
 import { resolveReferencedActor } from "../../src/spawn.js"
 import * as StateNode from "../../src/StateNode.js"
@@ -1258,6 +1261,54 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
 
       assert.deepStrictEqual(sent, ["hello"])
       assert.deepStrictEqual(lines, ["record"])
+    })
+  )
+
+  it.effect("[COV-1] an inline and, or or not in a setup machine names only the setup's guards, each with params of its type", () =>
+    Effect.gen(function* () {
+      const guarded = setup({
+        types: {} as { context: { open: boolean }; events: { type: "GO" } },
+        guards: {
+          isOpen: ({ context }) => context.open,
+          isLocked: () => false,
+          under: (_, params: { readonly max: number }) => params.max > 1,
+        },
+      })
+      const machine = guarded.createMachine({
+        context: { open: true },
+        initial: "waiting",
+        states: {
+          waiting: {
+            on: { GO: { target: "gone", guard: and(["isOpen", not("isLocked"), { type: "under", params: { max: 2 } }]) } },
+          },
+          gone: {},
+        },
+      })
+      // Never called: each config is a type error, which the directive above it asserts
+      const unknownNames = () => [
+        guarded.createMachine({
+          context: { open: true },
+          // @ts-expect-error the setup has no guard named isClosed
+          on: { GO: { guard: and(["isOpen", "isClosed"]) } },
+        }),
+        guarded.createMachine({
+          context: { open: true },
+          // @ts-expect-error the guard under needs its params
+          on: { GO: { guard: or(["isOpen", "under"]) } },
+        }),
+        guarded.createMachine({
+          context: { open: true },
+          // @ts-expect-error the setup has no guard named isAjar
+          on: { GO: { guard: not("isAjar") } },
+        }),
+      ]
+
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      yield* actor.send({ type: "GO" })
+
+      assert.strictEqual((yield* actor.getSnapshot).value, "gone")
+      assert.strictEqual(typeof unknownNames, "function")
     })
   )
 })
