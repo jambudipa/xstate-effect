@@ -8,6 +8,8 @@
  * class follows its JSDoc (SD-28, P11c, DEV-75): an unknown id clears nothing, and a move made
  * while the clock fires its timers moves the end of the move that is firing. `waitFor` ends
  * with the signal's reason when the signal aborts, also when it aborts during the first check.
+ * The pure transition functions type a machine's named actions with their params beside the
+ * special built-in actions (upstream `ExecutableActionsFrom`).
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Logger, Option } from "effect"
@@ -24,11 +26,15 @@ import {
   fromTransition,
   getInitialMicrosteps,
   getInitialSnapshot,
+  getMicrosteps,
   getNextSnapshot,
+  initialTransition,
   makeSimulatedClockEffect,
   SimulatedClock,
   raise,
+  setup,
   TimeTravelError,
+  transition,
   waitFor,
 } from "../../src/index.js"
 import { guardEvaluationFailed, infiniteLoop } from "./upstream-messages.js"
@@ -401,6 +407,37 @@ describe("COV-3 test helpers (src/testing)", () => {
         )
       )
       assert.strictEqual(reason, "stop waiting")
+    })
+  )
+
+  it.effect("[COV-3] the pure transition functions type a machine's named actions with their params, beside the special built-in actions", () =>
+    Effect.gen(function* () {
+      const machine = setup({
+        types: {} as { events: { type: "GO" } },
+        actions: { track: (_, params: { readonly id: number }) => void params },
+      }).createMachine({
+        entry: { type: "track", params: { id: 1 } },
+        on: { GO: { actions: [{ type: "track", params: { id: 2 } }, raise({ type: "GO" }, { delay: 10 })] } },
+      })
+
+      // Each `action.type === "track"` compiles only when the action type names `track` with its params
+      const [initial, initialActions] = yield* initialTransition(machine)
+      const initialIds = initialActions.flatMap((action) => (action.type === "track" ? [action.params.id] : []))
+      const [, nextActions] = yield* transition(machine, initial, { type: "GO" })
+      const nextIds = nextActions.flatMap((action) => (action.type === "track" ? [action.params.id] : []))
+      const delays = nextActions.flatMap((action) => (action.type === "xstate.raise" ? [action.params.delay] : []))
+      const steps = yield* getMicrosteps(machine, initial, { type: "GO" })
+      const stepIds = steps.flatMap(([, actions]) => actions.flatMap((action) => (action.type === "track" ? [action.params.id] : [])))
+      const initialSteps = yield* getInitialMicrosteps(machine)
+      const initialStepIds = initialSteps.flatMap(([, actions]) =>
+        actions.flatMap((action) => (action.type === "track" ? [action.params.id] : []))
+      )
+
+      assert.deepStrictEqual(initialIds, [1])
+      assert.deepStrictEqual(nextIds, [2])
+      assert.deepStrictEqual(delays, [10])
+      assert.deepStrictEqual(stepIds, [2])
+      assert.deepStrictEqual(initialStepIds, [1])
     })
   )
 })

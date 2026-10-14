@@ -22,7 +22,7 @@ import { allocateChild, buildChild, restoreChild } from "../Actor.js"
 import { GuardError, TransitionError } from "../Errors.js"
 import type { InitializationError } from "../Errors.js"
 import { ACTOR_REF_TYPE, type PersistedActorRef } from "../persistence.js"
-import type { AnyStateMachine, StateMachineTypeId } from "../StateMachine.js"
+import type { AnyStateMachine, StateMachine, StateMachineTypeId } from "../StateMachine.js"
 import { getProperAncestors, isAtomicStateNode, MicrostepRecorder, type MicrostepRecording } from "../stateUtils.js"
 import type { ParameterizedObject, SnapshotFrom, TransitionDefinition } from "../Types.js"
 
@@ -374,16 +374,52 @@ export type SpecialExecutableAction = ExecutableSpawnAction | ExecutableRaiseAct
 /** The executable actions of a logic with this snapshot type: a machine's, none for any other logic. */
 type ExecutableActionsOf<TSnapshot> = TSnapshot extends Snap.MachineSnapshot ? SpecialExecutableAction : never
 
+/** The params of an action implementation's uses: the second parameter of its function form. */
+type ImplementationParamsOf<TImplementation> = TImplementation extends (args: never, params: infer TParams) => unknown ? TParams : never
+
 /**
- * The actions the transitions of a logic return (upstream `ExecutableActionsFrom`): the
- * special built-in actions for a machine, none for any other logic. The port's machine type
- * does not carry the names of its actions, so upstream's `ToExecutableAction` of each named
- * action is not part of it.
+ * The named actions of a machine (upstream `ToExecutableAction<TAction>` of each): one for each
+ * action its `provide` takes by name (a setup's actions, or the actions its `types` declares),
+ * with the params of that action. A machine that names no action, and any other logic, has none.
+ */
+type NamedExecutableActions<TLogic> = TLogic extends StateMachine<
+  infer _Id,
+  infer _TContext,
+  infer _TEvent,
+  infer _TInput,
+  infer _TOutput,
+  infer _TEmitted,
+  infer _R,
+  infer _TStateMeta,
+  infer _TTransitionMeta,
+  infer _TStateSchema,
+  infer TProvided,
+  infer _TStateValue,
+  infer _TChildren,
+  infer _TTag
+>
+  ? TProvided extends { readonly actions?: infer TActions }
+    ? string extends keyof NonNullable<TActions> ? never
+      : {
+          readonly [K in keyof NonNullable<TActions> & string]: ToExecutableAction<{
+            readonly type: K
+            readonly params: ImplementationParamsOf<NonNullable<TActions>[K]>
+          }>
+        }[keyof NonNullable<TActions> & string]
+    : never
+  : never
+
+/**
+ * The actions the transitions of a logic return (upstream `ExecutableActionsFrom`): for a
+ * machine, the special built-in actions and each action the machine names (a setup's actions,
+ * or the actions its `types` declares), with the params of its uses; none for any other
+ * logic. An inline action, and the other built-in actions, come back too, as upstream's do,
+ * but neither type names them.
  *
  * @since 0.1.0
  * @category Testing
  */
-export type ExecutableActionsFrom<TLogic> = ExecutableActionsOf<SnapshotFrom<TLogic>>
+export type ExecutableActionsFrom<TLogic> = ExecutableActionsOf<SnapshotFrom<TLogic>> | NamedExecutableActions<TLogic>
 
 /**
  * The executable form of a named action (upstream `ToExecutableAction`): its type and
@@ -427,7 +463,7 @@ export const transition = <TLogic extends AnyActorLogic>(
   snapshot: TransitionTypes<TLogic>[0],
   event: TransitionTypes<TLogic>[1]
 ): Effect.Effect<
-  readonly [nextSnapshot: TransitionTypes<TLogic>[0], actions: Array<ExecutableActionsOf<TransitionTypes<TLogic>[0]>>],
+  readonly [nextSnapshot: TransitionTypes<TLogic>[0], actions: Array<ExecutableActionsFrom<TLogic>>],
   TransitionTypes<TLogic>[3] | GuardError,
   Exclude<TransitionTypes<TLogic>[2], ActorScope>
 > =>
@@ -435,7 +471,7 @@ export const transition = <TLogic extends AnyActorLogic>(
     const actions = yield* Ref.make(Chunk.empty<CustomActionExecution>())
     const nextSnapshot = yield* runTransition(logic, snapshot, event, collectingActorScope(snapshot, actions))
     // The actions as upstream types them for this logic
-    const executable = Chunk.toArray(yield* Ref.get(actions)) as Array<ExecutableActionsOf<TransitionTypes<TLogic>[0]>>
+    const executable = Chunk.toArray(yield* Ref.get(actions)) as Array<ExecutableActionsFrom<TLogic>>
     return [nextSnapshot, executable] as const
   })
 
@@ -455,12 +491,14 @@ export const initialTransition = <
   TEvent extends EventObject,
   TInput,
   TEmitted extends EventObject,
-  R
+  R,
+  // The logic as given, for the actions it names
+  TLogic = unknown
 >(
-  logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>,
+  logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & TLogic,
   ...[input]: undefined extends TInput ? [input?: TInput] : [input: TInput]
 ): Effect.Effect<
-  readonly [nextSnapshot: TSnapshot, actions: Array<ExecutableActionsOf<TSnapshot>>],
+  readonly [nextSnapshot: TSnapshot, actions: Array<ExecutableActionsOf<TSnapshot> | NamedExecutableActions<TLogic>>],
   InitializationError,
   Exclude<R, Scope.Scope>
 > =>
@@ -476,7 +514,7 @@ export const initialTransition = <
         Effect.scoped
       )
     // The actions as upstream types them for this logic
-    const executable = Chunk.toArray(yield* Ref.get(actions)) as Array<ExecutableActionsOf<TSnapshot>>
+    const executable = Chunk.toArray(yield* Ref.get(actions)) as Array<ExecutableActionsOf<TSnapshot> | NamedExecutableActions<TLogic>>
     return [snapshot, executable] as const
   })
 
@@ -518,7 +556,7 @@ export const getMicrosteps = <TMachine extends AnyStateMachine>(
   snapshot: TransitionTypes<TMachine>[0],
   event: TransitionTypes<TMachine>[1]
 ): Effect.Effect<
-  Array<readonly [snapshot: TransitionTypes<TMachine>[0], actions: Array<ExecutableActionsOf<TransitionTypes<TMachine>[0]>>]>,
+  Array<readonly [snapshot: TransitionTypes<TMachine>[0], actions: Array<ExecutableActionsFrom<TMachine>>]>,
   TransitionTypes<TMachine>[3] | GuardError,
   Exclude<TransitionTypes<TMachine>[2], ActorScope>
 > =>
@@ -529,7 +567,7 @@ export const getMicrosteps = <TMachine extends AnyStateMachine>(
       // The snapshots of this machine's microsteps, and their actions as upstream types them
       ([, steps]) =>
         steps as unknown as Array<
-          readonly [TransitionTypes<TMachine>[0], Array<ExecutableActionsOf<TransitionTypes<TMachine>[0]>>]
+          readonly [TransitionTypes<TMachine>[0], Array<ExecutableActionsFrom<TMachine>>]
         >
     )
   })
@@ -551,13 +589,15 @@ export const getInitialMicrosteps = <
   TEvent extends EventObject,
   TInput,
   TEmitted extends EventObject,
-  R
+  R,
+  // The machine as given, for the actions it names
+  TMachine = unknown
 >(
   // A state machine, as upstream's `T extends AnyStateMachine`; its logic types give the input
-  machine: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & Pick<AnyStateMachine, StateMachineTypeId>,
+  machine: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & Pick<AnyStateMachine, StateMachineTypeId> & TMachine,
   ...[input]: undefined extends TInput ? [input?: TInput] : [input: TInput]
 ): Effect.Effect<
-  Array<readonly [snapshot: TSnapshot, actions: Array<ExecutableActionsOf<TSnapshot>>]>,
+  Array<readonly [snapshot: TSnapshot, actions: Array<ExecutableActionsOf<TSnapshot> | NamedExecutableActions<TMachine>>]>,
   InitializationError | TransitionError | GuardError,
   Exclude<Exclude<R, ActorScope>, Scope.Scope>
 > =>
@@ -576,7 +616,7 @@ export const getInitialMicrosteps = <
         // `getInitialMicrosteps` throws it
         Option.match(Option.filter(snapshot.error, () => snapshot.status === "error"), {
           onNone: () =>
-            Effect.succeed(steps as unknown as Array<readonly [TSnapshot, Array<ExecutableActionsOf<TSnapshot>>]>),
+            Effect.succeed(steps as unknown as Array<readonly [TSnapshot, Array<ExecutableActionsOf<TSnapshot> | NamedExecutableActions<TMachine>>]>),
           onSome: (error) =>
             error instanceof TransitionError || error instanceof GuardError ? Effect.fail(error) : Effect.die(error),
         })
