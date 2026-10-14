@@ -8,9 +8,11 @@ sources: [packages/core/src/Types.ts, packages/core/src/setup.ts, packages/core/
 
 > **TL;DR:** The extractor types read one part of a setup, a machine, an actor logic, an actor or
 > a reference: `ContextFrom`, `EventFrom`, `SnapshotFrom`, `InputFrom`, `OutputFrom`,
-> `ActorRefFrom` and the others. `OutputFrom` gives the output type itself, not the `Option` that
-> `snapshot.output` holds. A type that an extractor does not recognise gives `never`. The root
-> also exports XState's general type utilities, such as `IsNever`, `Compute` and `SingleOrArray`.
+> `ActorRefFrom` and the others; `OutputFrom` gives the output type itself, not the `Option` that
+> `snapshot.output` holds. The requirement extractors, such as `Types.ConfigRequirementsOf`, give
+> the Effect services that an action, a config or a set of implementations needs. A type that an
+> extractor does not recognise gives `never`. The root also exports XState's general type
+> utilities, such as `IsNever`, `Compute` and `SingleOrArray`.
 
 Every item on this page is a type-only export of `@jambudipa/xstate-effect`. Import it with
 `import type` or with the `type` modifier. No item has a value at run time.
@@ -25,6 +27,7 @@ Every item on this page is a type-only export of `@jambudipa/xstate-effect`. Imp
 | [`ActionsFrom<T>`](#actorsfrom-actionsfrom-guardsfrom-and-delaysfrom) | A setup | The `actions` record of the setup |
 | [`GuardsFrom<T>`](#actorsfrom-actionsfrom-guardsfrom-and-delaysfrom) | A setup | The `guards` record of the setup |
 | [`DelaysFrom<T>`](#actorsfrom-actionsfrom-guardsfrom-and-delaysfrom) | A setup | The `delays` record of the setup |
+| [`SchemaTypeOr<TSchema, TDefault>`](#schematypeor) | A schema, or `undefined` | The decoded type of the schema, or `TDefault` |
 | [`ActorRefFrom<T>`](#actorreffrom) | An actor logic, a `Promise`, or a function that returns one | The reference type of the logic |
 | [`ActorRefFromLogic<T>`](#actorreffromlogic) | An actor logic | The reference type of the logic |
 | [`SnapshotFrom<T>`](#snapshotfrom) | An actor logic, an actor, an actor reference, or a function that returns one | The snapshot type |
@@ -38,6 +41,11 @@ Every item on this page is a type-only export of `@jambudipa/xstate-effect`. Imp
 | [`TagsFrom<TMachine>`](#tagsfrom) | A machine | The tags that `snapshot.hasTag` takes |
 | [`MachineImplementationsFrom<T>`](#machineimplementationsfrom) | A machine, or a function that returns one | The implementations that `machine.provide` takes |
 | [`StateSchemaFrom<T>`](#stateschemafrom) | A machine | The state schema of the machine |
+| [`Types.EffectRequirementsOf<T>`](#effectrequirementsof) | Any type | What the Effect `T` requires |
+| [`Types.ActionRequirementsOf<TAction>`](#actionrequirementsof) | An action, or an array of actions | The services that its Effect needs |
+| [`Types.ConfigRequirementsOf<TConfig>`](#configrequirementsof) | A machine config, as it is written | The services of its inline actions and inline actor logic |
+| [`Types.ImplementationsRequirementsOf<T>`](#implementationsrequirementsof) | The implementations given to `machine.provide` | The services that they need |
+| [`SetupRequirements<TActions, TActors>`](#setuprequirements) | The `actions` and `actors` records of a setup | The services that they need |
 | [General type utilities](#general-type-utilities) | Any types | XState's helper types, from `AnyFunction` to `Values` |
 
 ## Setup extractors
@@ -124,6 +132,24 @@ export type Actors = ActorsFrom<typeof shop> // { readonly load: PromiseActorLog
 export type Actions = ActionsFrom<typeof shop> // { readonly track: () => void }
 export type Guards = GuardsFrom<typeof shop> // { readonly isReady: () => true }
 export type Delays = DelaysFrom<typeof shop> // { readonly soon: 100 }
+```
+
+### SchemaTypeOr
+
+`SchemaTypeOr<TSchema, TDefault>` gives the decoded type of an Effect Schema
+(`Schema.Schema.Type<TSchema>`) when `TSchema` is a schema, and `TDefault` for any other type,
+such as `undefined`. `setupWithSchema` uses it for the input and the output types of its
+machines: the decoded type of the `input` or `output` schema, or `NonReducibleUnknown` and
+`unknown` without one. See [setupWithSchema](./setup.md#setupwithschema).
+
+```ts
+import { Schema } from "effect"
+import type { NonReducibleUnknown, SchemaTypeOr } from "@jambudipa/xstate-effect"
+
+export const Input = Schema.Struct({ start: Schema.NumberFromString })
+
+export type WithSchema = SchemaTypeOr<typeof Input, NonReducibleUnknown> // { readonly start: number }
+export type WithoutSchema = SchemaTypeOr<undefined, NonReducibleUnknown> // NonReducibleUnknown
 ```
 
 ## Actor and logic extractors
@@ -373,6 +399,81 @@ export const machine = setup({}).createMachine({ id: "door", initial: "closed", 
 export type Schema = StateSchemaFrom<typeof machine> // { readonly id: "door"; readonly states: { … } }
 ```
 
+## Requirement extractors
+
+These types give the Effect services (the `R` of an Effect) that a part of a machine needs. A
+`setup` machine's requirements are built from them; see
+[setup.createMachine](./setup.md#requirements) and [machine.provide](./create-machine.md#machineprovide).
+The first four are members of the `Types` namespace only; `SetupRequirements` is a root export.
+
+### EffectRequirementsOf
+
+`Types.EffectRequirementsOf<T>` gives `R` when `T` is an `Effect<A, E, R>`. Any other type gives
+`never`, and so does `any`: a mock such as `vi.fn()` returns `any`, which would otherwise require
+`unknown`.
+
+### ActionRequirementsOf
+
+`Types.ActionRequirementsOf<TAction>` gives the services that an action needs.
+
+| `TAction` | Result |
+|---|---|
+| A function | What the Effect that it returns requires; `never` when it returns no Effect. |
+| An action definition (an object with `exec`) | What the Effect that its `exec` returns requires. |
+| An array of actions | The union of the result for each action. |
+| A name, or `{ type, params }` | `never`: the implementation of that name counts where it is given. |
+
+### ConfigRequirementsOf
+
+`Types.ConfigRequirementsOf<TConfig>` gives the services that a machine config needs, as it is
+written: the union of `ActionRequirementsOf` for its `entry` and `exit`, for the `actions` of
+each transition in `on`, `always`, `after` and `onDone`, and for the `actions` of an `invoke`'s
+`onDone`, `onError` and `onSnapshot`; the requirements of each `invoke` `src` that is actor
+logic, not a name; and the result for each state in `states`, at any depth. A `states` record
+whose keys are typed as `string` adds nothing, and so do the `actions` of an `initial` object
+and of a `route`.
+
+### ImplementationsRequirementsOf
+
+`Types.ImplementationsRequirementsOf<TImplementations>` gives the services that a set of
+implementations needs: `ActionRequirementsOf` of each action in `actions`, and the requirements
+of each actor logic in `actors`. Guards and delays add nothing. `machine.provide` adds this type
+to the requirements of the machine it gives.
+
+### SetupRequirements
+
+`SetupRequirements<TActions, TActors>` gives the services that the records of a setup need:
+`ActionRequirementsOf` of each action in `TActions`, and the requirements of each actor logic in
+`TActors`. A record that the setup does not give (its `string`-keyed default) adds nothing.
+
+```ts
+import { Context, Effect } from "effect"
+import type { Types } from "@jambudipa/xstate-effect"
+
+class Mailer extends Context.Service<Mailer, {
+  readonly send: (to: string) => Effect.Effect<void>
+}>()("app/Mailer") {}
+
+export const sendWelcome = () =>
+  Effect.gen(function* () {
+    const mailer = yield* Mailer
+    yield* mailer.send("user@example.com")
+  })
+
+export type FromEffect = Types.EffectRequirementsOf<ReturnType<typeof sendWelcome>> // Mailer
+export type FromAction = Types.ActionRequirementsOf<typeof sendWelcome> // Mailer
+export type FromName = Types.ActionRequirementsOf<"sendWelcome"> // never
+
+export type FromConfig = Types.ConfigRequirementsOf<{
+  readonly initial: "idle"
+  readonly states: { readonly idle: { readonly exit: typeof sendWelcome } }
+}> // Mailer
+
+export type FromImplementations = Types.ImplementationsRequirementsOf<{
+  readonly actions: { readonly welcome: typeof sendWelcome }
+}> // Mailer
+```
+
 ## General type utilities
 
 The root exports the helper types of XState's `types.ts` with the same names and formulas. They
@@ -429,9 +530,11 @@ export declare function pick<T extends string>(values: ReadonlyArray<T>, fallbac
 
 The root also exports `Types`, the namespace of the module that defines most machine and actor
 types. The extractors from `ActorRefFrom` to `StateSchemaFrom` on this page are also its members,
-for example `Types.SnapshotFrom`. The setup extractors (`ContextFrom`, `EventFrom`, `ActorsFrom`,
-`ActionsFrom`, `GuardsFrom` and `DelaysFrom`) and the general type utilities are not members of
-`Types`.
+for example `Types.SnapshotFrom`. `EffectRequirementsOf`, `ActionRequirementsOf`,
+`ConfigRequirementsOf` and `ImplementationsRequirementsOf` are members of `Types` only: the root
+does not export them by name. The setup extractors (`ContextFrom`, `EventFrom`, `ActorsFrom`,
+`ActionsFrom`, `GuardsFrom`, `DelaysFrom` and `SchemaTypeOr`), `SetupRequirements` and the
+general type utilities are not members of `Types`.
 
 ```ts
 import { createMachine, type Types } from "@jambudipa/xstate-effect"

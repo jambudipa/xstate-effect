@@ -111,7 +111,7 @@ export declare function createMachine<
 | `TInput` | `unknown` | `types.input`. |
 | `TOutput` | `unknown` | `types.output`. |
 | `TEmitted` | `EventObject` | `types.emitted`. |
-| `R` | `never` | Never inferred: only an explicit type argument sets it. |
+| `R` | `never` | Never inferred: only an explicit type argument sets it. The Effects of the config's actions and of `implementations` add nothing. A [`setup`](./setup.md#requirements) machine infers them, and [`provide`](#machineprovide) adds the services of what it is given. |
 | `TStateMeta` | `unknown` | `types.meta`. |
 | `TTransitionMeta` | `TStateMeta` | `types.transitionMeta`. |
 | `TAction`, `TGuard`, `TDelay`, `TActor` | any name | `types.actions`, `types.guards`, `types.delays`, `types.actors`. |
@@ -361,23 +361,33 @@ new implementations are `{ ...old, ...provided }`. The original machine does not
 
 ### Signature
 
-`provide(implementations: TProvided): StateMachine.StateMachine<Id, TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta, TStateSchema, TProvided, TStateValue, TChildren, TTag>`
+`provide<const TGiven extends TProvided>(implementations: TGiven): StateMachine.StateMachine<Id, TContext, TEvent, TInput, TOutput, TEmitted, R | Types.ImplementationsRequirementsOf<TGiven>, TStateMeta, TTransitionMeta, TStateSchema, TProvided, TStateValue, TChildren, TTag>`
 
 
 ### Parameters
 
 | Parameter | Type | Description |
 |---|---|---|
-| `implementations` | `TProvided` | For a machine from `createMachine`: the [implementations](#implementations) that its `types` declare, or any name. For a setup machine: only the setup's names. |
+| `implementations` | `TGiven`, which must fit `TProvided` | For a machine from `createMachine`: the [implementations](#implementations) that its `types` declare, or any name. For a setup machine: only the setup's names, and for an actor a logic of the type of the setup's logic of that name. |
 
 ### Returns
 
-A machine of the same type.
+A machine of the same type, except for its requirements: `R` with the services that the given
+implementations need (`Types.ImplementationsRequirementsOf<TGiven>`). Those are what the Effect
+of each given action requires (for an action definition, the Effect of its `exec`) and the
+requirements of each given actor logic. This holds for a machine from `createMachine` and for a
+setup machine. A machine of `setupWithSchema` keeps its
+[run-time checks](./setup.md#run-time-checks).
 
 ### Example
 
 ```ts
-import { createMachine } from "@jambudipa/xstate-effect"
+import { Context, Effect, type Scope } from "effect"
+import { createActor, createMachine } from "@jambudipa/xstate-effect"
+
+class Tracker extends Context.Service<Tracker, {
+  readonly track: (id: number) => Effect.Effect<void>
+}>()("app/Tracker") {}
 
 const machine = createMachine({
   types: {} as { actions: { type: "track"; params: { id: number } } },
@@ -385,8 +395,17 @@ const machine = createMachine({
 })
 
 export const tested = machine.provide({
-  actions: { track: (_, params) => console.log(params.id) }
+  actions: {
+    track: (_, params) =>
+      Effect.gen(function* () {
+        const tracker = yield* Tracker
+        yield* tracker.track(params.id)
+      })
+  }
 })
+
+// The given action's Effect needs Tracker, so creating the actor needs Tracker too
+export const created: Effect.Effect<unknown, never, Scope.Scope | Tracker> = createActor(tested)
 ```
 
 ## machine.withContext
@@ -395,35 +414,41 @@ A new machine with the same config and another `context`.
 
 ### Signature
 
-`withContext<TNewContext>(context: TNewContext | ((input: TInput) => TNewContext)): StateMachine.StateMachine<Id, TNewContext, TEvent, …>`
+`withContext<TNewContext extends MachineContext>(context: TNewContext | ContextFactory<TNewContext, ProvidedActor, TInput, TEvent>): StateMachine.StateMachine<Id, TNewContext, TEvent, TInput, TOutput, TEmitted, R, …, MachineImplementations<TNewContext, TEvent>, …>`
 
 
 ### Parameters
 
 | Parameter | Type | Description |
 |---|---|---|
-| `context` | `TNewContext \| ((input: TInput) => TNewContext)` | A context value, or a function that becomes the new machine's context factory. |
-
-A function is used as the context factory: at run time it receives the factory's argument
-`{ input, spawn, self }`, although its declared parameter type is `TInput`.
+| `context` | `TNewContext \| ContextFactory<TNewContext, ProvidedActor, TInput, TEvent>` | A context value, or a [context factory](#context-factory): a function of `{ input, spawn, self }` that the new machine calls once for each actor, as it calls the config's `context` function. |
 
 ### Returns
 
-A machine whose context type is `TNewContext`. Its `provide` takes any name.
+A machine whose context type is `TNewContext`. Its `provide` takes any name. A machine of
+`setupWithSchema` keeps its [run-time checks](./setup.md#run-time-checks), so the new context
+must still match the context schema.
 
 ### Example
 
 ```ts
 import { createMachine } from "@jambudipa/xstate-effect"
 
-const machine = createMachine({ context: { count: 0 } })
+const machine = createMachine({
+  types: {} as { context: { count: number }; input: { readonly start: number } },
+  context: { count: 0 }
+})
 
 export const fromTen = machine.withContext({ count: 10 })
+
+// The factory gets the actor's input, as the config's context function does
+export const fromInput = machine.withContext(({ input }) => ({ count: input.start }))
 ```
 
 ## machine.withId
 
-A new machine with the same config and another id. The state ids change with it.
+A new machine with the same config and another id. The state ids change with it. A machine of
+`setupWithSchema` keeps its [run-time checks](./setup.md#run-time-checks).
 
 ### Signature
 
@@ -553,7 +578,9 @@ provide that service; see [Pure transition functions](./testing/get-next-snapsho
 ### Returns
 
 An Effect that succeeds with the initial snapshot. When the context factory, an initial action or
-an initial guard throws, the snapshot has the status `error` and the thrown value as `error`.
+an initial guard throws, the snapshot has the status `error` and the thrown value as `error`. A
+machine of `setupWithSchema` gives that snapshot too when its input, its initial context or its
+initial output does not match its schema, with the `SchemaError` as `error`.
 
 ### Errors
 
@@ -600,6 +627,10 @@ An Effect that succeeds with the next snapshot.
 |---|---|
 | `TransitionError` | The config has a definition error (its `cause` is the `MachineDefinitionError`), or the macrostep fails, for example past `options.maxIterations`. |
 
+A machine of `setupWithSchema` dies with the `SchemaError` when the event, or the context or the
+output of the next snapshot, does not match its schema; see
+[Run-time checks](./setup.md#run-time-checks).
+
 ### Example
 
 ```ts
@@ -643,7 +674,8 @@ An Effect that succeeds with the list of snapshots, one for each microstep.
 
 ### Errors
 
-The same as [`machine.transition`](#machinetransition).
+The same as [`machine.transition`](#machinetransition), except that a machine of
+`setupWithSchema` checks only the event, not the snapshots of the microsteps.
 
 ### Example
 

@@ -1,17 +1,17 @@
 ---
 title: How to give a machine's actions and actors Effect services
 doc-type: how-to
-sources: [packages/core/src/setup.ts, packages/core/src/Actor.ts]
+sources: [packages/core/src/setup.ts, packages/core/src/Actor.ts, packages/core/src/Types.ts, packages/core/src/StateMachine.ts]
 ---
 
 # How to give a machine's actions and actors Effect services
 
-> **TL;DR:** Build the machine with `setup`. An action that returns an Effect, and an actor
-> built with `fromEffect`, add the services their Effects need to the machine's requirements, so
-> `createActor` asks for them beside `Scope`. Provide them with `Effect.provideService` or a
-> `Layer` around the Effect that calls `createActor`. The actor keeps the services it was
-> created with, and every action (the initial entry actions included) and every child actor
-> receives them.
+> **TL;DR:** Build the machine with `setup`. An action that returns an Effect, named in the setup
+> or written inline in the config, and an actor built with `fromEffect` add the services their
+> Effects need to the machine's requirements, so `createActor` asks for them beside `Scope`.
+> Provide them with `Effect.provideService` or a `Layer` around the Effect that calls
+> `createActor`. The actor keeps the services it was created with, and every action (the initial
+> entry actions included) and every child actor receives them.
 
 ## When you need this
 
@@ -42,7 +42,8 @@ export class Mailer extends Context.Service<Mailer, {
 
 Write the action in `setup({ actions })` as a function that returns an Effect. The Effect reads
 the service with `yield*`. The machine's requirements are now `Mailer`, and so are those of the
-Effect that `createActor` returns.
+Effect that `createActor` returns. An action written inline in the config counts in the same
+way; see [Write the action inline, or replace it with `provide`](#write-the-action-inline-or-replace-it-with-provide).
 
 ```ts
 import { setup } from "@jambudipa/xstate-effect"
@@ -135,8 +136,10 @@ void Effect.runPromise(
 
 Actor logic from `fromEffect` carries the requirements of its Effect. Put it in
 `setup({ actors })` and invoke it by name: the machine's requirements then include the actor's,
-and the actor reads the services when it starts. The same holds for `fromEffectBackground`,
-`fromEffectRetry` and `fromStream`, and for a child machine built with `setup`.
+and the actor reads the services when it starts. Logic written inline as the `src` of an
+`invoke`, in a setup that has an `actors` record, counts too. The same holds for
+`fromEffectBackground`, `fromEffectRetry` and `fromStream`, and for a child machine built with
+`setup`.
 
 ```ts
 import { assign, fromEffect, setup } from "@jambudipa/xstate-effect"
@@ -175,6 +178,68 @@ export const profileMachine = setup({
   }
 })
 ```
+
+### Write the action inline, or replace it with `provide`
+
+An action written inline in the config of a `setup` machine adds the services of its Effect, in
+any state and on any transition. `machine.provide` gives a new machine whose requirements also
+hold the services of the implementations that you give it, so a replacement action that reads
+another service makes `createActor` ask for that service too.
+
+```ts
+import { createActor, setup } from "@jambudipa/xstate-effect"
+import { Context, Effect, type Scope } from "effect"
+
+class Mailer extends Context.Service<Mailer, {
+  readonly send: (to: string, subject: string) => Effect.Effect<void>
+}>()("app/Mailer") {}
+
+class Audit extends Context.Service<Audit, {
+  readonly record: (entry: string) => Effect.Effect<void>
+}>()("app/Audit") {}
+
+const signupMachine = setup({
+  types: {} as { events: { readonly type: "CONFIRM" } },
+  actions: { recordConfirmed: () => Effect.void }
+}).createMachine({
+  initial: "pending",
+  states: {
+    pending: {
+      on: {
+        CONFIRM: {
+          target: "confirmed",
+          actions: [
+            // An inline action: the machine requires Mailer
+            () =>
+              Effect.gen(function* () {
+                const mailer = yield* Mailer
+                yield* mailer.send("user@example.com", "Confirmed")
+              }),
+            "recordConfirmed"
+          ]
+        }
+      }
+    },
+    confirmed: { type: "final" }
+  }
+})
+
+// The replacement action reads Audit: the new machine requires Mailer and Audit
+const auditedMachine = signupMachine.provide({
+  actions: {
+    recordConfirmed: () =>
+      Effect.gen(function* () {
+        const audit = yield* Audit
+        yield* audit.record("signup confirmed")
+      })
+  }
+})
+
+export const created: Effect.Effect<unknown, never, Scope.Scope | Mailer | Audit> = createActor(auditedMachine)
+```
+
+A replacement actor is different: it must have the type of the setup's logic of that name, so
+one that needs another service is a type error.
 
 ### Provide the services with a `Layer`
 
@@ -219,21 +284,24 @@ the machine is needed.
 
 ### Where services are not tracked
 
-The compiler tracks services only through `setup`. In these cases nothing asks you for the
+The compiler tracks the services of a `setup` machine's named and inline actions and actors,
+and of the implementations given to `machine.provide`. In these cases nothing asks you for the
 service, and an Effect that reads a missing one fails with `Service not found`, which gives the
 actor the status `error`:
 
-- **`createMachine` without `setup`.** Its machine requires no services, whatever its actions'
-  Effects need. Use `setup` for a machine whose actions need services.
-- **Inline actions in a `setup` machine's config.** Only the actions named in
-  `setup({ actions })` count. Name an action in `setup` when its Effect needs a service.
-- **Replacement actions given to `machine.provide`.** A replacement action that needs a service
-  the machine did not already require adds nothing to the requirements. Provide that service
-  yourself around `createActor`. A replacement actor is different: it must have the replaced
-  logic's type, so one that needs a new service is a type error.
+- **`createMachine` without `setup`.** Its machine requires no services, whatever the Effects of
+  its config's actions or of its `implementations` argument need. Use `setup` for a machine
+  whose actions need services. Its `provide` still adds the services of what you give it.
+- **Actions that `enqueueActions` enqueues.** The callback chooses them at run time, so their
+  Effects add nothing to the requirements. Name such an action in `setup({ actions })` and
+  enqueue it by name: the setup's record then carries its services.
+- **Inline actions of an `initial` object or a `route`.** The `actions` of
+  `initial: { target, actions }` and of a state's `route` add nothing. Name such an action in
+  `setup({ actions })` and use its name there.
 
 A guard cannot read a service: it may return an `Effect<boolean>`, but that Effect has no
-requirements. A failure of an action's Effect also gives the actor the status `error`; see
+requirements, and a guard whose Effect needs a service is a type error. A failure of an action's
+Effect also gives the actor the status `error`; see
 [How to handle actor errors](handle-actor-errors.md).
 
 ## Related
@@ -244,4 +312,7 @@ requirements. A failure of an action's Effect also gives the actor the status `e
   and its requirements.
 - [fromEffect, fromEffectBackground and fromEffectRetry](../reference/actors/from-effect.md) —
   Effect-based actor logic and its requirements.
-- [setup and setupWithSchema](../reference/setup.md) — the `actions` and `actors` records.
+- [setup and setupWithSchema](../reference/setup.md#requirements) — the requirements of a setup
+  machine, and the `actions` and `actors` records.
+- [machine.provide](../reference/create-machine.md#machineprovide) — the requirements that the
+  given implementations add.

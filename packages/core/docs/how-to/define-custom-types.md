@@ -268,7 +268,9 @@ export type CounterSnapshot = SnapshotFrom<typeof counter>
 
 ### Take the types from Effect Schemas
 
-When the context and events are already described as Effect Schemas, see
+When the context, the events, the input or the output are already described as Effect Schemas,
+use `setupWithSchema`: it takes the types from the Schemas' decoded types, and its machines also
+check those values at run time. See
 [How to type a machine from Effect Schemas](validate-events-with-schema.md).
 
 ## Related
