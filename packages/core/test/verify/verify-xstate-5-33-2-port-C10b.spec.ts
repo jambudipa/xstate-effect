@@ -13,7 +13,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Context, Effect, Option, Schedule } from "effect"
 import type { Scope } from "effect"
 import type { ActorLogic } from "../../src/ActorLogic.js"
-import { createActor, fromEffect, fromEffectBackground } from "../../src/index.js"
+import { createActor, fromEffect, fromEffectBackground, setup } from "../../src/index.js"
 import { fromEffectRetry } from "../../src/actors/fromEffect.js"
 
 /** A service the effect logic reads. */
@@ -124,6 +124,28 @@ describe("C10b An effect actor's requirements flow to createActor", () => {
 
       assert.strictEqual(attempts, 2)
       assert.deepStrictEqual((yield* actor.getSnapshot).output, Option.some("Hi, Grace"))
+    })
+  )
+
+  it.effect("[C10b] a setup machine whose action reads a service gets it from the Effect that calls createActor, and createActor requires it", () =>
+    Effect.gen(function* () {
+      const greeted: Array<string> = []
+      const machine = setup({
+        actions: {
+          hello: () =>
+            Effect.gen(function* () {
+              greeted.push((yield* Greeter).greet("Ada"))
+            }),
+        },
+      }).createMachine({ entry: "hello" })
+
+      // @ts-expect-error the Greeter service the hello action reads is not provided
+      const withoutService: Effect.Effect<unknown, never, Scope.Scope> = createActor(machine)
+      assert.isDefined(withoutService)
+
+      const actor = yield* createActor(machine).pipe(Effect.provideService(Greeter, { greet: (name) => `Hello, ${name}` }))
+      yield* actor.start
+      assert.deepStrictEqual(greeted, ["Hello, Ada"])
     })
   )
 })

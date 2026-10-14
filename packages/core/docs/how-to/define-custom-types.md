@@ -4,19 +4,32 @@ This guide shows how to set up type-safe context, events, input, and output type
 
 ## Basic Type Setup
 
-Use the `types` property in `setup` to define your machine's type schema:
+Use the `types` property in `setup` to define your machine's context, events and input. The
+`types` of `setup` has no `output` member: to type the output, see [Output Types](#output-types).
 
 ```typescript
-import { setup } from "@jambudipa/xstate-effect"
+import { setup, assign } from "@jambudipa/xstate-effect"
 
-const _machine = setup({
+export const machine = setup({
   types: {} as {
-    context: { /* your context type */ }
-    events: { /* your event union */ }
-    input: { /* input for initialization */ }
-    output: { /* output when machine completes */ }
+    context: { count: number }                        // your context type
+    events: { type: "INCREMENT" } | { type: "FINISH" } // your event union
+    input: { start: number }                          // input for initialization
   }
-}).createMachine({ /* ... */ })
+}).createMachine({
+  id: "counter",
+  initial: "active",
+  context: ({ input }) => ({ count: input.start }),
+  states: {
+    active: {
+      on: {
+        INCREMENT: { actions: assign({ count: ({ context }) => context.count + 1 }) },
+        FINISH: "done"
+      }
+    },
+    done: { type: "final" }
+  }
+})
 ```
 
 ## Context Types
@@ -24,6 +37,8 @@ const _machine = setup({
 Context holds the data for your machine:
 
 ```typescript
+import { setup } from "@jambudipa/xstate-effect"
+
 interface UserContext {
   user: {
     id: string
@@ -34,7 +49,7 @@ interface UserContext {
   error: string | null
 }
 
-const _userMachine = setup({
+export const userMachine = setup({
   types: {} as {
     context: UserContext
     events: { type: "FETCH" }
@@ -47,27 +62,56 @@ const _userMachine = setup({
     isLoading: false,
     error: null
   },
-  states: { /* ... */ }
+  states: {
+    idle: {
+      on: { FETCH: "loading" }
+    },
+    loading: {}
+  }
 })
 ```
 
 ## Event Types
 
-Define events as a discriminated union:
+Define events as a discriminated union. A transition under an event type reads that event, so
+its actions see the event's own fields:
 
 ```typescript
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+interface UserContext {
+  userId: string
+  name: string
+  email: string
+}
+
 type UserEvent =
   | { type: "FETCH"; userId: string }
   | { type: "UPDATE"; name: string; email: string }
   | { type: "DELETE" }
   | { type: "RESET" }
 
-const _machine = setup({
+export const machine = setup({
   types: {} as {
     context: UserContext
     events: UserEvent
   }
-}).createMachine({ /* ... */ })
+}).createMachine({
+  id: "user",
+  initial: "active",
+  context: { userId: "", name: "", email: "" },
+  states: {
+    active: {
+      on: {
+        FETCH: { actions: assign({ userId: ({ event }) => event.userId }) },
+        UPDATE: { actions: assign({ name: ({ event }) => event.name, email: ({ event }) => event.email }) },
+        RESET: { actions: assign({ userId: "", name: "", email: "" }) },
+        DELETE: "deleted"
+      }
+    },
+    deleted: { type: "final" }
+  }
+})
 ```
 
 ### Events with Payloads
@@ -97,6 +141,9 @@ type _CrudEvent<T> =
 Input is data passed when creating an actor:
 
 ```typescript
+import { setup, assign, createActor } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
 interface MachineInput {
   initialCount: number
   maxCount: number
@@ -115,51 +162,77 @@ const counterMachine = setup({
     count: input.initialCount,
     max: input.maxCount
   }),
-  states: { /* ... */ }
+  states: {
+    active: {
+      on: {
+        INCREMENT: {
+          guard: ({ context }) => context.count < context.max,
+          actions: assign({ count: ({ context }) => context.count + 1 })
+        }
+      }
+    }
+  }
 })
 
 // Usage
-const _actor = yield* createActor(counterMachine, {
-  input: { initialCount: 0, maxCount: 10 }
+export const program = Effect.gen(function* () {
+  const actor = yield* createActor(counterMachine, {
+    input: { initialCount: 0, maxCount: 10 }
+  })
+  yield* actor.start
+  const snapshot = yield* actor.getSnapshot
+  console.log(snapshot.context.max) // 10
 })
 ```
 
 ## Output Types
 
-Output is the value returned when the machine reaches a final state:
+Output is the value the machine's `output` gives when the machine reaches a top-level final
+state. The `types` of `setup` has no `output` member, so declare the output type in the `types`
+of `createMachine`. The machine's `output` must then give that type, and the actor's
+`snapshot.output` is an `Option` of it:
 
 ```typescript
+import { createMachine, assign, type OutputFrom } from "@jambudipa/xstate-effect"
+
 interface MachineOutput {
   result: "success" | "cancelled"
   data?: string
 }
 
-const _wizardMachine = setup({
+export const wizardMachine = createMachine({
   types: {} as {
-    context: { step: number; data: string }
-    events: { type: "NEXT" } | { type: "CANCEL" }
+    context: { step: number; data: string; cancelled: boolean }
+    events: { type: "NEXT"; data: string } | { type: "CANCEL" }
     output: MachineOutput
-  }
-}).createMachine({
+  },
   id: "wizard",
   initial: "step1",
-  context: { step: 1, data: "" },
+  context: { step: 1, data: "", cancelled: false },
   states: {
-    step1: { /* ... */ },
-    step2: { /* ... */ },
-    complete: {
-      type: "final",
-      output: ({ context }) => ({
-        result: "success" as const,
-        data: context.data
-      })
+    step1: {
+      on: {
+        NEXT: { target: "step2", actions: assign({ step: 2, data: ({ event }) => event.data }) },
+        CANCEL: "cancelled"
+      }
     },
+    step2: {
+      on: {
+        NEXT: "complete",
+        CANCEL: "cancelled"
+      }
+    },
+    complete: { type: "final" },
     cancelled: {
       type: "final",
-      output: { result: "cancelled" as const }
+      entry: assign({ cancelled: true })
     }
-  }
+  },
+  output: ({ context }): MachineOutput =>
+    context.cancelled ? { result: "cancelled" } : { result: "success", data: context.data }
 })
+
+export type WizardOutput = OutputFrom<typeof wizardMachine> // MachineOutput
 ```
 
 ## Actor Types
@@ -167,14 +240,15 @@ const _wizardMachine = setup({
 Define types for child actors:
 
 ```typescript
-import { fromPromise, ActorRefFrom } from "@jambudipa/xstate-effect"
+import { setup, assign, fromPromise, type ActorRefFrom } from "@jambudipa/xstate-effect"
 
 const fetchUser = fromPromise(async ({ input }: { input: { id: string } }) => {
   const response = await fetch(`/api/users/${input.id}`)
-  return response.json() as Promise<{ name: string; email: string }>
+  const user: { name: string; email: string } = await response.json()
+  return user
 })
 
-const _machine = setup({
+export const machine = setup({
   types: {} as {
     context: {
       userRef: ActorRefFrom<typeof fetchUser> | null
@@ -184,14 +258,27 @@ const _machine = setup({
   actors: {
     fetchUser
   }
-}).createMachine({ /* ... */ })
+}).createMachine({
+  id: "users",
+  context: { userRef: null },
+  on: {
+    FETCH: {
+      actions: assign({
+        userRef: ({ event, spawn }) => spawn("fetchUser", { input: { id: event.userId } })
+      })
+    }
+  }
+})
 ```
 
 ## Complete Example
 
+The machine declares its output type, so it uses the `types` of `createMachine` and gives the
+actor logic to `invoke` directly:
+
 ```typescript
-import { setup, createActor, assign, fromPromise } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
+import { createMachine, createActor, assign, fromPromise } from "@jambudipa/xstate-effect"
+import { Effect, Option } from "effect"
 
 // Define all types
 interface User {
@@ -219,21 +306,20 @@ interface AuthOutput {
   wasLoggedIn: boolean
 }
 
+// Define the actor logic
+const authenticate = fromPromise(async ({ input }: { input: { email: string; password: string } }) => {
+  // Simulated auth
+  return { user: { id: "1", name: "User", email: input.email }, token: "abc123" }
+})
+
 // Define the machine
-const authMachine = setup({
+const authMachine = createMachine({
   types: {} as {
     context: AuthContext
     events: AuthEvent
     input: AuthInput
     output: AuthOutput
   },
-  actors: {
-    authenticate: fromPromise(async ({ input }: { input: { email: string; password: string } }) => {
-      // Simulated auth
-      return { user: { id: "1", name: "User", email: input.email }, token: "abc123" }
-    })
-  }
-}).createMachine({
   id: "auth",
   initial: "idle",
   context: ({ input }) => ({
@@ -253,17 +339,20 @@ const authMachine = setup({
     },
     authenticating: {
       invoke: {
-        src: "authenticate",
+        src: authenticate,
         input: ({ event }) => ({
           email: event.type === "LOGIN" ? event.email : "",
           password: event.type === "LOGIN" ? event.password : ""
         }),
         onDone: {
           target: "authenticated",
-          actions: assign({
-            user: ({ event }) => event.output.user,
-            token: ({ event }) => event.output.token
-          })
+          // The output of a done event is an Option
+          actions: assign(({ event }) =>
+            Option.match(event.output, {
+              onNone: () => ({}),
+              onSome: ({ user, token }) => ({ user, token, error: null })
+            })
+          )
         },
         onError: {
           target: "idle",
@@ -280,10 +369,11 @@ const authMachine = setup({
       }
     },
     loggedOut: {
-      type: "final",
-      output: { wasLoggedIn: true }
+      type: "final"
     }
-  }
+  },
+  // The machine reaches its final state only by a logout
+  output: { wasLoggedIn: true }
 })
 
 // Usage with full type safety
@@ -291,12 +381,12 @@ const _program = Effect.gen(function* () {
   const actor = yield* createActor(authMachine, {
     input: { persistedToken: undefined }
   })
-  yield* actor.start()
+  yield* actor.start
 
   // TypeScript knows the event shape
   yield* actor.send({ type: "LOGIN", email: "user@example.com", password: "secret" })
 
-  const snapshot = yield* actor.getSnapshot()
+  const snapshot = yield* actor.getSnapshot
   // TypeScript knows context.user is User | null
   if (snapshot.context.user) {
     console.log(snapshot.context.user.name)

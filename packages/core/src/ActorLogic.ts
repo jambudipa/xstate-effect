@@ -38,7 +38,7 @@ import { resolveDelay } from "./internal/delay.js"
  * @since 0.1.0
  * @category Type ID
  */
-export const ActorLogicTypeId: unique symbol = Symbol.for("@xstate-effect/ActorLogic")
+export const ActorLogicTypeId: unique symbol = Symbol.for("@jambudipa/xstate-effect/ActorLogic")
 
 /**
  * Type ID type for ActorLogic.
@@ -454,7 +454,7 @@ export interface SchedulerService {
 export class ActorScope extends Context.Service<
   ActorScope,
   ActorScopeService
->()("@xstate-effect/ActorScope") {}
+>()("@jambudipa/xstate-effect/ActorScope") {}
 
 // ============================================================
 // ACTOR LOGIC INTERFACE

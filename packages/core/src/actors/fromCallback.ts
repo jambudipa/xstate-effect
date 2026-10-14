@@ -126,8 +126,16 @@ export type CallbackLogicFunction<
   TEmitted extends EventObject = EventObject
 > = (args: CallbackActorArgs<TEvent, TInput, TEmitted, TSentEvent>) => (() => void) | void
 
-/** The receive listeners of each running callback actor of one logic, keyed by the actor itself. */
-type Instances<TEvent extends EventObject> = WeakMap<ActorRefBase, MutableRef.MutableRef<ReadonlyArray<Receiver<TEvent>>>>
+/** What one running callback actor holds (upstream `CallbackInstanceState`). */
+interface Instance<TEvent extends EventObject> {
+  /** The receive listeners, in the order they were added */
+  readonly receivers: MutableRef.MutableRef<ReadonlyArray<Receiver<TEvent>>>
+  /** The cleanup the callback returned, until it has run */
+  readonly dispose: MutableRef.MutableRef<Option.Option<() => void>>
+}
+
+/** The state of each running callback actor of one logic, keyed by the actor itself. */
+type Instances<TEvent extends EventObject> = WeakMap<ActorRefBase, Instance<TEvent>>
 
 /** The listeners `self` has added, in order; none for an actor that is not running. */
 const receiversOf = <TEvent extends EventObject>(
@@ -136,7 +144,23 @@ const receiversOf = <TEvent extends EventObject>(
 ): ReadonlyArray<Receiver<TEvent>> =>
   Option.match(Option.fromUndefinedOr(instances.get(self)), {
     onNone: () => [],
-    onSome: MutableRef.get,
+    onSome: (instance) => MutableRef.get(instance.receivers),
+  })
+
+/**
+ * Clears the listeners, then runs the cleanup if it has not run yet (upstream: `receivers.clear()`,
+ * then `dispose()`), so it runs once whichever comes first: the stop transition or the close of
+ * the actor's scope. What the cleanup throws is reported through the logger (SD-21).
+ */
+const disposeOnce = <TEvent extends EventObject>(instance: Instance<TEvent>): Effect.Effect<void> =>
+  Effect.suspend(() => {
+    MutableRef.set(instance.receivers, [])
+    const dispose = MutableRef.get(instance.dispose)
+    MutableRef.set(instance.dispose, Option.none())
+    return Option.match(dispose, {
+      onNone: () => Effect.void,
+      onSome: (cleanup) => isolateCallback(() => Effect.sync(cleanup)),
+    })
   })
 
 /**
@@ -160,9 +184,11 @@ const relayToParent = (actorScope: ActorScopeService, event: EventObject): Effec
  * upstream relays and emits inside the call, so it never waits for another event. A throw in the
  * callback is the actor's error, the raw value (SD-4).
  *
- * The stop closes the scope: the listeners are cleared and the cleanup runs once; what the
- * cleanup throws is reported through the logger (SD-21), never thrown into the stop. Later sends
- * and emits are ignored.
+ * The stop clears the listeners and runs the cleanup inside the `xstate.stop` transition, as
+ * upstream does, so a `sendBack` in the cleanup still reaches the parent. An actor whose scope
+ * closes without that transition (it errored, or the close of its owner's scope released it) runs
+ * the cleanup as the scope closes. Either way it runs once, and what it throws is reported through
+ * the logger (SD-21), never thrown into the stop. Sends and emits after the stop are ignored.
  */
 const runCallback = <TEvent extends EventObject, TInput, TEmitted extends EventObject>(
   callback: CallbackLogicFunction<TEvent, AnyEventObject, TInput, TEmitted>,
@@ -172,34 +198,31 @@ const runCallback = <TEvent extends EventObject, TInput, TEmitted extends EventO
   Effect.gen(function* () {
     const actorScope = yield* ActorScope
     const self = actorScope.self
-    const receivers = MutableRef.make<ReadonlyArray<Receiver<TEvent>>>([])
+    const instance: Instance<TEvent> = { receivers: MutableRef.make([]), dispose: MutableRef.make(Option.none()) }
     // The stop closes the outbox, so a send or an emit after it is dropped
     const outbox = yield* Outbox.make
 
     // Upstream `instanceStates.set(self, ...)`; the stop removes the entry again
-    yield* Effect.sync(() => instances.set(self, receivers))
+    yield* Effect.sync(() => instances.set(self, instance))
     yield* Effect.addFinalizer(() => Effect.sync(() => instances.delete(self)))
 
     yield* Effect.acquireRelease(
-      Effect.sync(() =>
-        callback({
+      Effect.sync(() => {
+        const cleanup = callback({
           input,
           // The actor scope's `self` is this callback actor
           self: self as CallbackActorRef<TEvent>,
           system: actorScope.system,
           // Upstream keeps the listeners in a `Set`: the same listener added twice runs once
           receive: (listener) => {
-            MutableRef.update(receivers, (current) => (current.includes(listener) ? current : [...current, listener]))
+            MutableRef.update(instance.receivers, (current) => (current.includes(listener) ? current : [...current, listener]))
           },
           sendBack: (event) => outbox.post(relayToParent(actorScope, event)),
           emit: (event) => outbox.post(actorScope.emit(event)),
         })
-      ),
-      (cleanup) =>
-        Effect.andThen(
-          Effect.sync(() => MutableRef.set(receivers, [])),
-          typeof cleanup === "function" ? isolateCallback(() => Effect.sync(cleanup)) : Effect.void
-        )
+        MutableRef.set(instance.dispose, typeof cleanup === "function" ? Option.some(cleanup) : Option.none())
+      }),
+      () => disposeOnce(instance)
     )
   })
 
@@ -256,15 +279,18 @@ export const fromCallback = <
 
     config: callback,
 
-    // Upstream `transition`: the stop event gives status `stopped` and no error, and no listener
-    // receives it (the cleanup is the actor's scope closing); every listener receives any other
-    // event, in order, and a throw is the actor's error (SD-4), the snapshot unchanged
+    // Upstream `transition`: the stop event clears the listeners, runs the cleanup while the actor
+    // is not yet stopped (its `sendBack` still reaches the parent) and gives status `stopped` and
+    // no error; every listener receives any other event, in order, and a throw is the actor's
+    // error (SD-4), the snapshot unchanged
     transition: (snapshot, event) =>
       Effect.gen(function* () {
+        const actorScope = yield* ActorScope
         if (isStopEvent(event)) {
+          const instance = Option.fromUndefinedOr(instances.get(actorScope.self))
+          yield* Option.match(instance, { onNone: () => Effect.void, onSome: disposeOnce })
           return { ...snapshot, status: "stopped", error: Option.none() }
         }
-        const actorScope = yield* ActorScope
         const receivers = yield* Effect.sync(() => receiversOf(instances, actorScope.self))
         yield* Effect.forEach(receivers, (receiver) => Effect.sync(() => receiver(event)), { discard: true })
         return snapshot

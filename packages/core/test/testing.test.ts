@@ -2,10 +2,11 @@
  * Testing utilities tests
  */
 import { describe, it, expect, vi } from "vitest"
-import { Effect, Duration } from "effect"
+import { Cause, Effect, Duration, Exit } from "effect"
 import {
   makeSimulatedClock,
   makeSimulatedClockEffect,
+  SimulatedClock,
   TimeTravelError,
 } from "../src/testing/SimulatedClock.js"
 import {
@@ -15,6 +16,16 @@ import {
 import {
   ActorOutputError,
 } from "../src/testing/toPromise.js"
+
+/** The value that `run` throws, or undefined when it returns. */
+const thrownBy = (run: () => unknown): unknown => {
+  try {
+    run()
+  } catch (error) {
+    return error
+  }
+  return undefined
+}
 
 describe("Testing Utilities", () => {
   describe("SimulatedClock", () => {
@@ -129,6 +140,78 @@ describe("Testing Utilities", () => {
       expect(callback1).not.toHaveBeenCalled()
       expect(callback2).not.toHaveBeenCalled()
       expect(clock.getPendingTimeouts()).toHaveLength(0)
+    })
+
+    it("stays usable after a callback throws: the throw reaches the caller of increment, then a later increment or set fires the due timeouts", () => {
+      const clock = makeSimulatedClock()
+      const failure = new Error("timeout A failed")
+      const fired: Array<string> = []
+
+      clock.setTimeout(() => {
+        fired.push("A")
+        throw failure
+      }, 100)
+      clock.setTimeout(() => fired.push("B"), 150)
+      clock.setTimeout(() => fired.push("C"), 300)
+
+      // The throw stops the flush where it happens: B is due but does not fire in this call.
+      expect(thrownBy(() => clock.increment(150))).toBe(failure)
+      expect(fired).toEqual(["A"])
+      expect(clock.now()).toBe(150)
+
+      clock.increment(50)
+      expect(fired).toEqual(["A", "B"])
+
+      expect(clock.set(300)).toBe(true)
+      expect(fired).toEqual(["A", "B", "C"])
+      expect(clock.getPendingTimeouts()).toHaveLength(0)
+    })
+
+    it("fires inside a callback's increment the timeouts that the increment makes due (DEV-75: upstream fires them after the callback returns)", () => {
+      const clock = makeSimulatedClock()
+      const order: Array<string> = []
+
+      clock.setTimeout(() => {
+        order.push("A starts")
+        clock.increment(50)
+        order.push("A ends")
+      }, 100)
+      clock.setTimeout(() => order.push("B"), 150)
+
+      clock.increment(100)
+      expect(order).toEqual(["A starts", "B", "A ends"])
+      expect(clock.now()).toBe(150)
+      expect(clock.getPendingTimeouts()).toHaveLength(0)
+    })
+  })
+
+  describe("SimulatedClock class", () => {
+    it("stays usable after a callback throws: the throw is a defect of increment, then a later increment or set fires the due timers", async () => {
+      const clock = new SimulatedClock()
+      const failure = new Error("timer A failed")
+      const fired: Array<string> = []
+
+      clock.setTimeout(() => {
+        fired.push("A")
+        throw failure
+      }, 100)
+      clock.setTimeout(() => fired.push("B"), 150)
+      clock.setTimeout(() => fired.push("C"), 300)
+
+      const program = Effect.gen(function* () {
+        const exit = yield* Effect.exit(clock.increment(150))
+        expect(Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined).toBe(failure)
+        expect(fired).toEqual(["A"])
+        expect(clock.now()).toBe(150)
+
+        yield* clock.increment(50)
+        expect(fired).toEqual(["A", "B"])
+
+        yield* clock.set(300)
+        expect(fired).toEqual(["A", "B", "C"])
+      })
+
+      await Effect.runPromise(program)
     })
   })
 

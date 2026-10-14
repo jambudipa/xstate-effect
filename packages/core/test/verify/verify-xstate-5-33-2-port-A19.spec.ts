@@ -22,7 +22,7 @@
  * `extend`'s actions may name a sibling extension action (upstream `TActions & TExtendActions`).
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Logger, References, Schema } from "effect"
+import { Effect, Logger, Option, References, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import {
   createActor,
@@ -756,6 +756,26 @@ describe("A19 setup().extend, createStateConfig, createAction and the bound help
       yield* Effect.flatMap(createActor(own.createMachine({ entry: "both" })), (actor) => actor.start)
       yield* Effect.flatMap(createActor(extended.createMachine({ entry: "both" })), (actor) => actor.start)
       assert.deepStrictEqual(calls, ["known", "withParams 1", "extended 2"])
+    })
+  )
+
+  it.effect("[A19] setup's types.output types the output of its machines (upstream SetupTypes.output), also after extend", () =>
+    Effect.gen(function* () {
+      const totals = setup({ types: {} as { output: { readonly total: number } } })
+      const machine = totals.createMachine({
+        initial: "done",
+        states: { done: { type: "final" } },
+        output: () => ({ total: 3 }),
+      })
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      // The type check of the tests fails here while the output type is `unknown`
+      const output: Option.Option<{ readonly total: number }> = (yield* actor.getSnapshot).output
+      assert.deepStrictEqual(output, Option.some({ total: 3 }))
+
+      const extended = totals.extend({ delays: { soon: 10 } }).createMachine({ initial: "done", states: { done: { type: "final" } }, output: { total: 4 } })
+      const extendedOutput: Option.Option<{ readonly total: number }> = (yield* Effect.flatMap(createActor(extended), (started) => Effect.andThen(started.start, started.getSnapshot))).output
+      assert.deepStrictEqual(extendedOutput, Option.some({ total: 4 }))
     })
   )
 })

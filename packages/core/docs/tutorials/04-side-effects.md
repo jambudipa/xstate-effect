@@ -18,24 +18,43 @@ Actions can be triggered at three points:
 3. **Transition actions**: Run during a specific transition
 
 ```typescript
-states: {
-  loading: {
-    entry: "onEnterLoading",   // Runs when entering "loading"
-    exit: "onExitLoading",     // Runs when leaving "loading"
-    on: {
-      SUCCESS: {
-        target: "success",
-        actions: "onSuccess"   // Runs during this transition
-      }
-    }
+import { setup } from "@jambudipa/xstate-effect"
+import { Console } from "effect"
+
+export const loadingMachine = setup({
+  types: {} as {
+    context: {}
+    events: { type: "SUCCESS" }
+  },
+  actions: {
+    onEnterLoading: () => Console.log("Entering loading"),
+    onExitLoading: () => Console.log("Leaving loading"),
+    onSuccess: () => Console.log("Loaded")
   }
-}
+}).createMachine({
+  id: "loader",
+  initial: "loading",
+  context: {},
+  states: {
+    loading: {
+      entry: "onEnterLoading",   // Runs when entering "loading"
+      exit: "onExitLoading",     // Runs when leaving "loading"
+      on: {
+        SUCCESS: {
+          target: "success",
+          actions: "onSuccess"   // Runs during this transition
+        }
+      }
+    },
+    success: {}
+  }
+})
 ```
 
 ## Step 1: Entry and Exit Actions
 
 ```typescript
-import { setup, createActor, action } from "@jambudipa/xstate-effect"
+import { setup, createActor } from "@jambudipa/xstate-effect"
 import { Effect, Console } from "effect"
 
 const documentMachine = setup({
@@ -44,15 +63,12 @@ const documentMachine = setup({
     events: { type: "SAVE" } | { type: "CLOSE" }
   },
   actions: {
-    logEnter: action("logEnter", ({ context }) =>
-      Console.log(`Entered state with document: ${context.documentId}`)
-    ),
-    logExit: action("logExit", ({ context }) =>
-      Console.log(`Exiting state with document: ${context.documentId}`)
-    ),
-    saveDocument: action("saveDocument", ({ context }) =>
+    logEnter: ({ context }) =>
+      Console.log(`Entered state with document: ${context.documentId}`),
+    logExit: ({ context }) =>
+      Console.log(`Exiting state with document: ${context.documentId}`),
+    saveDocument: ({ context }) =>
       Console.log(`Saving document: ${context.documentId}`)
-    )
   }
 }).createMachine({
   id: "document",
@@ -73,50 +89,78 @@ const documentMachine = setup({
     }
   }
 })
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(documentMachine)
+  yield* actor.start                   // Entered state with document: doc-123
+  yield* actor.send({ type: "SAVE" })  // Saving document: doc-123
+  yield* actor.send({ type: "CLOSE" }) // Exiting state with document: doc-123
+                                       // Entered state with document: doc-123
+})
+
+void Effect.runPromise(Effect.scoped(program))
 ```
 
-## Step 2: The action Function
+## Step 2: Actions that Return Effects
 
-The `action` function creates typed actions that return Effects:
+A custom action is a function that receives `{ context, event }`. When the function returns an Effect, the actor runs that Effect:
 
 ```typescript
-import { action } from "@jambudipa/xstate-effect"
+import { setup } from "@jambudipa/xstate-effect"
 import { Effect, Console } from "effect"
 
-// Basic action with logging
-const logAction = action("logAction", ({ context, event }) =>
-  Console.log(`Event ${event.type} received`)
-)
+export const dataMachine = setup({
+  types: {} as {
+    context: { url: string }
+    events: { type: "LOAD" } | { type: "TRY" }
+  },
+  actions: {
+    // Basic action with logging
+    logAction: ({ event }) => Console.log(`Event ${event.type} received`),
 
-// Action that performs async work
-const fetchData = action("fetchData", ({ context }) =>
-  Effect.gen(function* () {
-    yield* Console.log("Fetching data...")
-    yield* Effect.sleep("1 second")
-    yield* Console.log("Data fetched!")
-  })
-)
+    // Action that performs async work
+    fetchData: ({ context }) =>
+      Effect.gen(function* () {
+        yield* Console.log(`Fetching ${context.url}...`)
+        yield* Effect.sleep("1 second")
+        yield* Console.log("Data fetched!")
+      }),
 
-// Action that can fail (errors are handled by the machine)
-const riskyAction = action("riskyAction", () =>
-  Effect.gen(function* () {
-    const random = Math.random()
-    if (random < 0.5) {
-      yield* Effect.fail(new Error("Random failure"))
+    // Action that can fail: a failure sets the actor's status to "error"
+    riskyAction: () =>
+      Effect.gen(function* () {
+        const random = Math.random()
+        if (random < 0.5) {
+          yield* Effect.fail(new Error("Random failure"))
+        }
+        yield* Console.log("Success!")
+      })
+  }
+}).createMachine({
+  id: "data",
+  initial: "idle",
+  context: { url: "/api/data" },
+  states: {
+    idle: {
+      on: {
+        LOAD: { actions: ["logAction", "fetchData"] },
+        TRY: { actions: ["logAction", "riskyAction"] }
+      }
     }
-    yield* Console.log("Success!")
-  })
-)
+  }
+})
 ```
+
+The actor runs the returned Effect as part of the transition, so a slow Effect delays the transition. For long-running work, invoke an actor instead (see [Tutorial 5](./05-child-actors.md)). If the Effect fails, the actor stops processing and its status becomes `error`, with the failure as its error.
 
 ## Step 3: Built-in Actions
 
 ### log - Simple Logging
 
 ```typescript
-import { log, logDebug, logInfo, logWarning, logError } from "@jambudipa/xstate-effect"
+import { setup, assign, log, logInfo } from "@jambudipa/xstate-effect"
 
-const _machine = setup({
+export const counterMachine = setup({
   types: {} as {
     context: { count: number }
     events: { type: "INCREMENT" }
@@ -141,12 +185,14 @@ const _machine = setup({
 })
 ```
 
+`log` writes at the info level by default. `logDebug`, `logInfo`, `logWarning` and `logError` write at their own level. Without a `logger` option on the actor, the entries go to Effect logging.
+
 ### raise - Send Events to Self
 
 ```typescript
-import { raise } from "@jambudipa/xstate-effect"
+import { setup, raise } from "@jambudipa/xstate-effect"
 
-const _machine = setup({
+export const startupMachine = setup({
   types: {} as {
     context: {}
     events: { type: "START" } | { type: "STARTED" }
@@ -177,19 +223,48 @@ const _machine = setup({
 ### sendTo - Send Events to Other Actors
 
 ```typescript
-import { sendTo, sendParent } from "@jambudipa/xstate-effect"
+import { setup, sendTo, sendParent } from "@jambudipa/xstate-effect"
 
-// Send to a specific actor by ID
-sendTo("otherActorId", { type: "PING" })
+// A child machine
+const otherMachine = setup({
+  types: {} as {
+    context: {}
+    events: { type: "PING" } | { type: "UPDATE"; value: number }
+  }
+}).createMachine({
+  id: "other",
+  context: {},
+  on: {
+    // Send to parent actor
+    PING: { actions: sendParent({ type: "CHILD_DONE" }) }
+  }
+})
 
-// Send to parent actor
-sendParent({ type: "CHILD_DONE" })
+export const parentMachine = setup({
+  types: {} as {
+    context: { targetActorId: string; value: number }
+    events: { type: "PING_CHILD" } | { type: "UPDATE_CHILD" } | { type: "CHILD_DONE" }
+  },
+  actors: {
+    other: otherMachine
+  }
+}).createMachine({
+  id: "parent",
+  context: { targetActorId: "otherActorId", value: 42 },
+  invoke: { id: "otherActorId", src: "other" },
+  on: {
+    // Send to a specific actor by ID
+    PING_CHILD: { actions: sendTo("otherActorId", { type: "PING" }) },
 
-// Dynamic target and event
-sendTo(
-  ({ context }) => context.targetActorId,
-  ({ context }) => ({ type: "UPDATE", value: context.value })
-)
+    // Dynamic target and event
+    UPDATE_CHILD: {
+      actions: sendTo(
+        ({ context }) => context.targetActorId,
+        ({ context }) => ({ type: "UPDATE", value: context.value })
+      )
+    }
+  }
+})
 ```
 
 ## Step 4: Multiple Actions
@@ -197,16 +272,17 @@ sendTo(
 Execute multiple actions in sequence:
 
 ```typescript
-const _machine = setup({
+import { setup, assign, sendParent } from "@jambudipa/xstate-effect"
+import { Console } from "effect"
+
+export const counterMachine = setup({
   types: {} as {
     context: { count: number }
     events: { type: "INCREMENT" }
   },
   actions: {
     increment: assign({ count: ({ context }) => context.count + 1 }),
-    logCount: action("logCount", ({ context }) =>
-      Console.log(`Count is now: ${context.count}`)
-    ),
+    logCount: ({ context }) => Console.log(`Count is now: ${context.count}`),
     notifyParent: sendParent({ type: "COUNT_CHANGED" })
   }
 }).createMachine({
@@ -225,34 +301,57 @@ const _machine = setup({
 })
 ```
 
-Actions execute in order. The new context from `assign` is available to subsequent actions.
+Actions execute in order. The new context from `assign` is available to subsequent actions. The `notifyParent` action needs a parent: run this machine as a child actor (see [Tutorial 5](./05-child-actors.md)).
 
 ## Step 5: Inline vs Named Actions
 
 **Inline actions** - defined directly in the machine:
 
 ```typescript
-states: {
-  active: {
-    entry: action("inline", () => Console.log("Entered!")),
-    on: {
-      CLICK: {
-        actions: assign({ clicked: true })
+import { setup, assign } from "@jambudipa/xstate-effect"
+import { Console } from "effect"
+
+export const inlineMachine = setup({
+  types: {} as {
+    context: { clicked: boolean }
+    events: { type: "CLICK" }
+  }
+}).createMachine({
+  id: "button",
+  initial: "active",
+  context: { clicked: false },
+  states: {
+    active: {
+      entry: () => Console.log("Entered!"),
+      on: {
+        CLICK: {
+          actions: assign({ clicked: true })
+        }
       }
     }
   }
-}
+})
 ```
 
 **Named actions** - defined in setup, referenced by string:
 
 ```typescript
-setup({
+import { setup, assign } from "@jambudipa/xstate-effect"
+import { Console } from "effect"
+
+export const namedMachine = setup({
+  types: {} as {
+    context: { clicked: boolean }
+    events: { type: "CLICK" }
+  },
   actions: {
-    onEnter: action("onEnter", () => Console.log("Entered!")),
+    onEnter: () => Console.log("Entered!"),
     onClick: assign({ clicked: true })
   }
 }).createMachine({
+  id: "button",
+  initial: "active",
+  context: { clicked: false },
   states: {
     active: {
       entry: "onEnter",
@@ -272,7 +371,7 @@ Named actions are preferred for:
 ## Complete Example: Notification System
 
 ```typescript
-import { setup, createActor, assign, action, raise } from "@jambudipa/xstate-effect"
+import { setup, createActor, assign } from "@jambudipa/xstate-effect"
 import { Effect, Console } from "effect"
 
 interface Notification {
@@ -281,7 +380,7 @@ interface Notification {
   type: "info" | "warning" | "error"
 }
 
-const _notificationMachine = setup({
+const notificationMachine = setup({
   types: {} as {
     context: {
       notifications: Notification[]
@@ -320,22 +419,20 @@ const _notificationMachine = setup({
       notifications: []
     }),
 
-    logNotification: action("logNotification", ({ event }) =>
+    logNotification: ({ event }) =>
       Effect.gen(function* () {
         if (event.type === "ADD") {
           yield* Console.log(`[${event.notificationType.toUpperCase()}] ${event.message}`)
         }
-      })
-    ),
+      }),
 
-    scheduleAutoDismiss: action("scheduleAutoDismiss", ({ context }) =>
+    scheduleAutoDismiss: ({ context }) =>
       Effect.gen(function* () {
         const lastNotif = context.notifications[context.notifications.length - 1]
         if (lastNotif) {
           yield* Console.log(`Will auto-dismiss ${lastNotif.id} in 5 seconds`)
         }
       })
-    )
   }
 }).createMachine({
   id: "notifications",
@@ -366,7 +463,7 @@ const _notificationMachine = setup({
 
 const program = Effect.gen(function* () {
   const actor = yield* createActor(notificationMachine)
-  yield* actor.start()
+  yield* actor.start
 
   yield* actor.send({
     type: "ADD",
@@ -380,16 +477,16 @@ const program = Effect.gen(function* () {
     notificationType: "warning"
   })
 
-  let snapshot = yield* actor.getSnapshot()
+  let snapshot = yield* actor.getSnapshot
   console.log(`Active notifications: ${snapshot.context.notifications.length}`)
 
   yield* actor.send({ type: "DISMISS", id: "notif-1" })
 
-  snapshot = yield* actor.getSnapshot()
+  snapshot = yield* actor.getSnapshot
   console.log(`After dismiss: ${snapshot.context.notifications.length}`)
 })
 
-void Effect.runPromise(program)
+void Effect.runPromise(Effect.scoped(program))
 ```
 
 ## Exercises
@@ -405,7 +502,7 @@ void Effect.runPromise(program)
 - **Entry actions** run when entering a state
 - **Exit actions** run when leaving a state
 - **Transition actions** run during a specific transition
-- The `action` function creates Effect-based actions
+- A custom action can return an Effect, and the actor runs it
 - Built-in actions: `log`, `raise`, `sendTo`, `sendParent`
 - Multiple actions execute in sequence
 - Named actions (via setup) are cleaner than inline actions

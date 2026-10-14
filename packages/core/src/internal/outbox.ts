@@ -57,7 +57,7 @@ interface OutboxState {
 const closed: OutboxState = { open: false, running: false, fiber: Option.none(), waiting: [] }
 
 /** The outbox whose delivery the current fiber runs, by its identity; none outside a delivery. */
-const Delivering = Context.Reference<Option.Option<object>>("@xstate-effect/internal/outbox/Delivering", {
+const Delivering = Context.Reference<Option.Option<object>>("@jambudipa/xstate-effect/internal/outbox/Delivering", {
   defaultValue: () => Option.none(),
 })
 

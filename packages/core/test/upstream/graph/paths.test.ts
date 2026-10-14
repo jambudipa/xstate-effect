@@ -368,6 +368,20 @@ describe('getShortestPathsFrom', () => {
     expect(shortestPaths).toHaveLength(4);
 
     expect(shortestPaths.every((path) => path.steps.length === 3)).toBeTruthy();
+
+    // Port check: the paths the comments above name, in upstream's order: each path to b in
+    // turn, joined with each shortest path from its end (`getShortestPathsFrom`; run against
+    // xstate@5.33.2)
+    expect(pathsToB.map((path) => path.description)).toEqual([
+      'Reaches state "b": xstate.init → NEXT',
+      'Reaches state "b": xstate.init → OTHER'
+    ]);
+    expect(shortestPaths.map((path) => path.description)).toEqual([
+      'Reaches state "c": xstate.init → NEXT → TO_C',
+      'Reaches state "d": xstate.init → NEXT → TO_D',
+      'Reaches state "c": xstate.init → OTHER → TO_C',
+      'Reaches state "d": xstate.init → OTHER → TO_D'
+    ]);
   }));
 
   describe('getSimplePathsFrom', () => {

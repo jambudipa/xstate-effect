@@ -9,7 +9,9 @@
 
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { execSync, spawnSync } from "node:child_process"
+import { spawnSync } from "node:child_process"
+import { collectLintErrors, collectTypeErrors, docsTsConfig, hasFailures, markdownFilesOf, mergeFindings } from "./check-markdown-core.ts"
+import type { Findings, ToolRun } from "./check-markdown-core.ts"
 
 // ============================================
 // TYPES
@@ -83,8 +85,17 @@ interface Report {
    * `blocksWithTypeErrors`.
    */
   blocksWithLintErrors: number
-  /** Blocks with no compiler error and no ESLint finding. */
+  /**
+   * Blocks with no compiler error and no ESLint finding. While `runErrors` is not empty, a tool did
+   * not check every block, so a block counted here may still fail.
+   */
   blocksClean: number
+  /**
+   * The failures of `tsc` and ESLint that name no block (`Findings.runErrors`): a bad config, an
+   * error outside the extracted files, a tool that did not start, finish or report. Any of them
+   * fails the run.
+   */
+  runErrors: string[]
   /** One entry per block, in the order the walk found them. */
   results: CheckResult[]
 }
@@ -116,33 +127,18 @@ const EXTRACTED_DIR = path.join(TEMP_DIR, "extracted")
 // ============================================
 
 /**
- * Lists every `.md` file under `dir`, at any depth, as paths joined onto `dir`.
- *
- * Only folders named `node_modules` or `.git` are skipped. Gitignored folders such as `.upstream/`
- * are scanned too, so a markdown file there adds its blocks to the check. Symbolic links are not
- * followed. A folder that cannot be read throws, which ends the run.
+ * Lists the `.md` files under `dir` that git tracks or would track, as paths joined onto `dir`
+ * (`markdownFilesOf`). Gitignored folders are left out: `node_modules`, `dist`, this check's own
+ * scratch folder, and the optional `.upstream/` clone, whose READMEs show XState's own API rather
+ * than this package's, so a fresh clone and a checkout with the clone check the same blocks. A
+ * listed file that is gone from the disk is left out. Without git the run ends with an error.
  */
 function findMarkdownFiles(dir: string): string[] {
-  const files: string[] = []
-
-  function walk(currentDir: string): void {
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true })
-
-    for (const entry of entries) {
-      const fullPath = path.join(currentDir, entry.name)
-
-      if (entry.isDirectory()) {
-        if (entry.name !== "node_modules" && entry.name !== ".git") {
-          walk(fullPath)
-        }
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        files.push(fullPath)
-      }
-    }
+  const result = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: dir, encoding: "utf-8" })
+  if (result.status !== 0) {
+    throw new Error(`git ls-files failed in ${dir}: ${result.error?.message ?? result.stderr.trim()}`)
   }
-
-  walk(dir)
-  return files
+  return markdownFilesOf(result.stdout, dir).filter((file) => fs.existsSync(file))
 }
 
 /**
@@ -241,42 +237,15 @@ function generateExtractedFile(block: CodeBlock, blockIndex: number): string {
 }
 
 /**
- * Writes the strict `tsconfig.json` that type-checks the extracted blocks.
+ * Writes the strict `tsconfig.json` that type-checks the extracted blocks (`docsTsConfig` of
+ * `check-markdown-core.ts`).
  *
- * It maps `@jambudipa/xstate-effect` and the `@/*` alias onto `src/`, so the samples compile
- * against the source, not against a build. A subpath import such as
- * `@jambudipa/xstate-effect/graph` has no mapping here.
+ * It maps `@jambudipa/xstate-effect`, its subpath entry points (`/actions`, `/actors`, `/guards`,
+ * `/graph`, `/dev`) and the `@/*` alias onto `src/`, so the samples compile against the source,
+ * not against a build.
  */
 function generateTsConfig(): void {
-  const tsconfig = {
-    compilerOptions: {
-      target: "ES2022",
-      module: "NodeNext",
-      moduleResolution: "NodeNext",
-      lib: ["ES2022", "DOM"],
-      strict: true,
-      esModuleInterop: true,
-      skipLibCheck: true,
-      forceConsistentCasingInFileNames: true,
-      noEmit: true,
-      noImplicitAny: true,
-      strictNullChecks: true,
-      noImplicitReturns: true,
-      noFallthroughCasesInSwitch: true,
-      noUncheckedIndexedAccess: true,
-      baseUrl: "..",
-      paths: {
-        "@jambudipa/xstate-effect": ["./src/index.ts"],
-        "@/*": ["./src/*"]
-      }
-    },
-    include: ["extracted/**/*.ts"]
-  }
-
-  fs.writeFileSync(
-    path.join(TEMP_DIR, "tsconfig.json"),
-    JSON.stringify(tsconfig, null, 2)
-  )
+  fs.writeFileSync(path.join(TEMP_DIR, "tsconfig.json"), JSON.stringify(docsTsConfig(), null, 2))
 }
 
 /**
@@ -329,48 +298,44 @@ export default tseslint.config(
 // ============================================
 
 /**
- * Runs `tsc` over the extracted files and returns its errors keyed by extracted-file path.
+ * Runs a tool from `npx` in `TEMP_DIR` and returns what it printed and how it ended.
  *
- * Only lines of the form `extracted/<file>(line,col): error TSnnnn: message` are kept. A failure
- * with no file position, such as a bad tsconfig or a missing `tsc`, matches nothing and leaves the
- * map empty, so the report shows every block as type-clean. Read the console output when the counts
- * look too good.
+ * A tool that cannot start gives a null status and the error message instead of throwing.
  */
-function runTypeCheck(): Map<string, string[]> {
-  const errors = new Map<string, string[]>()
-
-  try {
-    execSync(`npx tsc -p tsconfig.json --pretty false 2>&1`, {
-      cwd: TEMP_DIR,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
-    })
-  } catch (err: unknown) {
-    const error = err as { stdout?: string; stderr?: string }
-    const output = (error.stdout ?? "") + (error.stderr ?? "")
-
-    // Parse TypeScript errors
-    // Format: filename(line,col): error TS####: message
-    const lines = output.split("\n")
-    for (const line of lines) {
-      const match = line.match(/^extracted\/([^(]+)\((\d+),(\d+)\): error (TS\d+): (.+)$/)
-      if (match) {
-        const filename = match[1]
-        const lineNum = match[2]
-        const colNum = match[3]
-        const code = match[4]
-        const message = match[5]
-
-        const fullPath = path.join(EXTRACTED_DIR, filename)
-        if (!errors.has(fullPath)) {
-          errors.set(fullPath, [])
-        }
-        errors.get(fullPath)!.push(`Line ${lineNum}:${colNum} - ${code}: ${message}`)
-      }
-    }
+function runTool(args: ReadonlyArray<string>): ToolRun {
+  const result = spawnSync("npx", [...args], {
+    cwd: TEMP_DIR,
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"]
+  })
+  return {
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    status: result.status,
+    ...(result.error ? { error: result.error.message } : {})
   }
+}
 
-  return errors
+/**
+ * Runs `tsc` over the extracted files and returns its errors keyed by extracted-file path, and its
+ * run errors (`collectTypeErrors` of `check-markdown-core.ts`): a failure with no file position,
+ * such as a bad tsconfig or a missing `tsc`, is a run error, which fails the check.
+ *
+ * `tsc` reports no semantic error at all while any file has a syntax error, so when the first pass
+ * finds errors, a second pass type-checks every other file again (`tsconfig.recheck.json`), and
+ * the check reports the findings of both.
+ */
+function runTypeCheck(): Findings {
+  const first = collectTypeErrors(runTool(["tsc", "-p", "tsconfig.json", "--pretty", "false"]), EXTRACTED_DIR)
+  if (first.byFile.size === 0) {
+    return first
+  }
+  fs.writeFileSync(
+    path.join(TEMP_DIR, "tsconfig.recheck.json"),
+    JSON.stringify(docsTsConfig([...first.byFile.keys()], EXTRACTED_DIR), null, 2)
+  )
+  const second = collectTypeErrors(runTool(["tsc", "-p", "tsconfig.recheck.json", "--pretty", "false"]), EXTRACTED_DIR)
+  return mergeFindings(first, second)
 }
 
 // ============================================
@@ -379,63 +344,13 @@ function runTypeCheck(): Map<string, string[]> {
 
 /**
  * Runs ESLint over the extracted files and returns its findings keyed by the absolute path that
- * ESLint reports.
+ * ESLint reports, and its run errors (`collectLintErrors` of `check-markdown-core.ts`).
  *
  * Warnings count as findings, the same as errors. When ESLint cannot run or prints something that
- * is not JSON, the function returns an empty map, and every block counts as lint-clean.
+ * is not JSON, that is a run error, which fails the check.
  */
-function runLint(): Map<string, string[]> {
-  const errors = new Map<string, string[]>()
-
-  try {
-    const result = spawnSync(
-      "npx",
-      ["eslint", "extracted", "--format", "json"],
-      {
-        cwd: TEMP_DIR,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"]
-      }
-    )
-
-    if (result.stdout) {
-      try {
-        const lintResults = JSON.parse(result.stdout) as Array<{
-          filePath: string
-          messages: Array<{
-            line: number
-            column: number
-            ruleId: string | null
-            message: string
-            severity: number
-          }>
-        }>
-
-        for (const file of lintResults) {
-          if (file.messages.length > 0) {
-            const fileErrors: string[] = []
-            for (const msg of file.messages) {
-              if (msg.severity > 0) {
-                const level = msg.severity === 2 ? "error" : "warning"
-                fileErrors.push(
-                  `Line ${msg.line}:${msg.column} - ${level} [${msg.ruleId ?? "unknown"}]: ${msg.message}`
-                )
-              }
-            }
-            if (fileErrors.length > 0) {
-              errors.set(file.filePath, fileErrors)
-            }
-          }
-        }
-      } catch {
-        // JSON parse error - likely no output
-      }
-    }
-  } catch {
-    // ESLint may not be configured properly for extracted files
-  }
-
-  return errors
+function runLint(): Findings {
+  return collectLintErrors(runTool(["eslint", "extracted", "--format", "json"]))
 }
 
 // ============================================
@@ -443,8 +358,9 @@ function runLint(): Map<string, string[]> {
 // ============================================
 
 /**
- * Renders the plain-text report: the totals, then each file with findings and its failing blocks,
- * then the clean files with their block counts. Paths are relative to the package root.
+ * Renders the plain-text report: the totals, then the run errors (when any), then each file with
+ * findings and its failing blocks, then the clean files with their block counts. Paths are
+ * relative to the package root.
  */
 function formatReport(report: Report): string {
   const lines: string[] = []
@@ -463,7 +379,20 @@ function formatReport(report: Report): string {
   lines.push(`  Clean blocks:          ${report.blocksClean}`)
   lines.push(`  Blocks with type errors: ${report.blocksWithTypeErrors}`)
   lines.push(`  Blocks with lint errors: ${report.blocksWithLintErrors}`)
+  if (report.runErrors.length > 0) {
+    lines.push(`  Run errors:            ${report.runErrors.length} (a tool did not check every block)`)
+  }
   lines.push("")
+
+  if (report.runErrors.length > 0) {
+    lines.push("-".repeat(80))
+    lines.push("RUN ERRORS")
+    lines.push("-".repeat(80))
+    for (const error of report.runErrors) {
+      lines.push(`  - ${error}`)
+    }
+    lines.push("")
+  }
 
   // Group results by file
   const byFile = new Map<string, CheckResult[]>()
@@ -548,7 +477,8 @@ function formatReport(report: Report): string {
  * It rebuilds `TEMP_DIR`, extracts every TypeScript block of every markdown file in the package,
  * type-checks and lints the blocks, prints the report and saves it as `report.txt` and
  * `report.json`. The process exits with code 1 when any block has a compiler error or any ESLint
- * finding (a warning included), and with code 0 when every block is clean or no block exists.
+ * finding (a warning included), or when `tsc` or ESLint failed without naming a block (a run
+ * error), and with code 0 when every block is clean or no block exists.
  */
 async function main(): Promise<void> {
   console.log("Markdown TypeScript Code Block Checker")
@@ -611,24 +541,30 @@ async function main(): Promise<void> {
   console.log("Running type check...")
   const typeErrors = runTypeCheck()
   for (const result of results) {
-    const errors = typeErrors.get(result.extractedFile)
+    const errors = typeErrors.byFile.get(result.extractedFile)
     if (errors) {
       result.typeErrors = errors
     }
   }
-  console.log(`Found type errors in ${typeErrors.size} files`)
+  console.log(`Found type errors in ${typeErrors.byFile.size} files`)
+  if (typeErrors.runErrors.length > 0) {
+    console.log(`tsc failed to check the blocks: ${typeErrors.runErrors.length} run error(s)`)
+  }
   console.log("")
 
   // Run linting
   console.log("Running linter...")
   const lintErrors = runLint()
   for (const result of results) {
-    const errors = lintErrors.get(result.extractedFile)
+    const errors = lintErrors.byFile.get(result.extractedFile)
     if (errors) {
       result.lintErrors = errors
     }
   }
-  console.log(`Found lint issues in ${lintErrors.size} files`)
+  console.log(`Found lint issues in ${lintErrors.byFile.size} files`)
+  if (lintErrors.runErrors.length > 0) {
+    console.log(`ESLint failed to check the blocks: ${lintErrors.runErrors.length} run error(s)`)
+  }
   console.log("")
 
   // Generate report
@@ -639,6 +575,7 @@ async function main(): Promise<void> {
     blocksWithTypeErrors: results.filter(r => r.typeErrors.length > 0).length,
     blocksWithLintErrors: results.filter(r => r.lintErrors.length > 0).length,
     blocksClean: results.filter(r => r.typeErrors.length === 0 && r.lintErrors.length === 0).length,
+    runErrors: [...typeErrors.runErrors, ...lintErrors.runErrors],
     results
   }
 
@@ -658,7 +595,7 @@ async function main(): Promise<void> {
   console.log(`JSON report saved to: ${jsonReportPath}`)
 
   // Exit with error code if there are issues
-  if (report.blocksWithTypeErrors > 0 || report.blocksWithLintErrors > 0) {
+  if (hasFailures(report)) {
     process.exit(1)
   }
 }

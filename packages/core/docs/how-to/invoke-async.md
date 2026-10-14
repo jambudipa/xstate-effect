@@ -8,11 +8,13 @@ The simplest way to invoke async operations:
 
 ```typescript
 import { setup, fromPromise, assign } from "@jambudipa/xstate-effect"
+import { Option } from "effect"
 
 const fetchUserActor = fromPromise(async ({ input }: { input: { userId: string } }) => {
   const response = await fetch(`/api/users/${input.userId}`)
   if (!response.ok) throw new Error("Failed to fetch user")
-  return response.json()
+  const user: unknown = await response.json()
+  return user
 })
 
 const _userMachine = setup({
@@ -37,11 +39,13 @@ const _userMachine = setup({
         input: ({ context }) => ({ userId: context.userId }),
         onDone: {
           target: "success",
-          actions: assign({ user: ({ event }) => event.output })
+          actions: assign({ user: ({ event }) => Option.getOrNull(event.output) })
         },
         onError: {
           target: "failure",
-          actions: assign({ error: ({ event }) => event.error.message })
+          actions: assign({
+            error: ({ event }) => event.error instanceof Error ? event.error.message : String(event.error)
+          })
         }
       }
     },
@@ -53,13 +57,17 @@ const _userMachine = setup({
 })
 ```
 
+The `output` of a done event is an `Option` (`Option.none()` where XState gives `undefined`),
+so the assigner unwraps it. The `error` of an error event is the raw value the actor failed
+with, so the assigner checks its type before it reads a message.
+
 ## Using fromEffect
 
 For Effect-based async operations:
 
 ```typescript
 import { setup, fromEffect, assign } from "@jambudipa/xstate-effect"
-import { Effect, Console } from "effect"
+import { Effect, Console, Option } from "effect"
 
 const processDataActor = fromEffect(({ input }: { input: { items: string[] } }) =>
   Effect.gen(function* () {
@@ -95,7 +103,7 @@ const _processorMachine = setup({
         input: ({ context }) => ({ items: context.items }),
         onDone: {
           target: "done",
-          actions: assign({ results: ({ event }) => event.output })
+          actions: assign({ results: ({ event }) => Option.getOrElse(event.output, () => []) })
         },
         onError: "error"
       }
@@ -111,6 +119,21 @@ const _processorMachine = setup({
 Invoke multiple services in parallel:
 
 ```typescript
+import { setup, fromPromise, assign } from "@jambudipa/xstate-effect"
+import { Option } from "effect"
+
+const fetchOne = async (url: string): Promise<unknown> => {
+  const response = await fetch(url)
+  const body: unknown = await response.json()
+  return body
+}
+
+const fetchMany = async (url: string): Promise<unknown[]> => {
+  const response = await fetch(url)
+  const body: unknown[] = await response.json()
+  return body
+}
+
 const _dashboardMachine = setup({
   types: {} as {
     context: {
@@ -121,9 +144,9 @@ const _dashboardMachine = setup({
     events: { type: "LOAD" }
   },
   actors: {
-    fetchUser: fromPromise(async () => { /* ... */ }),
-    fetchPosts: fromPromise(async () => { /* ... */ }),
-    fetchNotifications: fromPromise(async () => { /* ... */ })
+    fetchUser: fromPromise(() => fetchOne("/api/user")),
+    fetchPosts: fromPromise(() => fetchMany("/api/posts")),
+    fetchNotifications: fromPromise(() => fetchMany("/api/notifications"))
   }
 }).createMachine({
   id: "dashboard",
@@ -144,7 +167,7 @@ const _dashboardMachine = setup({
                 src: "fetchUser",
                 onDone: {
                   target: "done",
-                  actions: assign({ user: ({ event }) => event.output })
+                  actions: assign({ user: ({ event }) => Option.getOrNull(event.output) })
                 },
                 onError: "error"
               }
@@ -161,7 +184,7 @@ const _dashboardMachine = setup({
                 src: "fetchPosts",
                 onDone: {
                   target: "done",
-                  actions: assign({ posts: ({ event }) => event.output })
+                  actions: assign({ posts: ({ event }) => Option.getOrElse(event.output, () => []) })
                 },
                 onError: "error"
               }
@@ -178,7 +201,7 @@ const _dashboardMachine = setup({
                 src: "fetchNotifications",
                 onDone: {
                   target: "done",
-                  actions: assign({ notifications: ({ event }) => event.output })
+                  actions: assign({ notifications: ({ event }) => Option.getOrElse(event.output, () => []) })
                 },
                 onError: "error"
               }
@@ -198,34 +221,64 @@ const _dashboardMachine = setup({
 ## Passing Dynamic Input
 
 ```typescript
-invoke: {
-  src: "fetchData",
-  input: ({ context, event }) => ({
-    // From context
-    userId: context.userId,
-    // From event (if available)
-    query: event.type === "SEARCH" ? event.query : "",
-    // Computed values
-    timestamp: Date.now()
-  }),
-  onDone: { /* ... */ }
-}
+import { setup, fromPromise } from "@jambudipa/xstate-effect"
+
+export const searchMachine = setup({
+  types: {} as {
+    context: { userId: string }
+    events: { type: "SEARCH"; query: string }
+  },
+  actors: {
+    fetchData: fromPromise(async ({ input }: { input: { userId: string; query: string; timestamp: number } }) => {
+      const response = await fetch(`/api/users/${input.userId}/search?q=${input.query}&t=${input.timestamp}`)
+      const results: unknown = await response.json()
+      return results
+    })
+  }
+}).createMachine({
+  id: "search",
+  initial: "idle",
+  context: { userId: "123" },
+  states: {
+    idle: {
+      on: { SEARCH: "searching" }
+    },
+    searching: {
+      invoke: {
+        src: "fetchData",
+        input: ({ context, event }) => ({
+          // From context
+          userId: context.userId,
+          // From event (if available)
+          query: event.type === "SEARCH" ? event.query : "",
+          // Computed values
+          timestamp: Date.now()
+        }),
+        onDone: "idle"
+      }
+    }
+  }
+})
 ```
 
 ## Handling Different Error Types
 
 ```typescript
 import { setup, fromEffect, assign } from "@jambudipa/xstate-effect"
-import { Effect, Data } from "effect"
+import { Effect, Schema } from "effect"
 
-class NetworkError extends Data.TaggedError("NetworkError")<{ message: string }> {}
-class ValidationError extends Data.TaggedError("ValidationError")<{ field: string }> {}
+class NetworkError extends Schema.TaggedError<NetworkError>()("NetworkError", {
+  message: Schema.String
+}) {}
+class ValidationError extends Schema.TaggedError<ValidationError>()("ValidationError", {
+  field: Schema.String
+}) {}
 
 const submitActor = fromEffect(({ input }: { input: { data: Record<string, unknown> } }) =>
   Effect.gen(function* () {
     // Validate
     if (!input.data.email) {
-      yield* Effect.fail(new ValidationError({ field: "email" }))
+      return yield* new ValidationError({ field: "email" })
     }
 
     // Submit
@@ -234,7 +287,10 @@ const submitActor = fromEffect(({ input }: { input: { data: Record<string, unkno
       catch: () => new NetworkError({ message: "Network request failed" })
     })
 
-    return yield* Effect.tryPromise(() => response.json())
+    return yield* Effect.tryPromise({
+      try: (): Promise<unknown> => response.json(),
+      catch: () => new NetworkError({ message: "The response was not JSON" })
+    })
   })
 )
 
@@ -284,17 +340,35 @@ const _formMachine = setup({
 Invoked actors are automatically cancelled when leaving the state:
 
 ```typescript
-states: {
-  loading: {
-    invoke: {
-      src: "slowOperation", // Cancelled if we leave "loading"
-      onDone: "success"
-    },
-    on: {
-      CANCEL: "idle" // Leaving triggers cancellation
-    }
+import { setup, fromEffect } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+export const cancellableMachine = setup({
+  types: {} as {
+    events: { type: "START" } | { type: "CANCEL" }
+  },
+  actors: {
+    slowOperation: fromEffect(() => Effect.sleep("10 seconds"))
   }
-}
+}).createMachine({
+  id: "cancellable",
+  initial: "idle",
+  states: {
+    idle: {
+      on: { START: "loading" }
+    },
+    loading: {
+      invoke: {
+        src: "slowOperation", // Cancelled if we leave "loading"
+        onDone: "success"
+      },
+      on: {
+        CANCEL: "idle" // Leaving triggers cancellation
+      }
+    },
+    success: {}
+  }
+})
 ```
 
 ## Invoke with ID
@@ -302,15 +376,40 @@ states: {
 Give your invocation an ID to reference it:
 
 ```typescript
-invoke: {
-  id: "myFetcher",
-  src: "fetchData",
-  onDone: {
-    actions: ({ event }) => {
-      // event.type will be "xstate.done.actor.myFetcher"
+import { setup, fromPromise } from "@jambudipa/xstate-effect"
+import { Console } from "effect"
+
+export const fetcherMachine = setup({
+  types: {} as {
+    events: { type: "FETCH" }
+  },
+  actors: {
+    fetchData: fromPromise(async () => {
+      const response = await fetch("/api/data")
+      const data: unknown = await response.json()
+      return data
+    })
+  }
+}).createMachine({
+  id: "fetcher",
+  initial: "idle",
+  states: {
+    idle: {
+      on: { FETCH: "loading" }
+    },
+    loading: {
+      invoke: {
+        id: "myFetcher",
+        src: "fetchData",
+        onDone: {
+          target: "idle",
+          // event.type is "xstate.done.actor.myFetcher"
+          actions: ({ event }) => Console.log(event.type)
+        }
+      }
     }
   }
-}
+})
 ```
 
 ## Tips

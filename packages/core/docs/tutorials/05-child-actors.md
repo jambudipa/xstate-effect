@@ -22,44 +22,34 @@ In the actor model:
 The simplest actor wraps a Promise-returning function:
 
 ```typescript
-import { setup, createActor, fromPromise, assign } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
+import { setup, fromPromise, assign } from "@jambudipa/xstate-effect"
+import { Option } from "effect"
+
+interface User {
+  name: string
+  email: string
+}
 
 // Define an actor that fetches user data
-const fetchUserActor = fromPromise(async ({ input }: { input: { userId: string } }) => {
+const fetchUserActor = fromPromise(async ({ input }: { input: { userId: string } }): Promise<User> => {
   const response = await fetch(`/api/users/${input.userId}`)
+  if (!response.ok) {
+    throw new Error(`Request failed with status ${response.status}`)
+  }
   return response.json()
 })
 
-const userMachine = setup({
+export const userMachine = setup({
   types: {} as {
     context: {
       userId: string
-      user: { name: string; email: string } | null
+      user: User | null
       error: string | null
     }
     events: { type: "FETCH" } | { type: "RETRY" }
   },
   actors: {
     fetchUser: fetchUserActor
-  },
-  actions: {
-    setUser: assign({
-      user: ({ event }) => {
-        if (event.type === "xstate.done.actor.fetchUser") {
-          return event.output
-        }
-        return null
-      }
-    }),
-    setError: assign({
-      error: ({ event }) => {
-        if (event.type === "xstate.error.actor.fetchUser") {
-          return event.error.message
-        }
-        return null
-      }
-    })
   }
 }).createMachine({
   id: "user",
@@ -80,11 +70,12 @@ const userMachine = setup({
         input: ({ context }) => ({ userId: context.userId }),
         onDone: {
           target: "success",
-          actions: "setUser"
+          // The output of a done event is an Option
+          actions: assign({ user: ({ event }) => Option.getOrNull(event.output), error: null })
         },
         onError: {
           target: "failure",
-          actions: "setError"
+          actions: assign({ error: ({ event }) => String(event.error) })
         }
       }
     },
@@ -103,16 +94,16 @@ const userMachine = setup({
 - **`invoke`**: Starts an actor when entering the state
 - **`src`**: References the actor defined in setup
 - **`input`**: Data passed to the actor
-- **`onDone`**: Transition when actor completes successfully
-- **`onError`**: Transition when actor fails
+- **`onDone`**: Transition when actor completes successfully. The event's `output` is an `Option` of the actor's result: `Option.none()` when the actor gives no value
+- **`onError`**: Transition when actor fails. The event's `error` is the value the actor failed with
 
 ## Step 2: Using fromEffect
 
 For Effect-based async operations:
 
 ```typescript
-import { fromEffect } from "@jambudipa/xstate-effect"
-import { Effect, Console } from "effect"
+import { setup, fromEffect, assign } from "@jambudipa/xstate-effect"
+import { Effect, Console, Option } from "effect"
 
 const processDataActor = fromEffect(({ input }: { input: { data: string[] } }) =>
   Effect.gen(function* () {
@@ -128,7 +119,7 @@ const processDataActor = fromEffect(({ input }: { input: { data: string[] } }) =
   })
 )
 
-const processingMachine = setup({
+export const processingMachine = setup({
   types: {} as {
     context: {
       data: string[]
@@ -154,7 +145,7 @@ const processingMachine = setup({
         onDone: {
           target: "done",
           actions: assign({
-            results: ({ event }) => event.output
+            results: ({ event }) => Option.getOrElse(event.output, () => [])
           })
         }
       }
@@ -169,7 +160,7 @@ const processingMachine = setup({
 For long-running processes that emit multiple events:
 
 ```typescript
-import { fromCallback } from "@jambudipa/xstate-effect"
+import { setup, fromCallback, assign } from "@jambudipa/xstate-effect"
 
 const timerActor = fromCallback(({ sendBack, input }: {
   sendBack: (event: { type: "TICK"; elapsed: number }) => void
@@ -186,7 +177,7 @@ const timerActor = fromCallback(({ sendBack, input }: {
   return () => clearInterval(intervalId)
 })
 
-const _timerMachine = setup({
+export const timerMachine = setup({
   types: {} as {
     context: { elapsed: number }
     events: { type: "START" } | { type: "STOP" } | { type: "TICK"; elapsed: number }
@@ -225,8 +216,7 @@ const _timerMachine = setup({
 Use `spawnChild` to create actors on-demand:
 
 ```typescript
-import { setup, createActor, spawnChild, stopChild, fromPromise, assign } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
+import { setup, spawnChild, stopChild, fromPromise, assign, type DoneActorEvent } from "@jambudipa/xstate-effect"
 
 const downloadActor = fromPromise(async ({ input }: { input: { url: string } }) => {
   // Simulate download
@@ -234,7 +224,7 @@ const downloadActor = fromPromise(async ({ input }: { input: { url: string } }) 
   return { url: input.url, size: Math.floor(Math.random() * 1000) }
 })
 
-const downloadManagerMachine = setup({
+export const downloadManagerMachine = setup({
   types: {} as {
     context: {
       downloads: Map<string, { url: string; status: "pending" | "complete" }>
@@ -242,7 +232,8 @@ const downloadManagerMachine = setup({
     events:
       | { type: "ADD_DOWNLOAD"; url: string; id: string }
       | { type: "CANCEL_DOWNLOAD"; id: string }
-      | { type: "xstate.done.actor.*"; output: { url: string; size: number } }
+      // A spawned child sends its parent a done event when it completes
+      | DoneActorEvent<{ url: string; size: number }>
   },
   actors: {
     download: downloadActor
@@ -282,6 +273,19 @@ const downloadManagerMachine = setup({
               }
             })
           ]
+        },
+        "xstate.done.actor.*": {
+          // Mark the download complete; event.actorId is the id the child was spawned with
+          actions: assign({
+            downloads: ({ context, event }) => {
+              const newDownloads = new Map(context.downloads)
+              const download = newDownloads.get(event.actorId)
+              if (download) {
+                newDownloads.set(event.actorId, { ...download, status: "complete" })
+              }
+              return newDownloads
+            }
+          })
         }
       }
     }
@@ -296,7 +300,9 @@ const downloadManagerMachine = setup({
 Children automatically send done/error events. For custom events, use `sendParent`:
 
 ```typescript
-const childMachine = setup({
+import { setup, assign, sendParent } from "@jambudipa/xstate-effect"
+
+export const childMachine = setup({
   types: {} as {
     context: { progress: number }
     events: { type: "WORK" }
@@ -326,13 +332,44 @@ const childMachine = setup({
 
 ### Parent to Child
 
-Use `sendTo` with the child's ID:
+Use `sendTo` with the child's ID. The parent below invokes the `childMachine` of the previous step, and logs the progress events the child sends back:
 
 ```typescript
-const _parentMachine = setup({
+import { setup, assign, sendParent, sendTo } from "@jambudipa/xstate-effect"
+import { Console } from "effect"
+
+// The childMachine of the previous step
+const childMachine = setup({
+  types: {} as {
+    context: { progress: number }
+    events: { type: "WORK" }
+  }
+}).createMachine({
+  id: "child",
+  initial: "working",
+  context: { progress: 0 },
+  states: {
+    working: {
+      entry: sendParent({ type: "CHILD_STARTED" }),
+      on: {
+        WORK: {
+          actions: [
+            assign({ progress: ({ context }) => context.progress + 10 }),
+            sendParent(({ context }) => ({ type: "CHILD_PROGRESS", progress: context.progress }))
+          ]
+        }
+      }
+    }
+  }
+})
+
+export const parentMachine = setup({
   types: {} as {
     context: {}
-    events: { type: "TELL_CHILD_TO_WORK" }
+    events:
+      | { type: "TELL_CHILD_TO_WORK" }
+      | { type: "CHILD_STARTED" }
+      | { type: "CHILD_PROGRESS"; progress: number }
   },
   actors: {
     child: childMachine
@@ -351,10 +388,11 @@ const _parentMachine = setup({
         TELL_CHILD_TO_WORK: {
           actions: sendTo("myChild", { type: "WORK" })
         },
+        CHILD_STARTED: {
+          actions: () => Console.log("Child started")
+        },
         CHILD_PROGRESS: {
-          actions: action("logProgress", ({ event }) =>
-            Console.log(`Child progress: ${event.progress}%`)
-          )
+          actions: ({ event }) => Console.log(`Child progress: ${event.progress}%`)
         }
       }
     }
@@ -364,8 +402,19 @@ const _parentMachine = setup({
 
 ## Complete Example: Task Queue
 
+The queue spawns one `taskWorker` child for each pending task, with at most `maxConcurrent` running at once. Each worker has the id `task.<task id>`, so its done event is `xstate.done.actor.task.<task id>`, and the wildcard descriptor `xstate.done.actor.task.*` matches the done events of all workers:
+
 ```typescript
-import { setup, createActor, fromEffect, spawnChild, assign, action } from "@jambudipa/xstate-effect"
+import {
+  setup,
+  createActor,
+  fromEffect,
+  assign,
+  enqueueActions,
+  waitFor,
+  type DoneActorEvent,
+  type ErrorActorEvent
+} from "@jambudipa/xstate-effect"
 import { Effect, Console } from "effect"
 
 interface Task {
@@ -381,13 +430,19 @@ const taskWorker = fromEffect(({ input }: { input: { task: Task } }) =>
 
     // Simulate occasional failure
     if (Math.random() < 0.2) {
-      yield* Effect.fail(new Error(`Task ${input.task.name} failed`))
+      return yield* Effect.fail(new Error(`Task ${input.task.name} failed`))
     }
 
     yield* Console.log(`Completed task: ${input.task.name}`)
     return { taskId: input.task.id, result: "success" }
   })
 )
+
+// A worker's actor id is "task.<task id>"
+const taskIdOf = (actorId: string) => actorId.slice("task.".length)
+
+const setStatus = (tasks: Task[], taskId: string, status: Task["status"]) =>
+  tasks.map(t => (t.id === taskId ? { ...t, status } : t))
 
 const taskQueueMachine = setup({
   types: {} as {
@@ -398,9 +453,8 @@ const taskQueueMachine = setup({
     }
     events:
       | { type: "ADD_TASK"; task: Task }
-      | { type: "PROCESS_NEXT" }
-      | { type: `xstate.done.actor.task-${string}`; output: { taskId: string } }
-      | { type: `xstate.error.actor.task-${string}`; error: Error }
+      | DoneActorEvent<{ taskId: string; result: string }, `task.${string}`>
+      | ErrorActorEvent<unknown, `task.${string}`>
   },
   actors: {
     taskWorker
@@ -412,27 +466,28 @@ const taskQueueMachine = setup({
         return [...context.tasks, event.task]
       }
     }),
+    // Start pending tasks up to maxConcurrent
+    startTasks: enqueueActions(({ context, enqueue }) => {
+      const canStart = context.maxConcurrent - context.runningCount
+      const toStart = context.tasks.filter(t => t.status === "pending").slice(0, canStart)
+
+      for (const task of toStart) {
+        enqueue.spawnChild("taskWorker", { id: `task.${task.id}`, input: { task } })
+      }
+
+      enqueue.assign({
+        tasks: context.tasks.map(t => (toStart.includes(t) ? { ...t, status: "running" as const } : t)),
+        runningCount: context.runningCount + toStart.length
+      })
+    }),
     markComplete: assign({
-      tasks: ({ context, event }) => {
-        // Extract task ID from event
-        const match = event.type.match(/xstate\.done\.actor\.task-(.+)/)
-        if (!match) return context.tasks
-        const taskId = match[1]
-        return context.tasks.map(t =>
-          t.id === taskId ? { ...t, status: "complete" as const } : t
-        )
-      },
+      tasks: ({ context, event }) =>
+        event.type === "ADD_TASK" ? context.tasks : setStatus(context.tasks, taskIdOf(event.actorId), "complete"),
       runningCount: ({ context }) => context.runningCount - 1
     }),
     markFailed: assign({
-      tasks: ({ context, event }) => {
-        const match = event.type.match(/xstate\.error\.actor\.task-(.+)/)
-        if (!match) return context.tasks
-        const taskId = match[1]
-        return context.tasks.map(t =>
-          t.id === taskId ? { ...t, status: "failed" as const } : t
-        )
-      },
+      tasks: ({ context, event }) =>
+        event.type === "ADD_TASK" ? context.tasks : setStatus(context.tasks, taskIdOf(event.actorId), "failed"),
       runningCount: ({ context }) => context.runningCount - 1
     })
   }
@@ -454,6 +509,7 @@ const taskQueueMachine = setup({
       }
     },
     processing: {
+      entry: "startTasks",
       always: {
         guard: ({ context }) => {
           const pending = context.tasks.filter(t => t.status === "pending")
@@ -461,24 +517,31 @@ const taskQueueMachine = setup({
         },
         target: "idle"
       },
-      entry: ({ context, self }) => {
-        // Start tasks up to maxConcurrent
-        const pending = context.tasks.filter(t => t.status === "pending")
-        const canStart = context.maxConcurrent - context.runningCount
-
-        pending.slice(0, canStart).forEach(task => {
-          // This would spawn the task worker
-          // spawnChild("taskWorker", { id: `task-${task.id}`, input: { task } })
-        })
-      },
       on: {
-        ADD_TASK: { actions: "addTask" },
-        "xstate.done.actor.task-*": { actions: "markComplete" },
-        "xstate.error.actor.task-*": { actions: "markFailed" }
+        ADD_TASK: { actions: ["addTask", "startTasks"] },
+        "xstate.done.actor.task.*": { actions: ["markComplete", "startTasks"] },
+        "xstate.error.actor.task.*": { actions: ["markFailed", "startTasks"] }
       }
     }
   }
 })
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(taskQueueMachine)
+  yield* actor.start
+
+  for (const name of ["Resize images", "Send emails", "Build report", "Archive logs"]) {
+    yield* actor.send({ type: "ADD_TASK", task: { id: name.toLowerCase().replaceAll(" ", "-"), name, status: "pending" } })
+  }
+
+  // The queue returns to idle when every task is complete or failed
+  const snapshot = yield* waitFor(actor, (s) => s.matches("idle"))
+  for (const task of snapshot.context.tasks) {
+    console.log(`${task.name}: ${task.status}`)
+  }
+})
+
+void Effect.runPromise(Effect.scoped(program))
 ```
 
 ## Exercises
@@ -501,4 +564,4 @@ const taskQueueMachine = setup({
 
 ## What's Next
 
-In the [next tutorial](./06-invoking-services.md), you'll dive deeper into invoking external services and handling their lifecycles.
+In the [next tutorial](./07-testing.md), you'll learn how to write deterministic tests for your machines with the testing utilities.

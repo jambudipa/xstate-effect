@@ -18,10 +18,9 @@ We'll build a counter that can increment, decrement, and reset. The count value 
 First, define the shape of your context in the `types` object:
 
 ```typescript
-import { setup, createActor as _createActor, assign as _assign } from "@jambudipa/xstate-effect"
-import { Effect as _Effect } from "effect"
+import { setup } from "@jambudipa/xstate-effect"
 
-const _counterMachine = setup({
+export const counterMachine = setup({
   types: {} as {
     context: { count: number }
     events:
@@ -56,10 +55,9 @@ The initial context is set in `createMachine`:
 The `assign` action updates context. Import it and add actions to your transitions:
 
 ```typescript
-import { setup, createActor as _createActor, assign } from "@jambudipa/xstate-effect"
-import { Effect as _Effect } from "effect"
+import { setup, assign } from "@jambudipa/xstate-effect"
 
-const _counterMachine = setup({
+export const counterMachine = setup({
   types: {} as {
     context: { count: number }
     events:
@@ -95,12 +93,36 @@ const _counterMachine = setup({
 
 **Static assignment** - set a fixed value:
 ```typescript
-assign({ count: 0 })
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const resetMachine = setup({
+  types: {} as {
+    context: { count: number }
+    events: { type: "RESET" }
+  }
+}).createMachine({
+  context: { count: 5 },
+  on: {
+    RESET: { actions: assign({ count: 0 }) }
+  }
+})
 ```
 
 **Dynamic assignment** - compute the new value:
 ```typescript
-assign({ count: ({ context }) => context.count + 1 })
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const incrementMachine = setup({
+  types: {} as {
+    context: { count: number }
+    events: { type: "INCREMENT" }
+  }
+}).createMachine({
+  context: { count: 0 },
+  on: {
+    INCREMENT: { actions: assign({ count: ({ context }) => context.count + 1 }) }
+  }
+})
 ```
 
 The function receives an object with:
@@ -112,7 +134,9 @@ The function receives an object with:
 Events can carry data. Let's add an `ADD` event that specifies how much to add:
 
 ```typescript
-const _counterMachine = setup({
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const counterMachine = setup({
   types: {} as {
     context: { count: number }
     events:
@@ -151,7 +175,29 @@ const _counterMachine = setup({
 Now you can send events with data:
 
 ```typescript
-yield* actor.send({ type: "ADD", amount: 5 })
+import { setup, assign, createActor } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const counterMachine = setup({
+  types: {} as {
+    context: { count: number }
+    events: { type: "ADD"; amount: number }
+  }
+}).createMachine({
+  context: { count: 0 },
+  on: {
+    ADD: { actions: assign({ count: ({ context, event }) => context.count + event.amount }) }
+  }
+})
+
+export const addFive = Effect.gen(function* () {
+  const actor = yield* createActor(counterMachine)
+  yield* actor.start
+  yield* actor.send({ type: "ADD", amount: 5 })
+
+  const snapshot = yield* actor.getSnapshot
+  console.log(snapshot.context.count) // 5
+})
 ```
 
 ## Step 4: Multiple Context Properties
@@ -159,7 +205,9 @@ yield* actor.send({ type: "ADD", amount: 5 })
 Context can have multiple properties:
 
 ```typescript
-const _counterMachine = setup({
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const counterMachine = setup({
   types: {} as {
     context: {
       count: number
@@ -213,7 +261,9 @@ const _counterMachine = setup({
 For cleaner code, define actions in the `setup` function:
 
 ```typescript
-const _counterMachine = setup({
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const counterMachine = setup({
   types: {} as {
     context: { count: number }
     events:
@@ -291,30 +341,31 @@ const counterMachine = setup({
 
 const program = Effect.gen(function* () {
   const actor = yield* createActor(counterMachine)
-  yield* actor.start()
+  yield* actor.start
 
-  let snapshot = yield* actor.getSnapshot()
+  let snapshot = yield* actor.getSnapshot
   console.log(`Initial count: ${snapshot.context.count}`) // 0
 
   yield* actor.send({ type: "INCREMENT" })
   yield* actor.send({ type: "INCREMENT" })
   yield* actor.send({ type: "INCREMENT" })
 
-  snapshot = yield* actor.getSnapshot()
+  snapshot = yield* actor.getSnapshot
   console.log(`After 3 increments: ${snapshot.context.count}`) // 3
 
   yield* actor.send({ type: "ADD", amount: 10 })
 
-  snapshot = yield* actor.getSnapshot()
+  snapshot = yield* actor.getSnapshot
   console.log(`After adding 10: ${snapshot.context.count}`) // 13
 
   yield* actor.send({ type: "RESET" })
 
-  snapshot = yield* actor.getSnapshot()
+  snapshot = yield* actor.getSnapshot
   console.log(`After reset: ${snapshot.context.count}`) // 0
 })
 
-void Effect.runPromise(program)
+// Effect.scoped closes the actor's scope when the program ends
+void Effect.runPromise(Effect.scoped(program))
 ```
 
 ## Exercises

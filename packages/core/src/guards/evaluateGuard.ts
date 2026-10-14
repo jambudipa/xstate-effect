@@ -42,7 +42,7 @@ const notImplementedMessage = (guardType: string): string => `Guard '${guardType
  * How many guard evaluations the current one runs inside: a built-in guard (`and`, `or`,
  * `not`, `stateNotIn`) evaluates its own guards inside its evaluation, in the same fiber.
  */
-const GuardDepth = Context.Reference<number>("@xstate-effect/guards/GuardDepth", { defaultValue: () => 0 })
+const GuardDepth = Context.Reference<number>("@jambudipa/xstate-effect/guards/GuardDepth", { defaultValue: () => 0 })
 
 /**
  * The deepest nesting of guard evaluations. Only a guard that refers back to itself through

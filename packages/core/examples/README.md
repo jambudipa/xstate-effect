@@ -46,7 +46,9 @@ with `createMachine(...)`. Three behaviours of this port show up in almost every
 ## How the examples are run and checked
 
 - `test/examples.test.ts` steps the counter, toggle, stopwatch and fetch machines through
-  `getInitialSnapshot` and `getNextSnapshot` and checks the state values and context.
+  `getInitialSnapshot` and `getNextSnapshot` and checks the state values and context. It also
+  runs the MongoDB credit check in a live actor with mock services (a cached report skips the
+  bureau fetch) and checks that the media scanner takes its paths from its input.
 - `test/smoke.test.ts` and `test/actor.test.ts` run the counter machine in a live actor.
 - The COMPAT-1 evidence file (`test/verify/verify-xstate-5-33-2-port-COMPAT-1.spec.ts`) covers
   every example. It compiles all of them with the test compiler options (`declaration` on, so an

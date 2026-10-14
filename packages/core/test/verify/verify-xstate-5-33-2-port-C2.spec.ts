@@ -28,6 +28,7 @@ import {
   assign,
   createActor,
   createMachine,
+  enqueueActions,
   type EventObject,
   fromCallback,
   fromEffect,
@@ -35,6 +36,7 @@ import {
   isActor,
   sendTo,
   setup,
+  spawnChild,
 } from "../../src/index.js"
 import { actorTypeNotFound } from "./upstream-messages.js"
 
@@ -69,6 +71,12 @@ const makeGate = <A>() => {
   })
   return { promise, resolve: (value: A) => handles.resolve(value), reject: (error: unknown) => handles.reject(error) }
 }
+
+/** A callback logic that records `[tag, input]` in `seen` when it starts. */
+const recordInput = (seen: Array<unknown>, tag: string) =>
+  fromCallback(({ input }: { input: unknown }) => {
+    seen.push([tag, input])
+  })
 
 /** Runs `program` with a logger that keeps the text of every Warn-level entry in `warnings`. */
 const withWarnings = <A, E, R>(warnings: Array<string>, program: Effect.Effect<A, E, R>) =>
@@ -583,5 +591,88 @@ describe("C2 State invoke runs, routes results and stops on exit", () => {
       const actor = yield* Effect.tap(createActor(machine), (started) => started.start)
       yield* settled(() => Effect.map(actor.getSnapshot, (snapshot) => snapshot.value === "b"))
       assert.deepStrictEqual((yield* actor.getSnapshot).context.result, Option.some("value"))
+    }))
+
+  it.effect("[C2] an invoke with input: null gives the child null, not undefined (upstream keeps the invoke config's input as given)", () =>
+    Effect.gen(function* () {
+      const seen: Array<unknown> = []
+      const machine = createMachine({ initial: "a", states: { a: { invoke: { src: recordInput(seen, "invoke"), input: null } } } })
+
+      yield* Effect.tap(createActor(machine), (started) => started.start)
+      yield* settled(() => Effect.sync(() => seen.length >= 1))
+      assert.deepStrictEqual(seen, [["invoke", null]])
+    }))
+
+  it.effect("[C2] an invoke whose input function returns null gives the child null (upstream resolveSpawn)", () =>
+    Effect.gen(function* () {
+      const seen: Array<unknown> = []
+      const machine = createMachine({
+        initial: "a",
+        states: { a: { invoke: { src: recordInput(seen, "invoke function"), input: () => null } } },
+      })
+
+      yield* Effect.tap(createActor(machine), (started) => started.start)
+      yield* settled(() => Effect.sync(() => seen.length >= 1))
+      assert.deepStrictEqual(seen, [["invoke function", null]])
+    }))
+
+  it.effect("[C2] in a setup machine an invoke by name with input: null gives the child null", () =>
+    Effect.gen(function* () {
+      const seen: Array<unknown> = []
+      const machine = setup({ actors: { child: recordInput(seen, "setup invoke") } }).createMachine({
+        initial: "a",
+        states: { a: { invoke: { src: "child", input: null } } },
+      })
+
+      yield* Effect.tap(createActor(machine), (started) => started.start)
+      yield* settled(() => Effect.sync(() => seen.length >= 1))
+      assert.deepStrictEqual(seen, [["setup invoke", null]])
+    }))
+
+  it.effect("[C2] spawnChild and enqueue.spawnChild with input: null give the child null", () =>
+    Effect.gen(function* () {
+      const seen: Array<unknown> = []
+      const machine = createMachine({
+        entry: [
+          spawnChild(recordInput(seen, "spawnChild"), { id: "first", input: null }),
+          enqueueActions(({ enqueue }) => {
+            enqueue.spawnChild(recordInput(seen, "enqueue.spawnChild"), { id: "second", input: null })
+          }),
+        ],
+      })
+
+      yield* Effect.tap(createActor(machine), (started) => started.start)
+      yield* settled(() => Effect.sync(() => seen.length >= 2))
+      assert.deepStrictEqual(seen, [["spawnChild", null], ["enqueue.spawnChild", null]])
+    }))
+
+  it.effect("[C2] spawn with input: null, of a logic and by name, gives the child null", () =>
+    Effect.gen(function* () {
+      const seen: Array<unknown> = []
+      const byLogic = createMachine({ context: ({ spawn }) => ({ ref: spawn(recordInput(seen, "spawn logic"), { input: null }) }) })
+      const byName = setup({ actors: { child: recordInput(seen, "spawn name") } }).createMachine({
+        context: ({ spawn }) => ({ ref: spawn("child", { input: null }) }),
+      })
+
+      yield* Effect.tap(createActor(byLogic), (started) => started.start)
+      yield* settled(() => Effect.sync(() => seen.length >= 1))
+      yield* Effect.tap(createActor(byName), (started) => started.start)
+      yield* settled(() => Effect.sync(() => seen.length >= 2))
+      assert.deepStrictEqual(seen, [["spawn logic", null], ["spawn name", null]])
+    }))
+
+  it.effect("[C2] createActor with input: null gives the logic null, and a machine's context factory receives null", () =>
+    Effect.gen(function* () {
+      const seen: Array<unknown> = []
+      yield* Effect.tap(createActor(recordInput(seen, "createActor"), { input: null }), (started) => started.start)
+      yield* settled(() => Effect.sync(() => seen.length >= 1))
+      assert.deepStrictEqual(seen, [["createActor", null]])
+
+      const machine = createMachine({
+        types: {} as { context: { readonly input: unknown }; input: unknown },
+        context: ({ input }) => ({ input }),
+      })
+      const actor = yield* createActor(machine, { input: null })
+      assert.strictEqual((yield* actor.getSnapshot).context.input, null)
     }))
 })

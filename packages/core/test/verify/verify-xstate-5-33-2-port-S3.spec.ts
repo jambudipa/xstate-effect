@@ -171,6 +171,18 @@ describe("S3 parallel states enter every region and handle events per region", (
         outer: { x: "x1", y: { y1: {}, y2: {} } },
         plain: "z",
       })
+
+      // "Fully": every node of the configuration is active, each once, in document order, as
+      // upstream's initial microstep enters them (`enterStates` sorts by `order`; run against
+      // xstate@5.33.2). `deepStrictEqual` on the value above ignores key order
+      assert.deepStrictEqual(
+        fromDeep._nodes.map((node) => node.id),
+        ["m", "m.one", "m.one.foo", "m.one.foo.a", "m.one.foo.a.b", "m.one.foo.a.b.c", "m.one.bar", "m.one.bar.a", "m.one.bar.a.b", "m.one.bar.a.b.c"]
+      )
+      assert.deepStrictEqual(
+        fromRegion._nodes.map((node) => node.id),
+        ["n", "n.outer", "n.outer.x", "n.outer.x.x1", "n.outer.y", "n.outer.y.y1", "n.outer.y.y2", "n.plain", "n.plain.z"]
+      )
     })
   )
 

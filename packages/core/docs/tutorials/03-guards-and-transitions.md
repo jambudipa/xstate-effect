@@ -14,43 +14,58 @@ In previous tutorials, transitions always happened when an event was received. N
 Consider a counter with a maximum value. Without guards, you'd need separate states for "at maximum" and "not at maximum". With guards, you can conditionally prevent the INCREMENT event:
 
 ```typescript
+import { setup, createMachine, assign } from "@jambudipa/xstate-effect"
+
 // Without guards: complex state structure
-states: {
-  belowMax: { on: { INCREMENT: "checkMax" } },
-  atMax: { on: { DECREMENT: "belowMax" } },
-  checkMax: { always: [ /* conditional transitions */ ] }
-}
+export const withoutGuards = createMachine({
+  initial: "belowMax",
+  states: {
+    belowMax: { on: { INCREMENT: "checkMax" } },
+    atMax: { on: { DECREMENT: "belowMax" } },
+    checkMax: { always: [ /* conditional transitions */ ] }
+  }
+})
 
 // With guards: simple and clear
-states: {
-  active: {
-    on: {
-      INCREMENT: { guard: "canIncrement", actions: "increment" }
+export const withGuards = setup({
+  types: {} as {
+    context: { count: number; max: number }
+    events: { type: "INCREMENT" }
+  },
+  guards: {
+    canIncrement: ({ context }) => context.count < context.max
+  },
+  actions: {
+    increment: assign({ count: ({ context }) => context.count + 1 })
+  }
+}).createMachine({
+  initial: "active",
+  context: { count: 0, max: 5 },
+  states: {
+    active: {
+      on: {
+        INCREMENT: { guard: "canIncrement", actions: "increment" }
+      }
     }
   }
-}
+})
 ```
 
 ## Step 1: Define a Guard
 
-Guards are functions that return `true` (allow) or `false` (prevent):
+Guards are functions that return `true` (allow) or `false` (prevent). Define them in the `guards` object of `setup`:
 
 ```typescript
-import { setup, createActor as _createActor, assign, guard } from "@jambudipa/xstate-effect"
-import { Effect as _Effect } from "effect"
+import { setup, assign } from "@jambudipa/xstate-effect"
 
-const _counterMachine = setup({
+export const counterMachine = setup({
   types: {} as {
     context: { count: number; max: number }
     events: { type: "INCREMENT" } | { type: "DECREMENT" }
   },
   guards: {
-    canIncrement: guard("canIncrement", ({ context }) =>
-      context.count < context.max
-    ),
-    canDecrement: guard("canDecrement", ({ context }) =>
-      context.count > 0
-    )
+    canIncrement: ({ context }) => context.count < context.max,
+    canDecrement: ({ context }) => context.count > 0
   },
   actions: {
     increment: assign({ count: ({ context }) => context.count + 1 }),
@@ -80,27 +95,37 @@ const _counterMachine = setup({
 ### Guard Function Signature
 
 ```typescript
-guard("name", ({ context, event }) => boolean)
+import type { GuardPredicate } from "@jambudipa/xstate-effect"
+
+type CounterContext = { count: number; max: number }
+type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" }
+
+// ({ context, event }) => boolean
+export const canIncrement: GuardPredicate<CounterContext, CounterEvent> = ({ context, event }) =>
+  event.type === "INCREMENT" && context.count < context.max
 ```
 
 The guard receives:
 - `context`: Current machine context
 - `event`: The event that triggered the transition
 
+A guard can also return an `Effect<boolean>`; the machine runs the Effect and uses its result.
+
 ## Step 2: Guards with Event Data
 
 Guards can inspect event payloads:
 
 ```typescript
-const _machine = setup({
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const accountMachine = setup({
   types: {} as {
     context: { balance: number }
     events: { type: "WITHDRAW"; amount: number }
   },
   guards: {
-    hasSufficientFunds: guard("hasSufficientFunds", ({ context, event }) =>
+    hasSufficientFunds: ({ context, event }) =>
       event.type === "WITHDRAW" && context.balance >= event.amount
-    )
   },
   actions: {
     withdraw: assign({
@@ -130,13 +155,15 @@ const _machine = setup({
 Define multiple transitions for the same event. The first matching guard wins:
 
 ```typescript
-const _trafficLight = setup({
+import { setup } from "@jambudipa/xstate-effect"
+
+export const trafficLightMachine = setup({
   types: {} as {
     context: { emergencyMode: boolean }
     events: { type: "NEXT" }
   },
   guards: {
-    isEmergency: guard("isEmergency", ({ context }) => context.emergencyMode)
+    isEmergency: ({ context }) => context.emergencyMode
   }
 }).createMachine({
   id: "trafficLight",
@@ -183,24 +210,25 @@ const _trafficLight = setup({
 Use `and`, `or`, and `not` to compose guards:
 
 ```typescript
-import { setup, guard, and, or, not } from "@jambudipa/xstate-effect"
+import { setup, and, or, not } from "@jambudipa/xstate-effect"
 
-const _machine = setup({
+export const accessMachine = setup({
   types: {} as {
     context: {
       isAdmin: boolean
       isVerified: boolean
       isBanned: boolean
     }
-    events: { type: "ACCESS_ADMIN" }
+    events: { type: "ACCESS_ADMIN" } | { type: "ACCESS_REPORTS" }
   },
   guards: {
-    isAdmin: guard("isAdmin", ({ context }) => context.isAdmin),
-    isVerified: guard("isVerified", ({ context }) => context.isVerified),
-    isBanned: guard("isBanned", ({ context }) => context.isBanned),
+    isAdmin: ({ context }) => context.isAdmin,
+    isVerified: ({ context }) => context.isVerified,
+    isBanned: ({ context }) => context.isBanned,
 
     // Combine guards
-    canAccessAdmin: and(["isAdmin", "isVerified", not("isBanned")])
+    canAccessAdmin: and(["isAdmin", "isVerified", not("isBanned")]),
+    canAccessReports: or(["isAdmin", "isVerified"])
   }
 }).createMachine({
   id: "access",
@@ -212,10 +240,15 @@ const _machine = setup({
         ACCESS_ADMIN: {
           guard: "canAccessAdmin",
           target: "admin"
+        },
+        ACCESS_REPORTS: {
+          guard: "canAccessReports",
+          target: "reports"
         }
       }
     },
-    admin: {}
+    admin: {},
+    reports: {}
   }
 })
 ```
@@ -223,17 +256,50 @@ const _machine = setup({
 ### Guard Combinators
 
 ```typescript
-// All guards must pass
-and(["guard1", "guard2", "guard3"])
+import { setup, and, or, not } from "@jambudipa/xstate-effect"
 
-// At least one guard must pass
-or(["guard1", "guard2"])
+export const combinatorsMachine = setup({
+  types: {} as {
+    context: { a: boolean; b: boolean; c: boolean }
+    events: { type: "CHECK" }
+  },
+  guards: {
+    guard1: ({ context }) => context.a,
+    guard2: ({ context }) => context.b,
+    guard3: ({ context }) => context.c,
 
-// Inverts the guard result
-not("guardName")
+    // All guards must pass
+    allPass: and(["guard1", "guard2", "guard3"]),
 
-// Nested combinations
-and(["guard1", or(["guard2", "guard3"])])
+    // At least one guard must pass
+    anyPasses: or(["guard1", "guard2"]),
+
+    // Inverts the guard result
+    notGuard1: not("guard1"),
+
+    // Nested combinations
+    nested: and(["guard1", or(["guard2", "guard3"])])
+  }
+}).createMachine({
+  initial: "waiting",
+  context: { a: true, b: false, c: true },
+  states: {
+    waiting: {
+      on: {
+        CHECK: [
+          { guard: "allPass", target: "all" },
+          { guard: "nested", target: "nested" },
+          { guard: "anyPasses", target: "some" },
+          { guard: "notGuard1", target: "none" }
+        ]
+      }
+    },
+    all: {},
+    nested: {},
+    some: {},
+    none: {}
+  }
+})
 ```
 
 ## Step 5: The stateIn Guard
@@ -276,7 +342,7 @@ const _machine = setup({
 ## Complete Example: Password Validator
 
 ```typescript
-import { setup, createActor, assign, guard, and } from "@jambudipa/xstate-effect"
+import { setup, createActor, assign, and } from "@jambudipa/xstate-effect"
 import { Effect } from "effect"
 
 const passwordMachine = setup({
@@ -290,15 +356,9 @@ const passwordMachine = setup({
       | { type: "SUBMIT" }
   },
   guards: {
-    hasMinLength: guard("hasMinLength", ({ context }) =>
-      context.password.length >= context.minLength
-    ),
-    hasNumber: guard("hasNumber", ({ context }) =>
-      /\d/.test(context.password)
-    ),
-    hasUppercase: guard("hasUppercase", ({ context }) =>
-      /[A-Z]/.test(context.password)
-    ),
+    hasMinLength: ({ context }) => context.password.length >= context.minLength,
+    hasNumber: ({ context }) => /\d/.test(context.password),
+    hasUppercase: ({ context }) => /[A-Z]/.test(context.password),
     isValidPassword: and(["hasMinLength", "hasNumber", "hasUppercase"])
   },
   actions: {
@@ -329,24 +389,24 @@ const passwordMachine = setup({
 
 const program = Effect.gen(function* () {
   const actor = yield* createActor(passwordMachine)
-  yield* actor.start()
+  yield* actor.start
 
   // Try weak password
   yield* actor.send({ type: "SET_PASSWORD", value: "weak" })
   yield* actor.send({ type: "SUBMIT" }) // Blocked by guard
 
-  let snapshot = yield* actor.getSnapshot()
+  let snapshot = yield* actor.getSnapshot
   console.log(`State after weak password: ${snapshot.value}`) // editing
 
   // Try strong password
   yield* actor.send({ type: "SET_PASSWORD", value: "Strong1Password" })
   yield* actor.send({ type: "SUBMIT" }) // Allowed
 
-  snapshot = yield* actor.getSnapshot()
+  snapshot = yield* actor.getSnapshot
   console.log(`State after strong password: ${snapshot.value}`) // submitted
 })
 
-void Effect.runPromise(program)
+void Effect.runPromise(Effect.scoped(program))
 ```
 
 ## Exercises

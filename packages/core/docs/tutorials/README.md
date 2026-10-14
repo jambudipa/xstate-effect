@@ -31,22 +31,8 @@ Before starting these tutorials, you should:
 5. [Child Actors](./05-child-actors.md)
    Spawn and communicate with child actors for parallel processing.
 
-6. [Invoking Services](./06-invoking-services.md)
-   Call async operations and handle their results.
-
-7. [Testing State Machines](./07-testing.md)
+6. [Testing State Machines](./07-testing.md)
    Write deterministic tests for your machines using the testing utilities.
-
-### Advanced
-
-8. [Hierarchical States](./08-hierarchical-states.md)
-   Organize complex behavior with nested states.
-
-9. [Parallel States](./09-parallel-states.md)
-   Model independent concurrent regions.
-
-10. [Building a Complete Application](./10-complete-application.md)
-    Put it all together to build a real-world feature.
 
 ## How to Use These Tutorials
 

@@ -36,11 +36,31 @@ An **actor** is an independent entity that:
 Each actor encapsulates its own state. Other actors cannot directly read or modify it - they can only send messages.
 
 ```typescript
-// Actor A cannot do this:
-actorB.snapshot.context.count = 5  // ❌ No direct access
+import { Effect } from "effect"
+import { assign, createActor, send, setup } from "@jambudipa/xstate-effect"
 
-// Actor A must send a message:
-yield* send(actorBRef, { type: "SET_COUNT", value: 5 })  // ✓
+const counterMachine = setup({
+  types: {} as {
+    context: { count: number }
+    events: { type: "SET_COUNT"; value: number }
+  }
+}).createMachine({
+  context: { count: 0 },
+  on: {
+    SET_COUNT: { actions: assign({ count: ({ event }) => event.value }) }
+  }
+})
+
+export const actorA = Effect.gen(function* () {
+  const actorB = yield* createActor(counterMachine)
+  yield* actorB.start
+
+  // Actor A cannot do this:
+  // actorB.snapshot.context.count = 5  // ❌ No direct access
+
+  // Actor A must send a message:
+  yield* send(actorB, { type: "SET_COUNT", value: 5 })  // ✓
+})
 ```
 
 ### Sequential Processing
@@ -48,11 +68,30 @@ yield* send(actorBRef, { type: "SET_COUNT", value: 5 })  // ✓
 An actor processes one message at a time. This eliminates race conditions within a single actor.
 
 ```typescript
-// These events are processed one at a time
-yield* actor.send({ type: "INCREMENT" })
-yield* actor.send({ type: "INCREMENT" })
-yield* actor.send({ type: "INCREMENT" })
-// count is guaranteed to be 3
+import { Effect } from "effect"
+import { assign, createActor, setup } from "@jambudipa/xstate-effect"
+
+const counterMachine = setup({
+  types: {} as { context: { count: number }; events: { type: "INCREMENT" } }
+}).createMachine({
+  context: { count: 0 },
+  on: {
+    INCREMENT: { actions: assign({ count: ({ context }) => context.count + 1 }) }
+  }
+})
+
+export const program = Effect.gen(function* () {
+  const actor = yield* createActor(counterMachine)
+  yield* actor.start
+
+  // These events are processed one at a time
+  yield* actor.send({ type: "INCREMENT" })
+  yield* actor.send({ type: "INCREMENT" })
+  yield* actor.send({ type: "INCREMENT" })
+
+  const snapshot = yield* actor.getSnapshot
+  console.log(snapshot.context.count) // count is guaranteed to be 3
+})
 ```
 
 ### Location Transparency
@@ -60,9 +99,12 @@ yield* actor.send({ type: "INCREMENT" })
 Actors communicate via references (ActorRef). The sender doesn't need to know where the actor lives.
 
 ```typescript
+import { send, type ActorRef, type Snapshot } from "@jambudipa/xstate-effect"
+
 // Send to any actor reference
-yield* send(someActorRef, { type: "PING" })
-// Works whether the actor is local or remote
+export const ping = (someActorRef: ActorRef<Snapshot, { type: "PING" }>) =>
+  send(someActorRef, { type: "PING" })
+// Works for any actor that takes PING, whatever logic runs it
 ```
 
 ## Actors in @jambudipa/xstate-effect
@@ -70,18 +112,24 @@ yield* send(someActorRef, { type: "PING" })
 ### Actor Creation
 
 ```typescript
-import { createActor } from "@jambudipa/xstate-effect"
+import { createActor, setup } from "@jambudipa/xstate-effect"
 import { Effect } from "effect"
 
-const _program = Effect.gen(function* () {
+const myMachine = setup({
+  types: {} as { context: { value: number }; input: { initialValue: number } }
+}).createMachine({
+  context: ({ input }) => ({ value: input.initialValue })
+})
+
+export const program = Effect.gen(function* () {
   // Create an actor from a machine
-  const _actor = yield* createActor(myMachine, {
+  const actor = yield* createActor(myMachine, {
     id: "my-actor",  // Optional ID
-    input: { initialValue: 10 }  // Optional input
+    input: { initialValue: 10 }  // Input, required because the machine declares one
   })
 
   // Start the actor
-  yield* actor.start()
+  yield* actor.start
 
   // Actor is now running
 })
@@ -89,18 +137,22 @@ const _program = Effect.gen(function* () {
 
 ### ActorRef
 
-An `ActorRef` is a reference to an actor. It provides methods to interact with the actor:
+An `ActorRef` is a reference to an actor. It provides Effects to interact with the actor. This
+is a simplified view of its main members:
 
 ```typescript
-interface _ActorRef<TSnapshot, TEvent> {
+import type { Effect } from "effect"
+import type { EventObject, Snapshot } from "@jambudipa/xstate-effect"
+
+export interface ActorRefSketch<TSnapshot extends Snapshot, TEvent extends EventObject> {
   // Unique identifier
-  id: string
+  readonly id: string
 
   // Get current snapshot
-  getSnapshot(): Effect<TSnapshot>
+  readonly getSnapshot: Effect.Effect<TSnapshot>
 
   // Send an event
-  send(event: TEvent): Effect<void>
+  readonly send: (event: TEvent) => Effect.Effect<void>
 }
 ```
 
@@ -114,11 +166,19 @@ All actors exist within an `ActorSystem` that provides:
 - Scheduling services
 
 ```typescript
+import { Effect } from "effect"
+import { createActor, createMachine } from "@jambudipa/xstate-effect"
+
+const machine = createMachine({
+  initial: "idle",
+  states: { idle: {} }
+})
+
 // The system is provided automatically
-const _program = Effect.gen(function* () {
+export const program = Effect.gen(function* () {
   const actor = yield* createActor(machine)
   // Actor is registered with the system
-  yield* actor.start()
+  yield* actor.start
 })
 ```
 
@@ -143,11 +203,11 @@ Actors form hierarchies. A parent actor can spawn children, and children can sen
 ### Spawning Children
 
 ```typescript
-import { spawnChild, fromPromise } from "@jambudipa/xstate-effect"
+import { fromPromise, setup, spawnChild } from "@jambudipa/xstate-effect"
 
-const _parentMachine = setup({
+export const parentMachine = setup({
   actors: {
-    fetchData: fromPromise(async ({ input }) => {
+    fetchData: fromPromise(async ({ input }: { input: { url: string } }): Promise<unknown> => {
       const response = await fetch(input.url)
       return response.json()
     })
@@ -173,22 +233,41 @@ const _parentMachine = setup({
 
 ### Communication
 
-**Parent to Child** - Use `sendTo`:
+**Parent to Child** - Use `sendTo` with the child's ID:
 
 ```typescript
-sendTo("childActorId", { type: "PING" })
+import { sendTo } from "@jambudipa/xstate-effect"
+
+// An action that sends PING to the child with the ID "childActorId"
+export const pingChild = sendTo("childActorId", { type: "PING" })
 ```
 
 **Child to Parent** - Use `sendParent`:
 
 ```typescript
-sendParent({ type: "CHILD_DONE", result: data })
+import { sendParent, setup } from "@jambudipa/xstate-effect"
+
+export const childMachine = setup({
+  types: {} as { context: { data: string } }
+}).createMachine({
+  context: { data: "report.pdf" },
+  entry: sendParent(({ context }) => ({ type: "CHILD_DONE", result: context.data }))
+})
 ```
 
-**Between Siblings** - Route through parent or use actor IDs:
+**Between Siblings** - Route through the parent, or look the sibling up by the `systemId` it was
+created with:
 
 ```typescript
-sendTo("sibling-actor-id", { type: "DATA", payload })
+import { Effect, Option } from "effect"
+import { sendTo } from "@jambudipa/xstate-effect"
+
+// An action that sends DATA to the actor registered as "sibling-actor-id".
+// `system.get` is an Effect that never waits, so the target function runs it at once.
+export const sendToSibling = sendTo(
+  ({ system }) => Option.getOrUndefined(Effect.runSync(system.get("sibling-actor-id"))),
+  { type: "DATA", payload: [1, 2, 3] }
+)
 ```
 
 ## Types of Actors
@@ -198,8 +277,23 @@ sendTo("sibling-actor-id", { type: "DATA", payload })
 The primary actor type - a full state machine:
 
 ```typescript
-const machine = setup({ /* ... */ }).createMachine({ /* ... */ })
-const _actor = yield* createActor(machine)
+import { Effect } from "effect"
+import { createActor, setup } from "@jambudipa/xstate-effect"
+
+const machine = setup({
+  types: {} as { events: { type: "NEXT" } }
+}).createMachine({
+  initial: "first",
+  states: {
+    first: { on: { NEXT: "second" } },
+    second: {}
+  }
+})
+
+export const program = Effect.gen(function* () {
+  const actor = yield* createActor(machine)
+  yield* actor.start
+})
 ```
 
 ### Promise Actors
@@ -207,7 +301,9 @@ const _actor = yield* createActor(machine)
 Wrap a Promise-returning function:
 
 ```typescript
-const _fetchActor = fromPromise(async ({ input }) => {
+import { fromPromise } from "@jambudipa/xstate-effect"
+
+export const fetchActor = fromPromise(async ({ input }: { input: { url: string } }): Promise<unknown> => {
   const response = await fetch(input.url)
   return response.json()
 })
@@ -218,7 +314,10 @@ const _fetchActor = fromPromise(async ({ input }) => {
 Wrap an Effect:
 
 ```typescript
-const _effectActor = fromEffect(({ _input }) =>
+import { Console, Effect } from "effect"
+import { fromEffect } from "@jambudipa/xstate-effect"
+
+export const effectActor = fromEffect(() =>
   Effect.gen(function* () {
     yield* Console.log("Processing...")
     yield* Effect.sleep("1 second")
@@ -232,7 +331,9 @@ const _effectActor = fromEffect(({ _input }) =>
 Long-running processes that emit events:
 
 ```typescript
-const _callbackActor = fromCallback(({ sendBack, receive }) => {
+import { fromCallback } from "@jambudipa/xstate-effect"
+
+export const callbackActor = fromCallback(({ sendBack, receive }) => {
   const interval = setInterval(() => {
     sendBack({ type: "TICK" })
   }, 1000)
@@ -252,7 +353,9 @@ const _callbackActor = fromCallback(({ sendBack, receive }) => {
 Minimal actors with a transition function:
 
 ```typescript
-const _transitionActor = fromTransition(
+import { fromTransition } from "@jambudipa/xstate-effect"
+
+export const transitionActor = fromTransition(
   (state, event) => {
     switch (event.type) {
       case "INCREMENT":
@@ -291,25 +394,40 @@ Created ──▶ Started ──▶ Active ──▶ Stopped
 ### Lifecycle in Code
 
 ```typescript
-const _program = Effect.gen(function* () {
+import { Effect } from "effect"
+import { createActor, createMachine } from "@jambudipa/xstate-effect"
+
+const machine = createMachine({
+  initial: "working",
+  states: {
+    working: { on: { COMPLETE: "finished" } },
+    finished: { type: "final" }
+  }
+})
+
+export const program = Effect.gen(function* () {
   // Created
   const actor = yield* createActor(machine)
 
   // Started
-  yield* actor.start()
+  yield* actor.start
 
-  let _snapshot = yield* actor.getSnapshot()
-  // _snapshot.status === "active"
+  let snapshot = yield* actor.getSnapshot
+  console.log(snapshot.status) // "active"
 
   // Send events while active
   yield* actor.send({ type: "COMPLETE" })
 
-  _snapshot = yield* actor.getSnapshot()
-  // _snapshot.status === "done" (if reached final state)
+  snapshot = yield* actor.getSnapshot
+  console.log(snapshot.status) // "done": the machine reached its final state
 
-  // Stop explicitly
-  yield* actor.stop()
-  // _snapshot.status === "stopped"
+  // Stop explicitly: a second actor, stopped before it is done
+  const other = yield* createActor(machine)
+  yield* other.start
+  yield* other.stop
+
+  snapshot = yield* other.getSnapshot
+  console.log(snapshot.status) // "stopped"
 })
 ```
 
@@ -318,23 +436,42 @@ const _program = Effect.gen(function* () {
 Parents can supervise children and respond to their lifecycle events:
 
 ```typescript
-states: {
-  running: {
-    invoke: {
-      src: "childMachine",
-      onDone: {
-        // Child reached final state
-        target: "childComplete",
-        actions: ({ event }) => console.log("Child output:", event.output)
-      },
-      onError: {
-        // Child had an error
-        target: "childFailed",
-        actions: ({ event }) => console.log("Child error:", event.error)
+import { Option } from "effect"
+import { createMachine, setup } from "@jambudipa/xstate-effect"
+
+const childMachine = createMachine({
+  initial: "working",
+  states: {
+    working: { on: { FINISH: "finished" } },
+    finished: { type: "final" }
+  },
+  output: { result: 42 }
+})
+
+export const parentMachine = setup({
+  actors: { childMachine }
+}).createMachine({
+  initial: "running",
+  states: {
+    running: {
+      invoke: {
+        src: "childMachine",
+        onDone: {
+          // Child reached final state; its output arrives as an Option
+          target: "childComplete",
+          actions: ({ event }) => console.log("Child output:", Option.getOrUndefined(event.output))
+        },
+        onError: {
+          // Child had an error
+          target: "childFailed",
+          actions: ({ event }) => console.log("Child error:", event.error)
+        }
       }
-    }
+    },
+    childComplete: {},
+    childFailed: {}
   }
-}
+})
 ```
 
 ## Benefits of the Actor Model
@@ -366,7 +503,26 @@ Actors can be tested in isolation by sending events and checking responses.
 One actor coordinates multiple workers:
 
 ```typescript
-const _coordinatorMachine = setup({
+import { assign, sendParent, setup, spawnChild } from "@jambudipa/xstate-effect"
+
+interface Task { id: string; text: string }
+interface TaskResult { taskId: string; text: string }
+
+const workerMachine = setup({
+  types: {} as { context: { task: Task }; input: { task: Task } }
+}).createMachine({
+  context: ({ input }) => ({ task: input.task }),
+  entry: sendParent(({ context }) => ({
+    type: "WORKER_DONE",
+    result: { taskId: context.task.id, text: context.task.text.toUpperCase() }
+  }))
+})
+
+export const coordinatorMachine = setup({
+  types: {} as {
+    context: { tasks: Task[]; results: TaskResult[] }
+    events: { type: "ADD_TASK"; task: Task } | { type: "WORKER_DONE"; result: TaskResult }
+  },
   actors: {
     worker: workerMachine
   }
@@ -404,11 +560,22 @@ const _coordinatorMachine = setup({
 Coordinate a multi-step process with compensation:
 
 ```typescript
-const _sagaMachine = setup({
+import { fromPromise, setup } from "@jambudipa/xstate-effect"
+
+// Your own order service client
+declare const orderApi: {
+  reserveInventory: () => Promise<void>
+  chargePayment: () => Promise<void>
+  sendConfirmation: () => Promise<void>
+  releaseInventory: () => Promise<void>
+}
+
+export const sagaMachine = setup({
   actors: {
-    reserveInventory: fromPromise(/* ... */),
-    chargePayment: fromPromise(/* ... */),
-    sendConfirmation: fromPromise(/* ... */)
+    reserveInventory: fromPromise(() => orderApi.reserveInventory()),
+    chargePayment: fromPromise(() => orderApi.chargePayment()),
+    sendConfirmation: fromPromise(() => orderApi.sendConfirmation()),
+    releaseInventory: fromPromise(() => orderApi.releaseInventory())
   }
 }).createMachine({
   id: "orderSaga",
@@ -464,5 +631,4 @@ Combined with state machines, actors enable modeling complex, concurrent systems
 ## Further Reading
 
 - [What is a State Machine?](./state-machines.md)
-- [Actor Lifecycle](./actor-lifecycle.md)
-- [Spawning Actors How-to](../how-to/spawn-actors.md)
+- [Spawning Dynamic Actors](../tutorials/05-child-actors.md#step-4-spawning-dynamic-actors) - Step 4 of the child actors tutorial

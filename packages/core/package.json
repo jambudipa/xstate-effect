@@ -1,7 +1,7 @@
 {
   "name": "@jambudipa/xstate-effect",
-  "version": "0.1.0",
-  "description": "Effect-native port of XState 5.33.2 for TypeScript \u2014 state machines, statecharts and actors on effect 4, checked against the 74 upstream test files",
+  "version": "0.2.0",
+  "description": "Effect-native port of XState 5.33.2 for TypeScript — state machines, statecharts and actors on effect 4, checked against the 74 upstream test files",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -54,6 +54,7 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "CI=true vitest run",
     "test:upstream": "CI=true vitest run --config vitest.upstream.config.ts",
+    "test:coverage": "CI=true vitest run --coverage",
     "test:watch": "vitest",
     "lint": "eslint --cache --cache-location node_modules/.cache/eslint src test",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.green.json --noEmit",
@@ -62,6 +63,7 @@
     "clean:analyze": "npx tsx scripts/clean.ts --analyze-only",
     "check-docs": "node --experimental-strip-types scripts/check-markdown-code.ts",
     "upstream:fetch": "sh scripts/upstream/fetch-upstream.sh",
+    "prepare": "git config core.hooksPath .githooks || true",
     "prepublishOnly": "rm -rf dist && pnpm build && pnpm typecheck",
     "prepack": "pnpm build",
     "changeset": "changeset",
@@ -80,7 +82,7 @@
     "effect-ts",
     "typescript"
   ],
-  "author": "Jambudipa.io",
+  "author": "jambudipa",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -103,6 +105,7 @@
     "@types/node": "^24.19.1",
     "@typescript-eslint/eslint-plugin": "^8.71.0",
     "@typescript-eslint/parser": "^8.71.0",
+    "@vitest/coverage-istanbul": "5.0.3",
     "ajv": "^8.12.0",
     "cli-progress": "^3.12.0",
     "commander": "^14.0.2",

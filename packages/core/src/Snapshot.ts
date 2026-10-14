@@ -46,7 +46,7 @@ export const SnapshotStatusSchema = Schema.Literals(["active", "done", "error", 
  * @since 0.1.0
  * @category Type ID
  */
-export const SnapshotTypeId: unique symbol = Symbol.for("@xstate-effect/Snapshot")
+export const SnapshotTypeId: unique symbol = Symbol.for("@jambudipa/xstate-effect/Snapshot")
 
 /**
  * Type ID type for Snapshot.
@@ -225,7 +225,7 @@ export const isStopped = <TOutput>(snapshot: Snapshot<TOutput>): boolean =>
  * @since 0.1.0
  * @category Type ID
  */
-export const MachineSnapshotTypeId: unique symbol = Symbol.for("@xstate-effect/MachineSnapshot")
+export const MachineSnapshotTypeId: unique symbol = Symbol.for("@jambudipa/xstate-effect/MachineSnapshot")
 
 /**
  * Type ID type for MachineSnapshot.

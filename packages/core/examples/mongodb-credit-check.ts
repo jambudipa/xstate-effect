@@ -12,6 +12,12 @@
  * - onDone with guard conditions
  *
  * Ported from xstate/examples/mongodb-credit-check-api
+ *
+ * Note: The original's `equiGavinReportFound`, `gavUnionReportFound` and `gavperianReportFound`
+ * guards read the bureau score from the context. A guard runs before the actions of its
+ * transition, so the `onDone` assign has not stored the cached score yet: the guard sees 0, and
+ * every check fetches from the bureau even when the reports table has a report. The port fixes
+ * this with one `reportFound` guard that reads the cached report from the done event.
  */
 import { Option } from "effect"
 import { setup, assign, fromPromise } from "../src/index.js"
@@ -77,6 +83,23 @@ async function checkBureauService(input: {
   return 650 + Math.floor(Math.random() * 150)
 }
 
+/** A stored bureau report, as the reports table gives it. */
+interface CachedReport {
+  /** The bureau score of the stored report. */
+  creditScore: number
+}
+
+/**
+ * The score of the cached report in the output of a reports-table done event: 0 when the output
+ * is None or the table had no report (a cache miss). The `reportFound` guard and the assign of
+ * a found report both read it.
+ */
+const cachedScore = (output: Option.Option<CachedReport | null>): number =>
+  Option.match(output, {
+    onNone: () => 0,
+    onSome: (report) => report?.creditScore ?? 0,
+  })
+
 /**
  * Mock cache lookup for a stored bureau report. It resolves to a score (700 to 799) about half
  * of the time and to null on a miss; it never rejects.
@@ -84,7 +107,7 @@ async function checkBureauService(input: {
 async function checkReportsTable(input: {
   ssn: string
   bureauName: string
-}): Promise<{ creditScore: number } | null> {
+}): Promise<CachedReport | null> {
   await new Promise((resolve) => setTimeout(resolve, 30))
   // Simulate cache miss 50% of the time
   if (Math.random() > 0.5) {
@@ -131,7 +154,7 @@ export const checkBureauActor = fromPromise<
 
 /** Promise actor over `checkReportsTable`: its output is the cached report, or null on a miss. */
 export const checkReportsTableActor = fromPromise<
-  { creditScore: number } | null,
+  CachedReport | null,
   { ssn: string; bureauName: string }
 >(async ({ input }) => checkReportsTable(input))
 
@@ -199,9 +222,8 @@ export const creditCheckMachine = setup({
       context.EquiGavinScore > 0 &&
       context.GavUnionScore > 0 &&
       context.GavperianScore > 0,
-    gavUnionReportFound: ({ context }) => context.GavUnionScore > 0,
-    equiGavinReportFound: ({ context }) => context.EquiGavinScore > 0,
-    gavperianReportFound: ({ context }) => context.GavperianScore > 0,
+    // The cached score comes from the done event: the context has no score yet when a guard runs
+    reportFound: (_, params: { creditScore: number }) => params.creditScore > 0,
   },
 }).createMachine({
   id: "multipleCreditCheck",
@@ -273,14 +295,14 @@ export const creditCheckMachine = setup({
                     }),
                     onDone: [
                       {
-                        guard: "equiGavinReportFound",
+                        guard: {
+                          type: "reportFound",
+                          // A done event's output is an Option (D8)
+                          params: ({ event }) => ({ creditScore: cachedScore(event.output) }),
+                        },
                         target: "FetchingComplete",
                         actions: assign(({ event }) => ({
-                          // A done event's output is an Option (D8)
-                          EquiGavinScore: Option.match(event.output, {
-                            onNone: () => 0,
-                            onSome: (report) => report?.creditScore ?? 0,
-                          }),
+                          EquiGavinScore: cachedScore(event.output),
                         })),
                       },
                       { target: "FetchingReport" },
@@ -325,14 +347,14 @@ export const creditCheckMachine = setup({
                     }),
                     onDone: [
                       {
-                        guard: "gavUnionReportFound",
+                        guard: {
+                          type: "reportFound",
+                          // A done event's output is an Option (D8)
+                          params: ({ event }) => ({ creditScore: cachedScore(event.output) }),
+                        },
                         target: "FetchingComplete",
                         actions: assign(({ event }) => ({
-                          // A done event's output is an Option (D8)
-                          GavUnionScore: Option.match(event.output, {
-                            onNone: () => 0,
-                            onSome: (report) => report?.creditScore ?? 0,
-                          }),
+                          GavUnionScore: cachedScore(event.output),
                         })),
                       },
                       { target: "FetchingReport" },
@@ -377,14 +399,14 @@ export const creditCheckMachine = setup({
                     }),
                     onDone: [
                       {
-                        guard: "gavperianReportFound",
+                        guard: {
+                          type: "reportFound",
+                          // A done event's output is an Option (D8)
+                          params: ({ event }) => ({ creditScore: cachedScore(event.output) }),
+                        },
                         target: "FetchingComplete",
                         actions: assign(({ event }) => ({
-                          // A done event's output is an Option (D8)
-                          GavperianScore: Option.match(event.output, {
-                            onNone: () => 0,
-                            onSome: (report) => report?.creditScore ?? 0,
-                          }),
+                          GavperianScore: cachedScore(event.output),
                         })),
                       },
                       { target: "FetchingReport" },

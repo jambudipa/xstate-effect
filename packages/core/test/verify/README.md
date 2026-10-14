@@ -7,11 +7,15 @@ has no `.spec` suffix, so it runs only when a spec or a config imports it.
 ## Scenario specs
 
 Each scenario has one file, `verify-xstate-5-33-2-port-<ID>.spec.ts` (SD-1), and the title of
-each of its tests starts with `[<ID>]`. The IDs are of two kinds:
+each of its tests starts with `[<ID>]`. The IDs are of four kinds:
 
 - **Behaviour** — a gap row (`S`, `A`, `C`, `P`, with `b` and `c` follow-ups) proves the
   behaviour that one row of the ledger's gap table (`test/upstream/CONFORMANCE.md`) asks for;
   `API`, `CONC`, `ERR`, `EVT`, `SCXML` and `COMPAT` prove behaviour that cuts across the rows.
+- **Coverage** — `COV-n` closes the coverage gaps of one `src/` folder, one spec per folder;
+  `docs/testing.md` at the repository root maps each folder to its spec.
+- **Test design** — `TD-n` proves the scenarios of the TEA test design
+  (`skills/test-artifacts/test-design-qa.md`); `TD-1` holds the six P0 scenarios, `TD-2` the P1 ones.
 - **Gates** — the checks that make conformance mechanical: `CONF-n` imports the upstream
   rewrites that are green at phase n and checks their pass counts (`conformance.ts`);
   `PARITY-n` compares each rewrite with the frozen manifest (`parity.ts`); `LEDGER-1`,

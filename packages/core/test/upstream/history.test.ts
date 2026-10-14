@@ -955,6 +955,18 @@ describe('parallel history states', () => {
         K: 'L'
       }
     });
+
+    // Port check (P1-006): `toEqual` on the value ignores key order, so the active nodes are
+    // pinned too: in document order, as upstream `enterStates` adds the entered nodes sorted
+    // by `order` (read from xstate@5.33.2 and run against its source)
+    expect((yield* actorRef.getSnapshot)._nodes.map((node) => node.id)).toEqual([
+      '(machine)',
+      '(machine).on',
+      '(machine).on.A',
+      '(machine).on.A.B',
+      '(machine).on.K',
+      '(machine).on.K.L'
+    ]);
   }));
 
   // upstream: test/history.test.ts > parallel history states > should remember first level state history
@@ -1027,6 +1039,19 @@ describe('parallel history states', () => {
         K: 'L'
       }
     });
+
+    // Port check (P1-006): `toEqual` on the value ignores key order, so the active nodes are
+    // pinned too: in document order, as upstream `enterStates` adds the entered nodes sorted
+    // by `order` (read from xstate@5.33.2 and run against its source)
+    expect((yield* actorRef.getSnapshot)._nodes.map((node) => node.id)).toEqual([
+      '(machine)',
+      '(machine).on',
+      '(machine).on.A',
+      '(machine).on.A.C',
+      '(machine).on.A.C.D',
+      '(machine).on.K',
+      '(machine).on.K.L'
+    ]);
   }));
 
   // upstream: test/history.test.ts > parallel history states > should re-enter each regions of parallel state correctly
@@ -1117,6 +1142,20 @@ describe('parallel history states', () => {
         K: { M: 'O' }
       }
     });
+
+    // Port check (P1-006): `toEqual` on the value ignores key order, so the active nodes are
+    // pinned too: in document order, as upstream `enterStates` adds the entered nodes sorted
+    // by `order` (read from xstate@5.33.2 and run against its source)
+    expect((yield* actorRef.getSnapshot)._nodes.map((node) => node.id)).toEqual([
+      '(machine)',
+      '(machine).on',
+      '(machine).on.A',
+      '(machine).on.A.C',
+      '(machine).on.A.C.E',
+      '(machine).on.K',
+      '(machine).on.K.M',
+      '(machine).on.K.M.O'
+    ]);
   }));
 
   // upstream: test/history.test.ts > parallel history states > should re-enter multiple history states
@@ -1208,6 +1247,20 @@ describe('parallel history states', () => {
         K: { M: 'N' }
       }
     });
+
+    // Port check (P1-006): `toEqual` on the value ignores key order, so the active nodes are
+    // pinned too: in document order, as upstream `enterStates` adds the entered nodes sorted
+    // by `order` (read from xstate@5.33.2 and run against its source)
+    expect((yield* actorRef.getSnapshot)._nodes.map((node) => node.id)).toEqual([
+      '(machine)',
+      '(machine).on',
+      '(machine).on.A',
+      '(machine).on.A.C',
+      '(machine).on.A.C.D',
+      '(machine).on.K',
+      '(machine).on.K.M',
+      '(machine).on.K.M.N'
+    ]);
   }));
 
   // upstream: test/history.test.ts > parallel history states > should re-enter a parallel with partial history
@@ -1299,6 +1352,20 @@ describe('parallel history states', () => {
         K: { M: 'N' }
       }
     });
+
+    // Port check (P1-006): `toEqual` on the value ignores key order, so the active nodes are
+    // pinned too: in document order, as upstream `enterStates` adds the entered nodes sorted
+    // by `order` (read from xstate@5.33.2 and run against its source)
+    expect((yield* actorRef.getSnapshot)._nodes.map((node) => node.id)).toEqual([
+      '(machine)',
+      '(machine).on',
+      '(machine).on.A',
+      '(machine).on.A.C',
+      '(machine).on.A.C.D',
+      '(machine).on.K',
+      '(machine).on.K.M',
+      '(machine).on.K.M.N'
+    ]);
   }));
 
   // upstream: test/history.test.ts > parallel history states > should re-enter a parallel with full history
@@ -1392,6 +1459,20 @@ describe('parallel history states', () => {
         K: { M: 'O' }
       }
     });
+
+    // Port check (P1-006): `toEqual` on the value ignores key order, so the active nodes are
+    // pinned too: in document order, as upstream `enterStates` adds the entered nodes sorted
+    // by `order` (read from xstate@5.33.2 and run against its source)
+    expect((yield* actorRef.getSnapshot)._nodes.map((node) => node.id)).toEqual([
+      '(machine)',
+      '(machine).on',
+      '(machine).on.A',
+      '(machine).on.A.C',
+      '(machine).on.A.C.E',
+      '(machine).on.K',
+      '(machine).on.K.M',
+      '(machine).on.K.M.O'
+    ]);
   }));
 });
 

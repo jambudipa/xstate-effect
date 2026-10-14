@@ -1,4 +1,4 @@
-# Tutorial 7: Testing State Machines
+# Tutorial 6: Testing State Machines
 
 State machines are inherently testable - they have defined states, transitions, and behaviors. This tutorial teaches you to write deterministic, reliable tests for your machines.
 
@@ -19,11 +19,12 @@ State machines provide:
 
 ## Step 1: Basic Snapshot Testing
 
-Use `getNextSnapshot` to test transitions without running an actor:
+Use `getInitialSnapshot` and `getNextSnapshot` to test transitions without running an actor. Both return Effects: run them with `yield*` inside `Effect.gen`, and return the Promise of `Effect.runPromise` from the test so that Vitest waits for it:
 
 ```typescript
 import { describe, it, expect } from "vitest"
-import { setup, getNextSnapshot } from "@jambudipa/xstate-effect"
+import { setup, getInitialSnapshot, getNextSnapshot } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
 
 const toggleMachine = setup({
   types: {} as {
@@ -41,27 +42,30 @@ const toggleMachine = setup({
 })
 
 describe("toggleMachine", () => {
-  it("starts in inactive state", () => {
-    const initialSnapshot = toggleMachine.getInitialSnapshot()
-    expect(initialSnapshot.value).toBe("inactive")
-  })
+  it("starts in inactive state", () =>
+    Effect.gen(function* () {
+      const initialSnapshot = yield* getInitialSnapshot(toggleMachine)
+      expect(initialSnapshot.value).toBe("inactive")
+    }).pipe(Effect.runPromise))
 
-  it("transitions to active on TOGGLE", async () => {
-    const initialSnapshot = toggleMachine.getInitialSnapshot()
-    const nextSnapshot = await getNextSnapshot(
-      toggleMachine,
-      initialSnapshot,
-      { type: "TOGGLE" }
-    )
-    expect(nextSnapshot.value).toBe("active")
-  })
+  it("transitions to active on TOGGLE", () =>
+    Effect.gen(function* () {
+      const initialSnapshot = yield* getInitialSnapshot(toggleMachine)
+      const nextSnapshot = yield* getNextSnapshot(
+        toggleMachine,
+        initialSnapshot,
+        { type: "TOGGLE" }
+      )
+      expect(nextSnapshot.value).toBe("active")
+    }).pipe(Effect.runPromise))
 
-  it("transitions back to inactive on second TOGGLE", async () => {
-    let snapshot = toggleMachine.getInitialSnapshot()
-    snapshot = await getNextSnapshot(toggleMachine, snapshot, { type: "TOGGLE" })
-    snapshot = await getNextSnapshot(toggleMachine, snapshot, { type: "TOGGLE" })
-    expect(snapshot.value).toBe("inactive")
-  })
+  it("transitions back to inactive on second TOGGLE", () =>
+    Effect.gen(function* () {
+      let snapshot = yield* getInitialSnapshot(toggleMachine)
+      snapshot = yield* getNextSnapshot(toggleMachine, snapshot, { type: "TOGGLE" })
+      snapshot = yield* getNextSnapshot(toggleMachine, snapshot, { type: "TOGGLE" })
+      expect(snapshot.value).toBe("inactive")
+    }).pipe(Effect.runPromise))
 })
 ```
 
@@ -69,7 +73,8 @@ describe("toggleMachine", () => {
 
 ```typescript
 import { describe, it, expect } from "vitest"
-import { setup, getNextSnapshot, assign } from "@jambudipa/xstate-effect"
+import { setup, getInitialSnapshot, getNextSnapshot, assign } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
 
 const counterMachine = setup({
   types: {} as {
@@ -103,25 +108,28 @@ const counterMachine = setup({
 })
 
 describe("counterMachine", () => {
-  it("increments count", async () => {
-    const initial = counterMachine.getInitialSnapshot()
-    const next = await getNextSnapshot(counterMachine, initial, { type: "INCREMENT" })
-    expect(next.context.count).toBe(1)
-  })
+  it("increments count", () =>
+    Effect.gen(function* () {
+      const initial = yield* getInitialSnapshot(counterMachine)
+      const next = yield* getNextSnapshot(counterMachine, initial, { type: "INCREMENT" })
+      expect(next.context.count).toBe(1)
+    }).pipe(Effect.runPromise))
 
-  it("handles ADD event with amount", async () => {
-    const initial = counterMachine.getInitialSnapshot()
-    const next = await getNextSnapshot(counterMachine, initial, { type: "ADD", amount: 5 })
-    expect(next.context.count).toBe(5)
-  })
+  it("handles ADD event with amount", () =>
+    Effect.gen(function* () {
+      const initial = yield* getInitialSnapshot(counterMachine)
+      const next = yield* getNextSnapshot(counterMachine, initial, { type: "ADD", amount: 5 })
+      expect(next.context.count).toBe(5)
+    }).pipe(Effect.runPromise))
 
-  it("can increment multiple times", async () => {
-    let snapshot = counterMachine.getInitialSnapshot()
-    for (let i = 0; i < 5; i++) {
-      snapshot = await getNextSnapshot(counterMachine, snapshot, { type: "INCREMENT" })
-    }
-    expect(snapshot.context.count).toBe(5)
-  })
+  it("can increment multiple times", () =>
+    Effect.gen(function* () {
+      let snapshot = yield* getInitialSnapshot(counterMachine)
+      for (let i = 0; i < 5; i++) {
+        snapshot = yield* getNextSnapshot(counterMachine, snapshot, { type: "INCREMENT" })
+      }
+      expect(snapshot.context.count).toBe(5)
+    }).pipe(Effect.runPromise))
 })
 ```
 
@@ -129,7 +137,8 @@ describe("counterMachine", () => {
 
 ```typescript
 import { describe, it, expect } from "vitest"
-import { setup, getNextSnapshot, assign, guard } from "@jambudipa/xstate-effect"
+import { setup, getInitialSnapshot, getNextSnapshot, assign } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
 
 const boundedCounterMachine = setup({
   types: {} as {
@@ -137,7 +146,7 @@ const boundedCounterMachine = setup({
     events: { type: "INCREMENT" }
   },
   guards: {
-    canIncrement: guard("canIncrement", ({ context }) => context.count < context.max)
+    canIncrement: ({ context }) => context.count < context.max
   },
   actions: {
     increment: assign({ count: ({ context }) => context.count + 1 })
@@ -159,38 +168,40 @@ const boundedCounterMachine = setup({
 })
 
 describe("boundedCounterMachine", () => {
-  it("allows increment when below max", async () => {
-    const initial = boundedCounterMachine.getInitialSnapshot()
-    const next = await getNextSnapshot(boundedCounterMachine, initial, { type: "INCREMENT" })
-    expect(next.context.count).toBe(1)
-  })
+  it("allows increment when below max", () =>
+    Effect.gen(function* () {
+      const initial = yield* getInitialSnapshot(boundedCounterMachine)
+      const next = yield* getNextSnapshot(boundedCounterMachine, initial, { type: "INCREMENT" })
+      expect(next.context.count).toBe(1)
+    }).pipe(Effect.runPromise))
 
-  it("blocks increment at max", async () => {
-    let snapshot = boundedCounterMachine.getInitialSnapshot()
+  it("blocks increment at max", () =>
+    Effect.gen(function* () {
+      let snapshot = yield* getInitialSnapshot(boundedCounterMachine)
 
-    // Increment to max
-    for (let i = 0; i < 3; i++) {
-      snapshot = await getNextSnapshot(boundedCounterMachine, snapshot, { type: "INCREMENT" })
-    }
-    expect(snapshot.context.count).toBe(3)
+      // Increment to max
+      for (let i = 0; i < 3; i++) {
+        snapshot = yield* getNextSnapshot(boundedCounterMachine, snapshot, { type: "INCREMENT" })
+      }
+      expect(snapshot.context.count).toBe(3)
 
-    // Try to increment past max
-    const blocked = await getNextSnapshot(boundedCounterMachine, snapshot, { type: "INCREMENT" })
-    expect(blocked.context.count).toBe(3) // Still 3, guard blocked it
-  })
+      // Try to increment past max
+      const blocked = yield* getNextSnapshot(boundedCounterMachine, snapshot, { type: "INCREMENT" })
+      expect(blocked.context.count).toBe(3) // Still 3, guard blocked it
+    }).pipe(Effect.runPromise))
 })
 ```
 
 ## Step 4: Testing with SimulatedClock
 
-For time-dependent behavior, use `SimulatedClock`:
+For time-dependent behavior, use `SimulatedClock`. Create one with `new SimulatedClock()` and give it to the actor with the `clock` option. Time then moves only when you call `clock.increment(ms)`, an Effect that fires the delayed events that are due:
 
 ```typescript
 import { describe, it, expect } from "vitest"
 import { setup, createActor, SimulatedClock } from "@jambudipa/xstate-effect"
 import { Effect } from "effect"
 
-const _timerMachine = setup({
+const timerMachine = setup({
   types: {} as {
     context: {}
     events: { type: "START" }
@@ -213,57 +224,51 @@ const _timerMachine = setup({
 })
 
 describe("timerMachine with SimulatedClock", () => {
-  it("transitions to completed after delay", async () => {
-    const clock = SimulatedClock.make()
-
-    const program = Effect.gen(function* () {
+  it("transitions to completed after delay", () =>
+    Effect.gen(function* () {
+      const clock = new SimulatedClock()
       const actor = yield* createActor(timerMachine, { clock })
-      yield* actor.start()
+      yield* actor.start
       yield* actor.send({ type: "START" })
 
-      let snapshot = yield* actor.getSnapshot()
+      let snapshot = yield* actor.getSnapshot
       expect(snapshot.value).toBe("running")
 
       // Advance time by 5 seconds
-      yield* clock.advance(5000)
+      yield* clock.increment(5000)
 
-      snapshot = yield* actor.getSnapshot()
+      snapshot = yield* actor.getSnapshot
       expect(snapshot.value).toBe("completed")
-    })
+    }).pipe(Effect.scoped, Effect.runPromise))
 
-    await Effect.runPromise(program)
-  })
-
-  it("remains in running before delay completes", async () => {
-    const clock = SimulatedClock.make()
-
-    const program = Effect.gen(function* () {
+  it("remains in running before delay completes", () =>
+    Effect.gen(function* () {
+      const clock = new SimulatedClock()
       const actor = yield* createActor(timerMachine, { clock })
-      yield* actor.start()
+      yield* actor.start
       yield* actor.send({ type: "START" })
 
       // Advance time by only 3 seconds
-      yield* clock.advance(3000)
+      yield* clock.increment(3000)
 
-      const snapshot = yield* actor.getSnapshot()
+      const snapshot = yield* actor.getSnapshot
       expect(snapshot.value).toBe("running") // Still running
-    })
-
-    await Effect.runPromise(program)
-  })
+    }).pipe(Effect.scoped, Effect.runPromise))
 })
 ```
 
+`createActor` needs a `Scope`, so these tests run the Effect with `Effect.scoped`: the actor stops when the test's Effect ends.
+
 ## Step 5: Testing with waitFor
 
-For async scenarios where you need to wait for a condition:
+For async scenarios where you need to wait for a condition, `waitFor` gives an Effect that succeeds with the first snapshot that satisfies the predicate:
 
 ```typescript
 import { describe, it, expect } from "vitest"
-import { setup, createActor, waitFor, fromPromise } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
+import { setup, createActor, waitFor, fromPromise, assign } from "@jambudipa/xstate-effect"
+import { Effect, Option } from "effect"
 
-const _fetchMachine = setup({
+const fetchMachine = setup({
   types: {} as {
     context: { data: string | null }
     events: { type: "FETCH" }
@@ -287,7 +292,8 @@ const _fetchMachine = setup({
         src: "fetchData",
         onDone: {
           target: "success",
-          actions: assign({ data: ({ event }) => event.output })
+          // The output of a done event is an Option
+          actions: assign({ data: ({ event }) => Option.getOrNull(event.output) })
         },
         onError: "failure"
       }
@@ -298,10 +304,10 @@ const _fetchMachine = setup({
 })
 
 describe("fetchMachine", () => {
-  it("fetches data successfully", async () => {
-    const program = Effect.gen(function* () {
+  it("fetches data successfully", () =>
+    Effect.gen(function* () {
       const actor = yield* createActor(fetchMachine)
-      yield* actor.start()
+      yield* actor.start
       yield* actor.send({ type: "FETCH" })
 
       // Wait for success state
@@ -313,10 +319,7 @@ describe("fetchMachine", () => {
 
       expect(snapshot.value).toBe("success")
       expect(snapshot.context.data).toBe("fetched data")
-    })
-
-    await Effect.runPromise(program)
-  })
+    }).pipe(Effect.scoped, Effect.runPromise))
 })
 ```
 
@@ -326,7 +329,8 @@ Use table-driven tests for comprehensive coverage:
 
 ```typescript
 import { describe, it, expect } from "vitest"
-import { setup, getNextSnapshot, assign, guard } from "@jambudipa/xstate-effect"
+import { setup, getInitialSnapshot, getNextSnapshot, assign } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
 
 const formMachine = setup({
   types: {} as {
@@ -340,9 +344,8 @@ const formMachine = setup({
       | { type: "SUBMIT" }
   },
   guards: {
-    isValid: guard("isValid", ({ context }) =>
+    isValid: ({ context }) =>
       context.email.includes("@") && context.password.length >= 8
-    )
   }
 }).createMachine({
   id: "form",
@@ -389,18 +392,19 @@ describe("formMachine validation", () => {
   ]
 
   testCases.forEach(({ name, email, password, shouldSubmit }) => {
-    it(name, async () => {
-      let snapshot = formMachine.getInitialSnapshot()
-      snapshot = await getNextSnapshot(formMachine, snapshot, { type: "SET_EMAIL", value: email })
-      snapshot = await getNextSnapshot(formMachine, snapshot, { type: "SET_PASSWORD", value: password })
-      snapshot = await getNextSnapshot(formMachine, snapshot, { type: "SUBMIT" })
+    it(name, () =>
+      Effect.gen(function* () {
+        let snapshot = yield* getInitialSnapshot(formMachine)
+        snapshot = yield* getNextSnapshot(formMachine, snapshot, { type: "SET_EMAIL", value: email })
+        snapshot = yield* getNextSnapshot(formMachine, snapshot, { type: "SET_PASSWORD", value: password })
+        snapshot = yield* getNextSnapshot(formMachine, snapshot, { type: "SUBMIT" })
 
-      if (shouldSubmit) {
-        expect(snapshot.value).toBe("submitted")
-      } else {
-        expect(snapshot.value).toBe("editing")
-      }
-    })
+        if (shouldSubmit) {
+          expect(snapshot.value).toBe("submitted")
+        } else {
+          expect(snapshot.value).toBe("editing")
+        }
+      }).pipe(Effect.runPromise))
   })
 })
 ```
@@ -410,55 +414,168 @@ describe("formMachine validation", () => {
 ### 1. Test States, Not Implementation
 
 ```typescript
-// Good: Test what state the machine is in
-expect(snapshot.value).toBe("loading")
+import { it, expect } from "vitest"
+import { setup, getInitialSnapshot, getNextSnapshot } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
 
-// Avoid: Testing internal implementation details
-expect(machine._internal_queue.length).toBe(0)
+const loaderMachine = setup({
+  types: {} as {
+    context: {}
+    events: { type: "LOAD" }
+  }
+}).createMachine({
+  id: "loader",
+  initial: "idle",
+  context: {},
+  states: {
+    idle: { on: { LOAD: "loading" } },
+    loading: {}
+  }
+})
+
+it("enters loading on LOAD", () =>
+  Effect.gen(function* () {
+    const initial = yield* getInitialSnapshot(loaderMachine)
+    const snapshot = yield* getNextSnapshot(loaderMachine, initial, { type: "LOAD" })
+
+    // Good: Test what state the machine is in
+    expect(snapshot.value).toBe("loading")
+
+    // Avoid: Testing internal implementation details
+    expect(snapshot._nodes.length).toBe(2)
+  }).pipe(Effect.runPromise))
 ```
 
 ### 2. Test Context Changes
 
 ```typescript
-// Good: Verify context after events
-const next = await getNextSnapshot(machine, initial, { type: "ADD_ITEM", item: "test" })
-expect(next.context.items).toContain("test")
+import { it, expect } from "vitest"
+import { setup, getInitialSnapshot, getNextSnapshot, assign } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const listMachine = setup({
+  types: {} as {
+    context: { items: string[] }
+    events: { type: "ADD_ITEM"; item: string }
+  }
+}).createMachine({
+  id: "list",
+  context: { items: [] },
+  on: {
+    ADD_ITEM: { actions: assign({ items: ({ context, event }) => [...context.items, event.item] }) }
+  }
+})
+
+it("adds the item", () =>
+  Effect.gen(function* () {
+    const initial = yield* getInitialSnapshot(listMachine)
+
+    // Good: Verify context after events
+    const next = yield* getNextSnapshot(listMachine, initial, { type: "ADD_ITEM", item: "test" })
+    expect(next.context.items).toContain("test")
+  }).pipe(Effect.runPromise))
 ```
 
 ### 3. Test Guard Behavior
 
 ```typescript
-// Test that guards block transitions
-const blockedSnapshot = await getNextSnapshot(machine, atMaxSnapshot, { type: "INCREMENT" })
-expect(blockedSnapshot.context.count).toBe(atMaxSnapshot.context.count)
+import { it, expect } from "vitest"
+import { setup, getInitialSnapshot, getNextSnapshot, assign } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const machine = setup({
+  types: {} as {
+    context: { count: number }
+    events: { type: "INCREMENT" }
+  },
+  guards: {
+    belowMax: ({ context }) => context.count < 3
+  }
+}).createMachine({
+  id: "counter",
+  context: { count: 3 },
+  on: {
+    INCREMENT: { guard: "belowMax", actions: assign({ count: ({ context }) => context.count + 1 }) }
+  }
+})
+
+it("blocks INCREMENT at the maximum", () =>
+  Effect.gen(function* () {
+    const atMaxSnapshot = yield* getInitialSnapshot(machine)
+
+    // Test that guards block transitions
+    const blockedSnapshot = yield* getNextSnapshot(machine, atMaxSnapshot, { type: "INCREMENT" })
+    expect(blockedSnapshot.context.count).toBe(atMaxSnapshot.context.count)
+  }).pipe(Effect.runPromise))
 ```
 
 ### 4. Use SimulatedClock for Delays
 
 ```typescript
-// Don't use real timers in tests
-// Good:
-yield* clock.advance(5000)
+import { SimulatedClock } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
 
-// Bad:
-await new Promise(resolve => setTimeout(resolve, 5000))
+// Don't use real timers in tests
+export const advanceTime = Effect.gen(function* () {
+  const clock = new SimulatedClock()
+
+  // Good: the simulated clock fires the due delayed events at once
+  yield* clock.increment(5000)
+
+  // Bad: the test waits five real seconds
+  yield* Effect.sleep("5 seconds")
+})
 ```
 
 ### 5. Test Edge Cases
 
+Write each edge case as a test that runs. A placeholder such as `it.todo` passes without
+checking anything, and this package's own suite fails on it:
+
 ```typescript
+import { describe, it, expect } from "vitest"
+import { setup, getInitialSnapshot, getNextSnapshot } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const toggleMachine = setup({
+  types: {} as {
+    context: {}
+    events: { type: "TOGGLE" } | { type: "UNKNOWN" }
+  }
+}).createMachine({
+  id: "toggle",
+  initial: "inactive",
+  context: {},
+  states: {
+    inactive: { on: { TOGGLE: "active" } },
+    active: { on: { TOGGLE: "inactive" } }
+  }
+})
+
 describe("edge cases", () => {
-  it("handles rapid events", async () => { /* ... */ })
-  it("handles unknown events gracefully", async () => { /* ... */ })
-  it("handles empty input", async () => { /* ... */ })
+  it("handles rapid events: 101 toggles end in active", () =>
+    Effect.gen(function* () {
+      let snapshot = yield* getInitialSnapshot(toggleMachine)
+      for (let toggle = 0; toggle < 101; toggle++) {
+        snapshot = yield* getNextSnapshot(toggleMachine, snapshot, { type: "TOGGLE" })
+      }
+      expect(snapshot.value).toBe("active")
+    }).pipe(Effect.runPromise))
+
+  it("ignores an event that no state handles", () =>
+    Effect.gen(function* () {
+      const initialSnapshot = yield* getInitialSnapshot(toggleMachine)
+      const nextSnapshot = yield* getNextSnapshot(toggleMachine, initialSnapshot, { type: "UNKNOWN" })
+      expect(nextSnapshot.value).toBe("inactive")
+    }).pipe(Effect.runPromise))
 })
 ```
 
 ## Complete Test Suite Example
 
 ```typescript
-import { describe, it, expect, beforeEach } from "vitest"
-import { setup, createActor, getNextSnapshot, assign, guard, SimulatedClock } from "@jambudipa/xstate-effect"
+import { describe, it, expect } from "vitest"
+import { setup, createActor, getInitialSnapshot, getNextSnapshot, assign, SimulatedClock } from "@jambudipa/xstate-effect"
 import { Effect } from "effect"
 
 const checkoutMachine = setup({
@@ -476,11 +593,10 @@ const checkoutMachine = setup({
       | { type: "CANCEL" }
   },
   guards: {
-    hasItems: guard("hasItems", ({ context }) => context.items.length > 0),
-    hasPayment: guard("hasPayment", ({ context }) => context.paymentMethod !== null),
-    canCheckout: guard("canCheckout", ({ context }) =>
+    hasItems: ({ context }) => context.items.length > 0,
+    hasPayment: ({ context }) => context.paymentMethod !== null,
+    canCheckout: ({ context }) =>
       context.items.length > 0 && context.paymentMethod !== null
-    )
   },
   actions: {
     addItem: assign({
@@ -537,116 +653,119 @@ const checkoutMachine = setup({
 
 describe("checkoutMachine", () => {
   describe("cart state", () => {
-    it("starts with empty cart", () => {
-      const snapshot = checkoutMachine.getInitialSnapshot()
-      expect(snapshot.value).toBe("cart")
-      expect(snapshot.context.items).toEqual([])
-      expect(snapshot.context.total).toBe(0)
-    })
+    it("starts with empty cart", () =>
+      Effect.gen(function* () {
+        const snapshot = yield* getInitialSnapshot(checkoutMachine)
+        expect(snapshot.value).toBe("cart")
+        expect(snapshot.context.items).toEqual([])
+        expect(snapshot.context.total).toBe(0)
+      }).pipe(Effect.runPromise))
 
-    it("adds items to cart", async () => {
-      const initial = checkoutMachine.getInitialSnapshot()
-      const next = await getNextSnapshot(checkoutMachine, initial, {
-        type: "ADD_ITEM",
-        item: "Widget",
-        price: 10
-      })
-      expect(next.context.items).toContain("Widget")
-      expect(next.context.total).toBe(10)
-    })
+    it("adds items to cart", () =>
+      Effect.gen(function* () {
+        const initial = yield* getInitialSnapshot(checkoutMachine)
+        const next = yield* getNextSnapshot(checkoutMachine, initial, {
+          type: "ADD_ITEM",
+          item: "Widget",
+          price: 10
+        })
+        expect(next.context.items).toContain("Widget")
+        expect(next.context.total).toBe(10)
+      }).pipe(Effect.runPromise))
 
-    it("removes items from cart", async () => {
-      let snapshot = checkoutMachine.getInitialSnapshot()
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, {
-        type: "ADD_ITEM",
-        item: "Widget",
-        price: 10
-      })
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, {
-        type: "REMOVE_ITEM",
-        item: "Widget",
-        price: 10
-      })
-      expect(snapshot.context.items).not.toContain("Widget")
-      expect(snapshot.context.total).toBe(0)
-    })
+    it("removes items from cart", () =>
+      Effect.gen(function* () {
+        let snapshot = yield* getInitialSnapshot(checkoutMachine)
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, {
+          type: "ADD_ITEM",
+          item: "Widget",
+          price: 10
+        })
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, {
+          type: "REMOVE_ITEM",
+          item: "Widget",
+          price: 10
+        })
+        expect(snapshot.context.items).not.toContain("Widget")
+        expect(snapshot.context.total).toBe(0)
+      }).pipe(Effect.runPromise))
   })
 
   describe("checkout validation", () => {
-    it("blocks checkout without items", async () => {
-      let snapshot = checkoutMachine.getInitialSnapshot()
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, {
-        type: "SET_PAYMENT",
-        method: "credit"
-      })
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, { type: "CHECKOUT" })
-      expect(snapshot.value).toBe("cart") // Blocked
-    })
+    it("blocks checkout without items", () =>
+      Effect.gen(function* () {
+        let snapshot = yield* getInitialSnapshot(checkoutMachine)
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, {
+          type: "SET_PAYMENT",
+          method: "credit"
+        })
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, { type: "CHECKOUT" })
+        expect(snapshot.value).toBe("cart") // Blocked
+      }).pipe(Effect.runPromise))
 
-    it("blocks checkout without payment", async () => {
-      let snapshot = checkoutMachine.getInitialSnapshot()
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, {
-        type: "ADD_ITEM",
-        item: "Widget",
-        price: 10
-      })
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, { type: "CHECKOUT" })
-      expect(snapshot.value).toBe("cart") // Blocked
-    })
+    it("blocks checkout without payment", () =>
+      Effect.gen(function* () {
+        let snapshot = yield* getInitialSnapshot(checkoutMachine)
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, {
+          type: "ADD_ITEM",
+          item: "Widget",
+          price: 10
+        })
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, { type: "CHECKOUT" })
+        expect(snapshot.value).toBe("cart") // Blocked
+      }).pipe(Effect.runPromise))
 
-    it("allows checkout with items and payment", async () => {
-      let snapshot = checkoutMachine.getInitialSnapshot()
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, {
-        type: "ADD_ITEM",
-        item: "Widget",
-        price: 10
-      })
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, {
-        type: "SET_PAYMENT",
-        method: "credit"
-      })
-      snapshot = await getNextSnapshot(checkoutMachine, snapshot, { type: "CHECKOUT" })
-      expect(snapshot.value).toBe("processing")
-    })
+    it("allows checkout with items and payment", () =>
+      Effect.gen(function* () {
+        let snapshot = yield* getInitialSnapshot(checkoutMachine)
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, {
+          type: "ADD_ITEM",
+          item: "Widget",
+          price: 10
+        })
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, {
+          type: "SET_PAYMENT",
+          method: "credit"
+        })
+        snapshot = yield* getNextSnapshot(checkoutMachine, snapshot, { type: "CHECKOUT" })
+        expect(snapshot.value).toBe("processing")
+      }).pipe(Effect.runPromise))
   })
 
   describe("processing state", () => {
-    it("completes after delay", async () => {
-      const clock = SimulatedClock.make()
-
-      const program = Effect.gen(function* () {
+    it("completes after delay", () =>
+      Effect.gen(function* () {
+        const clock = new SimulatedClock()
         const actor = yield* createActor(checkoutMachine, { clock })
-        yield* actor.start()
+        yield* actor.start
 
         yield* actor.send({ type: "ADD_ITEM", item: "Widget", price: 10 })
         yield* actor.send({ type: "SET_PAYMENT", method: "credit" })
         yield* actor.send({ type: "CHECKOUT" })
 
-        let snapshot = yield* actor.getSnapshot()
+        let snapshot = yield* actor.getSnapshot
         expect(snapshot.value).toBe("processing")
 
-        yield* clock.advance(2000)
+        yield* clock.increment(2000)
 
-        snapshot = yield* actor.getSnapshot()
+        snapshot = yield* actor.getSnapshot
         expect(snapshot.value).toBe("complete")
         expect(snapshot.context.items).toEqual([]) // Cart cleared
-      })
-
-      await Effect.runPromise(program)
-    })
+      }).pipe(Effect.scoped, Effect.runPromise))
   })
 })
 ```
 
 ## Key Takeaways
 
-- **`getNextSnapshot`**: Pure function for testing transitions
-- **`SimulatedClock`**: Deterministic time control for delays
-- **`waitFor`**: Async waiting for conditions
+- **`getInitialSnapshot`** and **`getNextSnapshot`**: Effects that compute snapshots without an actor, for testing transitions
+- **`SimulatedClock`**: Deterministic time control for delays, moved with `clock.increment(ms)`
+- **`waitFor`**: An Effect that waits for a snapshot that satisfies a condition
+- Run each test's Effect with `Effect.runPromise` (and `Effect.scoped` when it creates an actor), and return the Promise to Vitest
 - Test **states and context**, not internal implementation
 - Use **table-driven tests** for comprehensive coverage
 - Test **guard behavior** explicitly
 
 ## What's Next
 
-In the [next tutorial](./08-hierarchical-states.md), you'll learn how to organize complex behavior with nested states.
+This is the last tutorial. To carry out a specific task, such as invoking an async operation or retrying one that fails, read the [how-to guides](../how-to/README.md). To understand why the library works as it does, read the [explanation pages](../explanation/README.md).

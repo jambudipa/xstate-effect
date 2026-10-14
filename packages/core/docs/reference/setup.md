@@ -5,17 +5,28 @@ Creates a type-safe machine factory with shared configuration.
 ## Signature
 
 ```typescript
-function setup<
+import type {
+  AnyActorLogic,
+  DelayConfig,
+  EventObject,
+  GuardImplementation,
+  SetupActionImplementation,
+  SetupConfig,
+  SetupReturn
+} from "@jambudipa/xstate-effect"
+
+// Simplified: the full signature also takes the state meta, transition meta, input,
+// emitted, children and tag types
+export declare function setup<
   TContext,
   TEvent extends EventObject,
-  TInput,
-  TOutput,
-  TEmitted extends EventObject,
   TActors extends Record<string, AnyActorLogic>,
-  TActions extends Record<string, AnyAction>,
-  TGuards extends Record<string, AnyGuard>,
-  TDelays extends Record<string, AnyDelay>
->(config: SetupConfig<...>): SetupReturn<...>
+  TActions extends Record<string, SetupActionImplementation<TContext, TEvent>>,
+  TGuards extends Record<string, GuardImplementation<TContext, TEvent>>,
+  TDelays extends Record<string, DelayConfig<TContext, TEvent>>
+>(
+  config: SetupConfig<TContext, TEvent, TActors, TActions, TGuards, TDelays>
+): SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays>
 ```
 
 ## Parameters
@@ -24,23 +35,38 @@ function setup<
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `types` | `SetupTypes` | Type definitions for the machine |
-| `actors` | `Record<string, ActorLogic>` | Named actor creators |
+| `types` | `{ context?, events?, input?, emitted?, children?, meta?, transitionMeta?, tags? }` | Type definitions for the machine (type only) |
+| `actors` | `Record<string, ActorLogic>` | Named actor logic |
 | `actions` | `Record<string, Action>` | Named actions |
-| `guards` | `Record<string, Guard>` | Named guard functions |
-| `delays` | `Record<string, Delay>` | Named delay functions |
+| `guards` | `Record<string, Guard>` | Named guards |
+| `delays` | `Record<string, Delay>` | Named delays |
 
 ## Types Definition
 
+Each member of `types` is optional, and `setup` reads none of its values at run time:
+
 ```typescript
-interface SetupTypes {
-  context: TContext        // Machine context type
-  events: TEvent           // Event union type
-  input?: TInput           // Input for actor creation
-  output?: TOutput         // Output for final states
-  emitted?: TEmitted       // Emitted event types
+import { setup } from "@jambudipa/xstate-effect"
+
+interface Order {
+  id: string
+  total: number
 }
+
+export const orderSetup = setup({
+  types: {} as {
+    context: { orders: Order[] }                 // Machine context type
+    events: { type: "ADD"; order: Order }        // Event union type
+    input: { customerId: string }                // Input for actor creation
+    output: { total: number }                    // Output of each machine
+    emitted: { type: "ORDER_ADDED"; id: string } // Emitted event types
+    tags: "busy" | "idle"                        // Tags that `hasTag` takes
+  }
+})
 ```
+
+`types.output` is the output type of each machine of the setup, as in XState: the machine's `output`
+config must give it, and its snapshots' `output` and its done event's `output` carry it.
 
 ## Return Value
 
@@ -55,9 +81,9 @@ Returns a `SetupReturn` object with:
 ### Basic Setup
 
 ```typescript
-import { setup } from "@jambudipa/xstate-effect"
+import { setup, assign } from "@jambudipa/xstate-effect"
 
-const machine = setup({
+export const machine = setup({
   types: {} as {
     context: { count: number }
     events: { type: "INCREMENT" } | { type: "DECREMENT" }
@@ -69,8 +95,8 @@ const machine = setup({
   states: {
     active: {
       on: {
-        INCREMENT: { /* ... */ },
-        DECREMENT: { /* ... */ }
+        INCREMENT: { actions: assign({ count: ({ context }) => context.count + 1 }) },
+        DECREMENT: { actions: assign({ count: ({ context }) => context.count - 1 }) }
       }
     }
   }
@@ -79,10 +105,14 @@ const machine = setup({
 
 ### With Actions
 
+A named action can be a built-in action such as `assign`, or a plain function. A plain
+function may return an Effect, which the actor runs:
+
 ```typescript
 import { setup, assign } from "@jambudipa/xstate-effect"
+import { Console } from "effect"
 
-const machine = setup({
+export const machine = setup({
   types: {} as {
     context: { count: number }
     events: { type: "INCREMENT" }
@@ -91,9 +121,7 @@ const machine = setup({
     increment: assign({
       count: ({ context }) => context.count + 1
     }),
-    logCount: action("logCount", ({ context }) =>
-      Console.log(`Count: ${context.count}`)
-    )
+    logCount: ({ context }) => Console.log(`Count: ${context.count}`)
   }
 }).createMachine({
   id: "counter",
@@ -112,17 +140,15 @@ const machine = setup({
 ### With Guards
 
 ```typescript
-import { setup, guard } from "@jambudipa/xstate-effect"
+import { setup, assign } from "@jambudipa/xstate-effect"
 
-const machine = setup({
+export const machine = setup({
   types: {} as {
     context: { count: number; max: number }
     events: { type: "INCREMENT" }
   },
   guards: {
-    canIncrement: guard("canIncrement", ({ context }) =>
-      context.count < context.max
-    )
+    canIncrement: ({ context }) => context.count < context.max
   }
 }).createMachine({
   id: "counter",
@@ -143,18 +169,22 @@ const machine = setup({
 
 ### With Actors
 
-```typescript
-import { setup, fromPromise } from "@jambudipa/xstate-effect"
+The `output` of a done event is an `Option`, so the assigner unwraps it:
 
-const machine = setup({
+```typescript
+import { setup, assign, fromPromise } from "@jambudipa/xstate-effect"
+import { Option } from "effect"
+
+export const machine = setup({
   types: {} as {
-    context: { data: any }
+    context: { data: unknown }
     events: { type: "FETCH" }
   },
   actors: {
     fetchData: fromPromise(async ({ input }: { input: { url: string } }) => {
       const response = await fetch(input.url)
-      return response.json()
+      const data: unknown = await response.json()
+      return data
     })
   }
 }).createMachine({
@@ -171,7 +201,7 @@ const machine = setup({
         input: { url: "/api/data" },
         onDone: {
           target: "success",
-          actions: assign({ data: ({ event }) => event.output })
+          actions: assign({ data: ({ event }) => Option.getOrNull(event.output) })
         }
       }
     },
@@ -185,7 +215,7 @@ const machine = setup({
 ```typescript
 import { setup } from "@jambudipa/xstate-effect"
 
-const machine = setup({
+export const machine = setup({
   types: {} as {
     context: { timeout: number }
     events: { type: "START" }
@@ -214,15 +244,15 @@ const machine = setup({
 ### Complete Example
 
 ```typescript
-import { setup, assign, guard, action, fromPromise } from "@jambudipa/xstate-effect"
-import { Effect, Console } from "effect"
+import { setup, assign, fromPromise } from "@jambudipa/xstate-effect"
+import { Console, Option } from "effect"
 
 interface User {
   id: string
   name: string
 }
 
-const userMachine = setup({
+export const userMachine = setup({
   types: {} as {
     context: {
       userId: string
@@ -234,13 +264,13 @@ const userMachine = setup({
       | { type: "RETRY" }
       | { type: "RESET" }
     input: { initialUserId?: string }
-    output: { user: User | null }
   },
   actors: {
     fetchUser: fromPromise(async ({ input }: { input: { userId: string } }) => {
       const response = await fetch(`/api/users/${input.userId}`)
       if (!response.ok) throw new Error("Failed to fetch")
-      return response.json() as Promise<User>
+      const user: User = await response.json()
+      return user
     })
   },
   actions: {
@@ -248,24 +278,20 @@ const userMachine = setup({
       userId: ({ event }) => event.type === "FETCH" ? event.userId : ""
     }),
     setUser: assign({
-      user: ({ event }) =>
-        event.type === "xstate.done.actor.fetchUser" ? event.output : null,
+      user: (_, params: { user: User | null }) => params.user,
       error: null
     }),
     setError: assign({
-      error: ({ event }) =>
-        event.type === "xstate.error.actor.fetchUser" ? event.error.message : null
+      error: (_, params: { message: string }) => params.message
     }),
     reset: assign({
       user: null,
       error: null
     }),
-    logFetch: action("logFetch", ({ context }) =>
-      Console.log(`Fetching user: ${context.userId}`)
-    )
+    logFetch: ({ context }) => Console.log(`Fetching user: ${context.userId}`)
   },
   guards: {
-    hasUserId: guard("hasUserId", ({ context }) => context.userId.length > 0)
+    hasUserId: ({ context }) => context.userId.length > 0
   }
 }).createMachine({
   id: "user",
@@ -291,11 +317,19 @@ const userMachine = setup({
         input: ({ context }) => ({ userId: context.userId }),
         onDone: {
           target: "success",
-          actions: "setUser"
+          actions: {
+            type: "setUser",
+            params: ({ event }) => ({ user: Option.getOrNull(event.output) })
+          }
         },
         onError: {
           target: "failure",
-          actions: "setError"
+          actions: {
+            type: "setError",
+            params: ({ event }) => ({
+              message: event.error instanceof Error ? event.error.message : String(event.error)
+            })
+          }
         }
       }
     },
@@ -330,13 +364,14 @@ const userMachine = setup({
 
 ## Notes
 
-- The `types` property uses `as` assertion to define types without runtime values
+- The `types` property uses the `{} as { ... }` assertion to define types without runtime values
 - Named actions, guards, and actors can be referenced by string in machine config
+- A named action that takes params is used as `{ type, params }`; `params` can be a function of the context and the event
 - Setup enables type inference across the entire machine definition
-- All properties in setup are optional except `types`
+- Every property of the setup config is optional, `types` included
 
 ## See Also
 
-- [createMachine](./create-machine.md)
+- [The `createMachine` method](../tutorials/01-first-state-machine.md#the-createmachine-method) - Tutorial 1 explains the machine config
 - [Actions Reference](./actions/)
-- [Guards Reference](./guards/)
+- [Guards](../tutorials/03-guards-and-transitions.md) - Tutorial 3 defines named guards in `setup`

@@ -1620,11 +1620,22 @@ describe('entry/exit actions', () => {
 
       const interpreter = (yield* createActor(parent));
       (yield* interpreter.start);
+      const children = Object.values((yield* interpreter.getSnapshot).children);
 
       // `stop` is an Effect (D6): "does not throw" is an Exit that is a success, which also
       // excludes a defect raised by the child's exit-handler `sendParent` while stopping
       const stopped = yield* Effect.exit(interpreter.stop);
       expect(Exit.isSuccess(stopped)).toBe(true);
+
+      // Port check: the stop completed, as upstream's does (run against xstate@5.33.2): the
+      // parent is stopped, `xstate.stop` stopped its one invoked child and left no child behind
+      const snapshot = yield* interpreter.getSnapshot;
+      expect(snapshot.status).toBe('stopped');
+      expect(Object.keys(snapshot.children)).toEqual([]);
+      expect(children).toHaveLength(1);
+      for (const child of children) {
+        expect((yield* child.getSnapshotUntyped).status).toBe('stopped');
+      }
     }));
 
     // TODO: determine if the sendParent action should execute when the child actor is stopped.

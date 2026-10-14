@@ -39,8 +39,19 @@ export default defineConfig({
     reporters: ["default", new NoSkipReporter(), pendingRewriteGuard],
     globals: false,
     environment: "node",
-    testTimeout: 10000,
-    hookTimeout: 10000,
+    // A hang detector with room for a loaded machine: the slowest default-timeout test takes about
+    // 6 s on a quiet one, and at a load average of 40 to 50 several passed 10 s. A test that hangs
+    // still fails, after 60 s (docs/testing.md)
+    testTimeout: 60000,
+    hookTimeout: 60000,
+    // The coverage gate: `pnpm test:coverage` (the pre-push hook and CI) turns coverage on, and a
+    // run below a threshold fails. `pnpm test` leaves it off. docs/testing.md at the repository root.
+    coverage: {
+      provider: "istanbul",
+      include: ["src/**/*.ts"],
+      reporter: ["text-summary", "lcov"],
+      thresholds: { lines: 90, branches: 85 },
+    },
   },
   resolve: {
     alias: [

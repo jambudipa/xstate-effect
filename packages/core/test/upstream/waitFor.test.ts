@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "@effect/vitest"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
-import { createActor, waitFor, createMachine } from "../../src/index.js";
+import { createActor, waitFor, createMachine, WaitForTimeoutError } from "../../src/index.js";
 
 // `waitFor` returns an Effect (D6): `await waitFor(...)` is `yield* waitFor(...)`, a
 // rejection is a failure of that Effect (`Effect.flip` for `.rejects`, `Effect.catch` for a
@@ -61,14 +61,22 @@ describe('waitFor', () => {
 
     const service = yield* Effect.tap(createActor(machine), (a) => a.start);
 
+    let caught = false;
     yield* waitFor(service, (state) => state.matches('c'), { timeout: 10 }).pipe(
       Effect.raceFirst(Effect.forever(TestClock.adjust("10 millis"))),
       Effect.catch((e) =>
         Effect.sync(() => {
+          caught = true;
           expect(e).toBeInstanceOf(Error);
+          // Port check: the error is the timeout's, with upstream's text (upstream
+          // `src/waitFor.ts` rejects with an Error 'Timeout of <timeout> ms exceeded')
+          expect(e).toBeInstanceOf(WaitForTimeoutError);
+          expect(e instanceof Error ? e.message : undefined).toBe('Timeout of 10 ms exceeded');
         })
       )
     );
+    // Port check: the wait did fail; without this a wait that ended without an error would pass
+    expect(caught).toBe(true);
   }));
 
   // upstream: test/waitFor.test.ts > waitFor > should not reject immediately when passing Infinity as timeout

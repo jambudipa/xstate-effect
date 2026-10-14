@@ -1868,11 +1868,21 @@ const orOwn =
   (inner: ReadonlyArray<MicrostepTransition<TContext, TEvent>>): Selection<TContext, TEvent> =>
     inner.length > 0 ? Effect.succeed(inner) : next(stateNode, ctx)
 
-/**
- * No transitions, for a value key that names no child. Unreachable: the engine selects
- * over a value it computed from a configuration.
- */
+/** No transitions: the macrostep's turn that selects no eventless transition, or a snapshot with no value at all. */
 const nothing = <TContext, TEvent extends EventObject>(): Selection<TContext, TEvent> => Effect.succeed([])
+
+/**
+ * A value key that names no child of `stateNode` (upstream `getStateNode`, which
+ * `transitionNode` calls and which throws): a defect that carries a `MachineDefinitionError`
+ * with the upstream message, as the engine's other raw upstream throws are (S16). The engine's
+ * own selections never meet one, as they walk a value computed from a configuration; a caller
+ * that hands `transitionNode`, `can` or `getTransitionData` a value naming no state does.
+ */
+const missingChild = <TContext, TEvent extends EventObject>(
+  stateNode: StateNode<TContext, TEvent>,
+  stateKey: string
+): Selection<TContext, TEvent> =>
+  Effect.die(new MachineDefinitionError({ message: `Child state '${stateKey}' does not exist on '${stateNode.id}'` }))
 
 /** Upstream `transitionAtomicNode`: the active atomic child's transition, else the node's own. */
 const transitionAtomicNode = <TContext, TEvent extends EventObject>(
@@ -1881,7 +1891,7 @@ const transitionAtomicNode = <TContext, TEvent extends EventObject>(
   ctx: EngineContext<TContext, TEvent>
 ): Selection<TContext, TEvent> =>
   Option.match(getChild(stateNode, stateValue), {
-    onNone: () => nothing<TContext, TEvent>(),
+    onNone: () => missingChild(stateNode, stateValue),
     onSome: (child) => next(child, ctx),
   }).pipe(Effect.flatMap(orOwn(stateNode, ctx)))
 
@@ -1892,10 +1902,11 @@ const transitionCompoundNode = <TContext, TEvent extends EventObject>(
   ctx: EngineContext<TContext, TEvent>
 ): Selection<TContext, TEvent> =>
   Option.match(Option.fromNullishOr(Object.entries(stateValue)[0]), {
-    onNone: () => nothing<TContext, TEvent>(),
+    // `selectFromNode` hands over a value with exactly one key
+    onNone: () => Effect.succeed([]),
     onSome: ([subStateKey, subStateValue]) =>
       Option.match(getChild(stateNode, subStateKey), {
-        onNone: () => nothing<TContext, TEvent>(),
+        onNone: () => missingChild(stateNode, subStateKey),
         onSome: (child) => selectFromNode(child, subStateValue, ctx),
       }),
   }).pipe(Effect.flatMap(orOwn(stateNode, ctx)))
@@ -1913,7 +1924,7 @@ const transitionParallelNode = <TContext, TEvent extends EventObject>(
     Object.entries(stateValue).filter(([, subStateValue]) => subStateValue !== ""),
     ([subStateKey, subStateValue]) =>
       Option.match(getChild(stateNode, subStateKey), {
-        onNone: () => nothing<TContext, TEvent>(),
+        onNone: () => missingChild(stateNode, subStateKey),
         onSome: (child) => selectFromNode(child, subStateValue, ctx),
       })
   ).pipe(
@@ -2520,7 +2531,7 @@ export interface MicrostepRecording {
  * @category Macrostep
  */
 export const MicrostepRecorder = Context.Reference<Option.Option<MicrostepRecording>>(
-  "@xstate-effect/stateUtils/MicrostepRecorder",
+  "@jambudipa/xstate-effect/stateUtils/MicrostepRecorder",
   { defaultValue: () => Option.none() }
 )
 
@@ -2596,9 +2607,24 @@ const sameStateNodes = <TContext, TEvent extends EventObject>(
 const selectTransitions = <TContext, TEvent extends EventObject>(
   ctx: EngineContext<TContext, TEvent>
 ): Selection<TContext, TEvent> =>
-  Option.match(configurationOf<TContext, TEvent>(ctx.snapshot), {
+  Option.match(selectionValueOf(ctx), {
     onNone: () => nothing<TContext, TEvent>(),
-    onSome: (configuration) => selectFromNode(ctx.machine.root, getStateValue(ctx.machine.root, configuration), ctx),
+    onSome: (value) => selectFromNode(ctx.machine.root, value, ctx),
+  })
+
+/**
+ * The state value that a selection walks (upstream `transitionNode(root, snapshot.value)`):
+ * the value of the snapshot's configuration, or, for a snapshot that lists no node (built from
+ * a value that names no state), its own value, which upstream walks and on which `getStateNode`
+ * throws (`missingChild`). None for a snapshot with no state value at all.
+ */
+const selectionValueOf = <TContext, TEvent extends EventObject>(ctx: EngineContext<TContext, TEvent>): Option.Option<StateValue> =>
+  Option.match(configurationOf<TContext, TEvent>(ctx.snapshot), {
+    onSome: (configuration) => Option.some(getStateValue(ctx.machine.root, configuration)),
+    onNone: () =>
+      typeof ctx.snapshot.value === "string" || Predicate.isObject(ctx.snapshot.value)
+        ? Option.some(ctx.snapshot.value)
+        : Option.none(),
   })
 
 /**
@@ -2615,11 +2641,11 @@ const selectTransitions = <TContext, TEvent extends EventObject>(
 export const getTransitionData = <TContext, TEvent extends EventObject>(
   ctx: EngineContext<TContext, TEvent>
 ): Effect.Effect<ReadonlyArray<TransitionDefinition<TContext, TEvent>>, GuardError> =>
-  Option.match(configurationOf<TContext, TEvent>(ctx.snapshot), {
+  Option.match(selectionValueOf(ctx), {
     onNone: () => Effect.succeed<ReadonlyArray<TransitionDefinition<TContext, TEvent>>>([]),
-    onSome: (configuration) =>
+    onSome: (value) =>
       Effect.map(
-        transitionNode(ctx.machine.root, getStateValue(ctx.machine.root, configuration), ctx),
+        transitionNode(ctx.machine.root, value, ctx),
         (definitions): ReadonlyArray<TransitionDefinition<TContext, TEvent>> => definitions ?? []
       ),
   }).pipe(Effect.catchDefect((defect) => (defect instanceof GuardError ? Effect.fail(defect) : Effect.die(defect))))
@@ -3020,11 +3046,16 @@ const runMacrostep =<TContext, TEvent extends EventObject>(
     return { snapshot: nextSnapshot, microsteps }
   })
 
-/** Wraps a definition error the engine meets while it handles `event` as the macrostep's failure. */
+/**
+ * Wraps a definition error the engine meets while it handles `event` as the macrostep's failure.
+ * The error keeps the upstream message, with the definition error as `cause` (DEV-72): upstream
+ * throws that message when the transition reaches the faulty node, e.g. an `initial` key that
+ * names no child of a state the transition enters.
+ */
 const asTransitionError =
   <TContext, TEvent extends EventObject>(event: TEvent, snapshot: EngineSnapshot<TContext>) =>
   (error: MachineDefinitionError | TransitionError): TransitionError =>
-    error._tag === "TransitionError" ? error : new TransitionError({ message: "Transition failed", event, snapshot, cause: error })
+    error._tag === "TransitionError" ? error : new TransitionError({ message: error.message, event, snapshot, cause: error })
 
 /**
  * Processes one event (upstream `macrostep`) with a fresh internal queue: the first
@@ -3037,8 +3068,8 @@ const asTransitionError =
  * status `active`. An actor never hands such a snapshot an event. Fails with a
  * `TransitionError`: the upstream message for an event whose type is `*`, which no
  * transition takes; the upstream
- * infinite-loop message past `options.maxIterations`; or "Transition failed" around a
- * definition error.
+ * infinite-loop message past `options.maxIterations`; or the upstream message of a definition
+ * error the transition reaches, with that error as `cause`.
  *
  * @since 0.1.0
  * @category Macrostep

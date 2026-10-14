@@ -5,28 +5,53 @@ Updates the machine's context with new values.
 ## Signature
 
 ```typescript
-function assign<TContext, TEvent>(
-  assignment: Assigner<TContext, TEvent> | PropertyAssigner<TContext, TEvent>
+import type { ActionDefinition, Assigner, EventObject, PropertyAssigner } from "@jambudipa/xstate-effect"
+
+// Simplified: the full type also carries the params type of the action's uses, every event
+// of the machine and the names of the machine's implementations
+export declare function assign<TContext, TEvent extends EventObject>(
+  assignment: Partial<TContext> | PropertyAssigner<TContext, TEvent> | Assigner<TContext, TEvent>
 ): ActionDefinition<TContext, TEvent>
 ```
+
+The context and event types come from where the action is used: the `types` of the machine
+or of its `setup`, and the event of the transition that runs the action.
 
 ## Parameters
 
 ### assignment
 
-Either an object with property assignments or a function returning the new context.
+Either an object with property assignments or a function returning the context properties to change.
 
-**Property Assigner** (recommended):
+**Property Assigner** (recommended): each key holds a value, or a function that computes it:
 ```typescript
-assign({
-  property1: value | ((args) => value),
-  property2: value | ((args) => value)
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const counter = setup({
+  types: {} as {
+    context: { count: number; label: string }
+  },
+  actions: {
+    update: assign({
+      count: 1,                                          // a value
+      label: ({ context }) => `Count: ${context.count}` // or a function of the arguments
+    })
+  }
 })
 ```
 
-**Function Assigner**:
+**Function Assigner**: the function returns the properties to change, and `assign` merges them into the context:
 ```typescript
-assign((args) => newContext)
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const counter = setup({
+  types: {} as {
+    context: { count: number; label: string }
+  },
+  actions: {
+    increment: assign(({ context }) => ({ count: context.count + 1 }))
+  }
+})
 ```
 
 ### Assignment Function Arguments
@@ -37,41 +62,70 @@ assign((args) => newContext)
 | `event` | `TEvent` | Event that triggered the action |
 | `self` | `ActorRef` | Reference to the current actor |
 | `system` | `ActorSystem` | The actor system |
+| `spawn` | `Spawner` | Spawns a child actor and gives its reference at once |
+
+The params of the action's use are the second argument of each function.
 
 ## Usage
 
 ### Static Values
 
 ```typescript
-assign({ count: 0 })
-assign({ name: "default", active: false })
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const profile = setup({
+  types: {} as {
+    context: { count: number; name: string; active: boolean }
+  },
+  actions: {
+    resetCount: assign({ count: 0 }),
+    resetProfile: assign({ name: "default", active: false })
+  }
+})
 ```
 
 ### Dynamic Values from Context
 
 ```typescript
-assign({
-  count: ({ context }) => context.count + 1
-})
+import { setup, assign } from "@jambudipa/xstate-effect"
 
-assign({
-  total: ({ context }) => context.items.reduce((sum, item) => sum + item.price, 0)
+export const cart = setup({
+  types: {} as {
+    context: { count: number; total: number; items: Array<{ price: number }> }
+  },
+  actions: {
+    increment: assign({
+      count: ({ context }) => context.count + 1
+    }),
+    computeTotal: assign({
+      total: ({ context }) => context.items.reduce((sum, item) => sum + item.price, 0)
+    })
+  }
 })
 ```
 
 ### Values from Event
 
 ```typescript
-assign({
-  name: ({ event }) => event.type === "SET_NAME" ? event.name : ""
-})
+import { setup, assign } from "@jambudipa/xstate-effect"
 
-assign({
-  items: ({ context, event }) => {
-    if (event.type === "ADD_ITEM") {
-      return [...context.items, event.item]
-    }
-    return context.items
+export const list = setup({
+  types: {} as {
+    context: { name: string; items: string[] }
+    events: { type: "SET_NAME"; name: string } | { type: "ADD_ITEM"; item: string }
+  },
+  actions: {
+    setName: assign({
+      name: ({ event }) => event.type === "SET_NAME" ? event.name : ""
+    }),
+    addItem: assign({
+      items: ({ context, event }) => {
+        if (event.type === "ADD_ITEM") {
+          return [...context.items, event.item]
+        }
+        return context.items
+      }
+    })
   }
 })
 ```
@@ -79,21 +133,40 @@ assign({
 ### Multiple Properties
 
 ```typescript
-assign({
-  count: ({ context }) => context.count + 1,
-  lastUpdated: () => Date.now(),
-  history: ({ context }) => [...context.history, context.count]
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const tracker = setup({
+  types: {} as {
+    context: { count: number; lastUpdated: number; history: number[] }
+  },
+  actions: {
+    record: assign({
+      count: ({ context }) => context.count + 1,
+      lastUpdated: () => Date.now(),
+      history: ({ context }) => [...context.history, context.count]
+    })
+  }
 })
 ```
 
 ### Full Context Replacement
 
 ```typescript
-assign(({ context, event }) => {
-  if (event.type === "RESET") {
-    return { count: 0, name: "", items: [] }
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const form = setup({
+  types: {} as {
+    context: { count: number; name: string; items: string[] }
+    events: { type: "RESET" } | { type: "SUBMIT" }
+  },
+  actions: {
+    reset: assign(({ context, event }) => {
+      if (event.type === "RESET") {
+        return { count: 0, name: "", items: [] }
+      }
+      return context
+    })
   }
-  return context
 })
 ```
 
@@ -102,7 +175,9 @@ assign(({ context, event }) => {
 ### Counter
 
 ```typescript
-const counterMachine = setup({
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const counterMachine = setup({
   types: {} as {
     context: { count: number }
     events:
@@ -134,7 +209,9 @@ const counterMachine = setup({
 ### Form Fields
 
 ```typescript
-const formMachine = setup({
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const formMachine = setup({
   types: {} as {
     context: {
       fields: Record<string, string>
@@ -168,40 +245,82 @@ const formMachine = setup({
     }),
     clearErrors: assign({ errors: {} })
   }
-}).createMachine({ /* ... */ })
+}).createMachine({
+  id: "form",
+  initial: "editing",
+  context: { fields: {}, errors: {}, touched: {} },
+  states: {
+    editing: {
+      on: {
+        SET_FIELD: { actions: "setField" },
+        BLUR_FIELD: { actions: "touchField" },
+        SET_ERROR: { actions: "setError" },
+        CLEAR_ERRORS: { actions: "clearErrors" }
+      }
+    }
+  }
+})
 ```
 
 ### Immutable Updates
 
+An `assign` written under an event in `on` reads that event's type, so it needs no check of `event.type`:
+
 ```typescript
-// Adding to array
-assign({
-  items: ({ context, event }) => [...context.items, event.item]
-})
+import { createMachine, assign } from "@jambudipa/xstate-effect"
 
-// Removing from array
-assign({
-  items: ({ context, event }) =>
-    context.items.filter(item => item.id !== event.itemId)
-})
+interface Item {
+  id: string
+  name: string
+  done: boolean
+}
 
-// Updating array item
-assign({
-  items: ({ context, event }) =>
-    context.items.map(item =>
-      item.id === event.itemId ? { ...item, ...event.updates } : item
-    )
-})
-
-// Updating nested object
-assign({
-  user: ({ context, event }) => ({
-    ...context.user,
-    profile: {
-      ...context.user?.profile,
-      name: event.name
+export const listMachine = createMachine({
+  types: {} as {
+    context: { items: Item[]; user: { profile: { name: string; bio: string } } }
+    events:
+      | { type: "ADD_ITEM"; item: Item }
+      | { type: "REMOVE_ITEM"; itemId: string }
+      | { type: "UPDATE_ITEM"; itemId: string; updates: Partial<Item> }
+      | { type: "SET_NAME"; name: string }
+  },
+  context: { items: [], user: { profile: { name: "", bio: "" } } },
+  on: {
+    // Adding to array
+    ADD_ITEM: {
+      actions: assign({
+        items: ({ context, event }) => [...context.items, event.item]
+      })
+    },
+    // Removing from array
+    REMOVE_ITEM: {
+      actions: assign({
+        items: ({ context, event }) =>
+          context.items.filter(item => item.id !== event.itemId)
+      })
+    },
+    // Updating array item
+    UPDATE_ITEM: {
+      actions: assign({
+        items: ({ context, event }) =>
+          context.items.map(item =>
+            item.id === event.itemId ? { ...item, ...event.updates } : item
+          )
+      })
+    },
+    // Updating nested object
+    SET_NAME: {
+      actions: assign({
+        user: ({ context, event }) => ({
+          ...context.user,
+          profile: {
+            ...context.user.profile,
+            name: event.name
+          }
+        })
+      })
     }
-  })
+  }
 })
 ```
 
@@ -209,7 +328,8 @@ assign({
 
 - `assign` always returns a new context object (immutable update)
 - Property assigners are evaluated in order
-- Later assignments can access results of earlier assignments in the same `assign` call
+- Every property assigner of one `assign` call reads the context from before the action, not the results of the other assigners
+- An assigner function may return an Effect of the properties to change; a failure of that Effect becomes the actor's error
 - Always handle the possibility that the event type doesn't match when using event data
 - Use TypeScript's type narrowing for type-safe event access
 
@@ -218,40 +338,59 @@ assign({
 ### Type-Safe Event Access
 
 ```typescript
-assign({
-  value: ({ event }) => {
-    // Type narrowing
-    if (event.type === "SET_VALUE") {
-      return event.value
-    }
-    return undefined
-  }
-})
+import { setup, assign } from "@jambudipa/xstate-effect"
 
-// Or with a type guard
-assign({
-  value: ({ event }) =>
-    event.type === "SET_VALUE" ? event.value : undefined
+export const valueSetup = setup({
+  types: {} as {
+    context: { value: number | undefined }
+    events: { type: "SET_VALUE"; value: number } | { type: "CLEAR" }
+  },
+  actions: {
+    setValue: assign({
+      value: ({ event }) => {
+        // Type narrowing
+        if (event.type === "SET_VALUE") {
+          return event.value
+        }
+        return undefined
+      }
+    }),
+    // Or with a conditional expression
+    setValueInline: assign({
+      value: ({ event }) =>
+        event.type === "SET_VALUE" ? event.value : undefined
+    })
+  }
 })
 ```
 
 ### Conditional Assignment
 
 ```typescript
-assign({
-  count: ({ context, event }) => {
-    if (event.type === "INCREMENT" && context.count < context.max) {
-      return context.count + 1
-    }
-    if (event.type === "DECREMENT" && context.count > context.min) {
-      return context.count - 1
-    }
-    return context.count
+import { setup, assign } from "@jambudipa/xstate-effect"
+
+export const bounded = setup({
+  types: {} as {
+    context: { count: number; min: number; max: number }
+    events: { type: "INCREMENT" } | { type: "DECREMENT" }
+  },
+  actions: {
+    step: assign({
+      count: ({ context, event }) => {
+        if (event.type === "INCREMENT" && context.count < context.max) {
+          return context.count + 1
+        }
+        if (event.type === "DECREMENT" && context.count > context.min) {
+          return context.count - 1
+        }
+        return context.count
+      }
+    })
   }
 })
 ```
 
 ## See Also
 
-- [Actions Overview](./index.md)
-- [How to Update Context](../how-to/update-context.md)
+- [Actions in the package entry points](../../../README.md#entry-points) - Every action that `@jambudipa/xstate-effect/actions` exports
+- [Working with Context](../../tutorials/02-working-with-context.md) - Tutorial 2 updates context with `assign`

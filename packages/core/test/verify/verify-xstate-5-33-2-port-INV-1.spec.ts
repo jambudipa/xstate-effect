@@ -1527,6 +1527,25 @@ describe("INV-1 triggers: each site's port operation uses the table's channel an
       assert.deepStrictEqual(byId, { ...NOTHING, channel: "effect-failure", messages: [fillTemplate(source, ["missing", "(machine)"])] })
     }))
 
+  it.effect("[INV-1] src/stateUtils.ts:453 on a transition: an actor that enters a state whose initial key names no child errors with the upstream text, not a generic one (DEV-72)", () =>
+    Effect.gen(function* () {
+      // Upstream reads `initial` when the transition enters `b`, and the actor's error is that Error
+      const observed = yield* observeActor(
+        Effect.gen(function* () {
+          const machine = createMachine<object, { readonly type: "GO" }>({
+            id: "m",
+            initial: "a",
+            context: {},
+            states: { a: { on: { GO: "b" } }, b: { initial: "missing", states: { c: {} } } },
+          })
+          const actor = yield* Effect.tap(createActor(machine), (created) => created.start)
+          yield* actor.send({ type: "GO" })
+          return actor
+        })
+      )
+      assert.deepStrictEqual(observed, { ...NOTHING, channel: "actor-error", messages: [Messages.initialStateNotFound("missing", "m.b")] })
+    }))
+
   it.effect("[INV-1] src/StateMachine.ts:180 is unreachable upstream: a top-level final state with output and no machine output logs nothing in the port either", () =>
     Effect.gen(function* () {
       const observed = yield* observeLogs(

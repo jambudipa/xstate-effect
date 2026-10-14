@@ -236,7 +236,7 @@ const readSource = (path: string) => Effect.sync(() => readFileSync(join(pkgRoot
  * updates this record with the ledger.
  */
 const ROW_COUNTS: Readonly<Record<string, number>> = {
-  deviation: 73,
+  deviation: 74,
   removed: 1,
   "not ported: missing": 25,
   "not ported: assertions": 0,

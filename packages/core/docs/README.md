@@ -43,17 +43,17 @@ const counterMachine = setup({
   }
 })
 
-// Run the machine
+// Run the machine: the actor lives in the scope of the program, and closing the scope stops it
 const program = Effect.gen(function* () {
   const actor = yield* createActor(counterMachine)
-  yield* actor.start()
+  yield* actor.start
   yield* actor.send({ type: "INCREMENT" })
   yield* actor.send({ type: "INCREMENT" })
-  const snapshot = yield* actor.getSnapshot()
+  const snapshot = yield* actor.getSnapshot
   console.log(snapshot.context.count) // 2
 })
 
-void Effect.runPromise(program)
+void Effect.runPromise(Effect.scoped(program))
 ```
 
 ## What is @jambudipa/xstate-effect?
@@ -75,6 +75,6 @@ npm install @jambudipa/xstate-effect effect
 ## Next Steps
 
 - **New to state machines?** Start with the [First State Machine Tutorial](./tutorials/01-first-state-machine.md)
-- **Know XState?** Read [XState to Effect Migration](./explanation/xstate-migration.md)
+- **Know XState?** Read [How it differs from XState](../README.md#how-it-differs-from-xstate)
 - **Building something specific?** Browse the [How-to Guides](./how-to/)
 - **Need API details?** Check the [Reference](./reference/)

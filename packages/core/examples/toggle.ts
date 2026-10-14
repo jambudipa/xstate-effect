@@ -8,7 +8,7 @@
  *
  * Ported from xstate/examples/toggle
  */
-import { createMachine } from "../src/index.js"
+import { assign, createMachine } from "../src/index.js"
 
 /**
  * Events that the toggle machine can receive.
@@ -70,23 +70,26 @@ export const toggleMachine = createMachine({
 /**
  * Enhanced toggle with context.
  *
- * This variant is meant to track how many times the toggle has been activated; see
- * `toggleCount` for what it does today.
+ * This variant counts the toggles in its context. It is the port's own addition: the upstream
+ * toggle example has only `toggleMachine`.
  */
 export interface ToggleWithCountContext {
-  /**
-   * Meant to count the activations. No transition of `toggleWithCountMachine` assigns it, so it
-   * stays 0; the tests check only its initial value.
-   */
+  /** The number of toggle events since the start or the last reset; each toggle adds 1, either way. */
   toggleCount: number
 }
 
 /** The events of `toggleWithCountMachine`: toggle flips the state, reset returns to "inactive" from either state. */
 export type ToggleWithCountEvent = { type: "toggle" } | { type: "reset" }
 
+/** Adds 1 to `toggleCount`; each toggle transition runs it. */
+const countToggle = assign<ToggleWithCountContext, ToggleWithCountEvent>(({ context }) => ({
+  toggleCount: context.toggleCount + 1,
+}))
+
 /**
  * Toggle machine with a context and a reset event. It starts "inactive"; toggle switches
- * between "inactive" and "active", and reset goes to "inactive" from either state.
+ * between "inactive" and "active" and adds 1 to `toggleCount`, and reset goes to "inactive"
+ * from either state and sets `toggleCount` back to 0.
  */
 export const toggleWithCountMachine = createMachine({
   types: {} as { context: ToggleWithCountContext; events: ToggleWithCountEvent },
@@ -98,19 +101,25 @@ export const toggleWithCountMachine = createMachine({
   states: {
     inactive: {
       on: {
-        toggle: "active",
+        toggle: {
+          target: "active",
+          actions: countToggle,
+        },
         reset: {
           target: "inactive",
-          actions: [],
+          actions: assign({ toggleCount: 0 }),
         },
       },
     },
     active: {
       on: {
-        toggle: "inactive",
+        toggle: {
+          target: "inactive",
+          actions: countToggle,
+        },
         reset: {
           target: "inactive",
-          actions: [],
+          actions: assign({ toggleCount: 0 }),
         },
       },
     },

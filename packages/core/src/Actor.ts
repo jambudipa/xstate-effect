@@ -85,7 +85,7 @@ const makeActorRefVariance = <
  * @since 0.1.0
  * @category Type ID
  */
-export const ActorTypeId: unique symbol = Symbol.for("@xstate-effect/Actor")
+export const ActorTypeId: unique symbol = Symbol.for("@jambudipa/xstate-effect/Actor")
 
 /**
  * Type ID type for Actor.
@@ -605,7 +605,7 @@ const ActorProto = Object.assign(Object.create(ActorClass.prototype) as object, 
  * fiber never waits for its macrostep, and a stop of one of these actors never waits for its
  * processing fiber, so an actor never waits for itself or for another actor.
  */
-const ProcessingActors = Context.Reference<ReadonlyArray<AR.ActorRefBase>>("@xstate-effect/Actor/ProcessingActors", {
+const ProcessingActors = Context.Reference<ReadonlyArray<AR.ActorRefBase>>("@jambudipa/xstate-effect/Actor/ProcessingActors", {
   defaultValue: () => [],
 })
 
@@ -695,7 +695,7 @@ interface ActorInternals {
 }
 
 /** The key of an actor's internals: module-private, so only this module reads them. */
-const ActorInternalsKey: unique symbol = Symbol("@xstate-effect/Actor/internals")
+const ActorInternalsKey: unique symbol = Symbol("@jambudipa/xstate-effect/Actor/internals")
 
 /** The internals of an actor this module created; none for any other reference. */
 const internalsOf = (ref: unknown): Option.Option<ActorInternals> =>
@@ -999,6 +999,10 @@ const build = <
       ),
       "sequential"
     )
+    // Done once the lifetime has closed in full, the children's scopes included: its first
+    // finalizer runs last. A send refused before then belongs to the close (`enqueue`)
+    const closed = yield* Deferred.make<void>()
+    yield* Scope.addFinalizer(lifetime, Deferred.done(closed, Exit.void))
     // The caller's services: the logic's work after creation reads them too (SD-8)
     const services = yield* Effect.context<R>()
 
@@ -1146,7 +1150,11 @@ const build = <
 
     /**
      * Queues `event` without waiting for its macrostep. A stopped, done or errored actor
-     * drops it with the upstream warning; the sender never waits and never fails.
+     * drops it with the upstream warning; the sender never waits and never fails. While the
+     * actor's lifetime still closes (a child's cleanup sending as it stops with this actor,
+     * whether by `stop`, a done or errored snapshot, or the close of the owner's scope), the
+     * event is dropped without the warning: upstream keeps the actor running until
+     * `_stopProcedure`, so it queues the event, and the procedure clears it with the mailbox.
      */
     const enqueue = (event: TEvent): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -1154,7 +1162,7 @@ const build = <
         const accepted = status === Types.ProcessingStatus.Stopped
           ? false
           : yield* Queue.offer(mailbox, { kind: "event", event, processed: Option.none() })
-        if (!accepted) {
+        if (!accepted && (yield* Deferred.isDone(closed))) {
           yield* warnStopped(event)
         }
       })
@@ -1636,7 +1644,11 @@ const build = <
         // finishes, so its scheduled events are cancelled and its scope closes (SD-27). An
         // initial action that fails errors the actor, which ends here too (upstream `_error`
         // inside `update`)
-        const goesOn = yield* update(yield* SubscriptionRef.get(snapshotRef), initEvent, true)
+        // With the caller's services of `createActor`, as `logic.start` and the processing fiber
+        // (SD-8): an initial action that returns an Effect reads them
+        const goesOn = yield* update(yield* SubscriptionRef.get(snapshotRef), initEvent, true).pipe(
+          Effect.provideContext(services)
+        )
         if (!goesOn) {
           yield* finish(true)
         }
@@ -1989,13 +2001,11 @@ const build = <
           return true
         }
 
+        // Upstream `_process` hands every event to the logic, whatever the snapshot's status: a
+        // done or errored snapshot never gets here (its `update` ended the processing), and a
+        // `stopped` one that a custom logic gave, or that was restored, keeps taking events, as
+        // upstream `update` has no case for `stopped`
         const currentSnapshot = yield* SubscriptionRef.get(snapshotRef)
-
-        // Skip if not active
-        if (currentSnapshot.status !== "active") {
-          yield* release(envelope)
-          return true
-        }
 
         // The `@xstate.event` inspection event was sent when the event was sent (upstream
         // `_relay`), so the processing reports it no more

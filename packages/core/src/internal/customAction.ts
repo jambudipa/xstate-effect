@@ -31,7 +31,7 @@ export type BuiltInCreator = "assign" | "emit" | "raise" | "sendTo"
  * The warnings of the custom action that runs in the current fiber; none outside one.
  */
 const CustomActionWarnings = Context.Reference<Option.Option<MutableRef.MutableRef<ReadonlyArray<string>>>>(
-  "@xstate-effect/internal/customAction/CustomActionWarnings",
+  "@jambudipa/xstate-effect/internal/customAction/CustomActionWarnings",
   { defaultValue: () => Option.none() }
 )
 

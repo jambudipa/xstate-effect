@@ -17,9 +17,9 @@
  *   npx tsx scripts/clean.ts --json            # JSON output for CI integration
  *
  * Run it from the package root: it reads `tsconfig.json`, `clean.config.ts` and `code-style/`
- * from the working folder. The repair agent runs with `bypassPermissions` (except with
- * `--dry-run`), so it can edit any file and run any command without a prompt. Run it only on a
- * checkout you trust, with your own work committed, and review its diff.
+ * from the working folder. The repair agent runs in `dontAsk` mode (not with `--dry-run`): it may
+ * read and edit files and run ESLint and tsc (`REPAIR_TOOLS`), and every other tool is denied.
+ * It can still edit any file: commit your own work first, and review its diff.
  */
 
 import * as ts from 'typescript';
@@ -27,8 +27,46 @@ import { ESLint, Rule } from 'eslint';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { program } from 'commander';
+import { InvalidArgumentError, program } from 'commander';
 import cliProgress from 'cli-progress';
+import * as core from './clean-core.js';
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+/**
+ * The working folder, not the script's folder. The CLI reads `tsconfig.json`, `clean.config.ts` and
+ * `code-style/` from it and starts the agent in it, so run the CLI from the package root, as the
+ * `pnpm clean` scripts do.
+ */
+const ROOT_DIR = process.cwd();
+
+/**
+ * Loads `clean.config.ts` from the working folder and merges its default export over
+ * `DEFAULT_CONFIG` (`mergeConfig` of `clean-core.ts`).
+ *
+ * A config that fails to import is ignored, and the defaults apply; `--debug` shows why. The import
+ * takes a computed path that the static module walk of CONF-8 cannot follow, so
+ * `test/verify/verify-xstate-5-33-2-port-CONF-8.spec.ts` allows this one dynamic import by its
+ * line number: a change that moves that line must update the allowance there.
+ */
+async function loadConfig(out: core.Output): Promise<core.CleanConfig> {
+  const configPath = path.join(ROOT_DIR, 'clean.config.ts');
+  if (fs.existsSync(configPath)) {
+    try {
+      // Dynamic import for config file
+      const config = await import(configPath);
+      out.debug(`config: loaded ${configPath}`);
+      return core.mergeConfig(config);
+    } catch (error) {
+      out.debug(`config: ${configPath} failed to load, the defaults apply: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      return core.DEFAULT_CONFIG;
+    }
+  }
+  out.debug(`config: no ${configPath}, the defaults apply`);
+  return core.DEFAULT_CONFIG;
+}
 
 // Terminal color utilities (reusing existing patterns)
 /**
@@ -78,71 +116,6 @@ const cyan = (text: string): string => `${CYAN}${text}${RESET}`;
 // Types
 // ============================================================================
 
-/**
- * One compiler diagnostic that `analyzeTypeScript` kept, in the form the repair prompt and the
- * reports use.
- */
-interface TypeScriptDiagnostic {
-  /**
-   * Absolute path as the compiler reports it. `mergeIssues` groups by this string, so it equals
-   * ESLint's path for the same file only where both use forward slashes (POSIX).
-   */
-  file: string;
-  /** 1-based line. */
-  line: number;
-  /** 1-based column. */
-  column: number;
-  /** The TypeScript error number without the `TS` prefix; the prompt and the reports add it. */
-  code: number;
-  /** The message text, with a nested message chain flattened onto separate lines. */
-  message: string;
-  /**
-   * `error` for a compiler error; every other category (warning, suggestion, message) becomes
-   * `warning`.
-   */
-  severity: 'error' | 'warning';
-}
-
-/** One ESLint message, from the analysis or from the re-check after a repair. */
-interface ESLintIssue {
-  /** Absolute path as ESLint reports it. */
-  file: string;
-  /** 1-based line. */
-  line: number;
-  /** 1-based column. */
-  column: number;
-  /**
-   * The rule that fired, or `unknown` for a message with no rule, such as a parse error.
-   * `loadCodeStyleGuidance` derives a guidance file name from it.
-   */
-  ruleId: string;
-  /** ESLint's message text. */
-  message: string;
-  /** `error` for ESLint severity 2, `warning` otherwise. */
-  severity: 'error' | 'warning';
-  /**
-   * ESLint's autofix, when the rule offers one. Nothing applies it: the prompt leaves it out, and
-   * only `repairs.json` carries it.
-   */
-  fix?: Rule.Fix;
-}
-
-/** All issues of one file, split by source. The repair prompt lists both kinds. */
-interface FileIssues {
-  /** Compiler diagnostics of the file. */
-  typescript: TypeScriptDiagnostic[];
-  /** ESLint messages of the file, warnings included. */
-  eslint: ESLintIssue[];
-}
-
-/**
- * Issues keyed by absolute file path.
- *
- * The order is insertion order: files with compiler diagnostics first, then files with ESLint
- * messages only. `--max-files` takes the first entries in this order.
- */
-type FileIssueMap = Map<string, FileIssues>;
-
 /** The totals of one analysis pass, for the console report, the JSON report and `analysis.json`. */
 interface AnalysisResult {
   /** Files that ESLint linted outside the excluded paths. The compiler pass adds no count. */
@@ -168,45 +141,6 @@ interface AnalysisResult {
   filesByIssueCount: Array<{ file: string; count: number }>;
 }
 
-/** The counts of the repair passes, and the files they could not fix. */
-interface RepairResult {
-  /** Files that the strict pass fixed, with no suppression comment. */
-  success: number;
-  /**
-   * Files that only the permissive pass fixed; they may now hold suppression comments with a
-   * reason.
-   */
-  partial: number;
-  /**
-   * Files that neither pass fixed. `main` keeps the count of the last global iteration, not a sum.
-   */
-  failed: number;
-  /**
-   * The unfixed files, each with the issues that the strict pass left. The permissive pass reports
-   * no list, so these can be out of date.
-   */
-  unresolved: Array<{ file: string; issues: FileIssues }>;
-}
-
-/**
- * The settings that `clean.config.ts` can override: its default export, merged over
- * `DEFAULT_CONFIG`.
- *
- * No field takes effect yet. The repair loop ignores the config: it repairs one file at a time,
- * passes no model to the agent, applies no time limit, and filters paths with fixed rules instead
- * of `exclude`.
- */
-interface CleanConfig {
-  /** Glob patterns of paths to skip. Not applied. */
-  exclude?: string[];
-  /** The number of agents to run at once. Not applied: files are repaired one at a time. */
-  maxConcurrentAgents?: number;
-  /** Model id of the repair agent. Not applied: the agent uses the default model of the SDK. */
-  agentModel?: string;
-  /** Time limit for one file, in milliseconds. Not applied. */
-  timeoutPerFile?: number;
-}
-
 /** The parsed command-line flags, as commander returns them from `program.opts()`. */
 interface CliOptions {
   /** `--analyze-only`: report, then exit with code 0 without a repair, even when issues exist. */
@@ -223,22 +157,25 @@ interface CliOptions {
   quiet: boolean;
   /**
    * `--dry-run`: run the agent in the SDK's `default` permission mode instead of
-   * `bypassPermissions`, and skip the re-check, so every file counts as fixed. The script itself
+   * `dontAsk`, and skip the re-check, so every file counts as fixed. The script itself
    * does not block writes.
    */
   dryRun: boolean;
-  /** `--max-files`: repair at most this many files in each global iteration. */
+  /**
+   * `--max-files`: repair at most this many files in each global iteration. A whole number of at
+   * least 1 (`integerFlag`).
+   */
   maxFiles?: number;
   /**
-   * `--fail-fast`: end the current iteration at the first file that neither pass fixes. The next
-   * global iteration still runs, so this does not end the run.
+   * `--fail-fast`: after the first file that neither pass fixes, start no further file and no
+   * further global iteration (`repairUntilClean`); the run then exits with code 1.
    */
   failFast: boolean;
   /**
-   * `--json`: print one JSON report instead of the console report.
+   * `--json`: print one JSON report on standard output instead of the console report.
    *
-   * The repair status lines still go to stdout, so only the output of an analysis-only run (or one
-   * that finds no issue) is pure JSON.
+   * Every other line (the repair status lines, the fail-fast notice, the `--verbose` trace) goes to
+   * standard error, so standard output holds the JSON report alone.
    */
   json: boolean;
   /**
@@ -247,59 +184,26 @@ interface CliOptions {
    */
   report?: string;
   /**
-   * `--timeout <ms>`: unused.
-   *
-   * Its parser `parseInt` receives the default `600_000` as its radix, so a value given on the
-   * command line becomes `NaN`.
+   * `--timeout <ms>`: the time limit of one agent run, over the `timeoutPerFile` of the config
+   * (`resolveSettings`). A whole number of at least 1 (`integerFlag`); absent when not given.
    */
-  timeout: number;
-  /** `--debug`: unused. */
+  timeout?: number;
+  /**
+   * `--debug`: write debug lines to standard error (`Output.debug`): the config, the settings, each
+   * analysis, each agent run's model, time limit and outcome, and the agent process's standard
+   * error. Turns off the progress bar.
+   */
   debug: boolean;
 }
 
-// ============================================================================
-// Configuration
-// ============================================================================
-
-/**
- * The working folder, not the script's folder. The CLI reads `tsconfig.json`, `clean.config.ts` and
- * `code-style/` from it and starts the agent in it, so run the CLI from the package root, as the
- * `pnpm clean` scripts do.
- */
-const ROOT_DIR = process.cwd();
-
-/**
- * The settings used when no `clean.config.ts` exists or it fails to load. None of them takes effect
- * yet (see `CleanConfig`).
- */
-const DEFAULT_CONFIG: CleanConfig = {
-  exclude: ['**/node_modules/**', '**/dist/**', '**/out-tsc/**', '**/.nx/**', '**/tmp/**'],
-  maxConcurrentAgents: 1,
-  agentModel: 'claude-opus-4-5-20251101',
-  timeoutPerFile: 600_000, // 10 minutes
-};
-
-/**
- * Loads `clean.config.ts` from the working folder and merges its default export over
- * `DEFAULT_CONFIG`.
- *
- * A config that fails to import is ignored without a message, and the defaults apply. The import
- * takes a computed path that the static module walk of CONF-8 cannot follow, so
- * `test/verify/verify-xstate-5-33-2-port-CONF-8.spec.ts` allows this one dynamic import by its
- * line number: a change that moves that line must update the allowance there.
- */
-async function loadConfig(): Promise<CleanConfig> {
-  const configPath = path.join(ROOT_DIR, 'clean.config.ts');
-  if (fs.existsSync(configPath)) {
-    try {
-      // Dynamic import for config file
-      const config = await import(configPath);
-      return { ...DEFAULT_CONFIG, ...config.default };
-    } catch {
-      return DEFAULT_CONFIG;
-    }
-  }
-  return DEFAULT_CONFIG;
+/** What the steps of one run share: the parsed flags, the settings and the output channels. */
+interface RunContext {
+  /** The parsed command-line flags. */
+  options: CliOptions;
+  /** The settings of `clean.config.ts`, with `--timeout` over `timeoutPerFile`. */
+  settings: core.Settings;
+  /** Where the console report, the status lines and the JSON report go. */
+  out: core.Output;
 }
 
 // ============================================================================
@@ -310,14 +214,15 @@ async function loadConfig(): Promise<CleanConfig> {
  * Type-checks the program of `tsconfig.json` in the working folder and returns its file
  * diagnostics.
  *
- * The argument is ignored: every call checks the whole program, which in this package is `src/`
- * only, so the re-check after each repair costs a full type check. Diagnostics with no file (option
- * and config errors) and those in `node_modules`, `out-tsc` or a `/scripts/` path are dropped. A
- * missing or unreadable `tsconfig.json` prints an error and returns an empty list, so the run then
- * sees no compiler issue.
+ * Every call checks the whole program, which in this package is `src/` only, so the re-check
+ * after each repair costs a full type check; only the diagnostics of files within `targetPaths`
+ * (`isWithinTargets`; all files when the list is empty) are kept. Diagnostics with no file (option
+ * and config errors) and those of a path that `exclude` or a `node_modules` or `scripts` folder
+ * covers (`isExcludedPath`) are dropped. A missing or unreadable `tsconfig.json` prints an error
+ * and returns an empty list, so the run then sees no compiler issue.
  */
-function analyzeTypeScript(_targetPaths: string[]): TypeScriptDiagnostic[] {
-  const diagnostics: TypeScriptDiagnostic[] = [];
+function analyzeTypeScript(targetPaths: string[], exclude: ReadonlyArray<string>): core.TypeScriptDiagnostic[] {
+  const diagnostics: core.TypeScriptDiagnostic[] = [];
 
   // Find tsconfig.json
   const tsconfigPath = path.join(ROOT_DIR, 'tsconfig.json');
@@ -359,8 +264,8 @@ function analyzeTypeScript(_targetPaths: string[]): TypeScriptDiagnostic[] {
 
       const filePath = diagnostic.file.fileName;
 
-      // Skip if in excluded paths
-      if (filePath.includes('node_modules') || filePath.includes('out-tsc') || filePath.includes('/scripts/')) {
+      // Skip if in excluded paths or outside the target paths
+      if (core.isExcludedPath(filePath, ROOT_DIR, exclude) || !core.isWithinTargets(filePath, ROOT_DIR, targetPaths)) {
         continue;
       }
 
@@ -388,7 +293,7 @@ function analyzeTypeScript(_targetPaths: string[]): TypeScriptDiagnostic[] {
  */
 interface ESLintAnalysisResult {
   /** Every ESLint message outside the excluded paths, warnings included. */
-  issues: ESLintIssue[];
+  issues: core.ESLintIssue[];
   /** Linted files outside the excluded paths, with or without messages. */
   filesScanned: number;
 }
@@ -397,12 +302,12 @@ interface ESLintAnalysisResult {
  * Lints `targetPaths`, or `src` and `test` when the list is empty, with the package's ESLint
  * config.
  *
- * Results whose path contains `node_modules`, `out-tsc`, `dist` or `/scripts/` are dropped. The
- * `dist` test is a plain substring match, so it also drops a file such as `src/distance.ts`. ESLint
- * throws for a target that matches no file, and that error ends the run.
+ * Results of a path that `exclude` or a `node_modules` or `scripts` folder covers
+ * (`isExcludedPath`) are dropped; the default globs match whole folder names, so `src/distance.ts`
+ * is kept. ESLint throws for a target that matches no file, and that error ends the run.
  */
-async function analyzeESLint(targetPaths: string[]): Promise<ESLintAnalysisResult> {
-  const issues: ESLintIssue[] = [];
+async function analyzeESLint(targetPaths: string[], exclude: ReadonlyArray<string>): Promise<ESLintAnalysisResult> {
+  const issues: core.ESLintIssue[] = [];
 
   const eslint = new ESLint({
     cwd: ROOT_DIR,
@@ -418,12 +323,7 @@ async function analyzeESLint(targetPaths: string[]): Promise<ESLintAnalysisResul
 
   for (const result of results) {
     // Skip excluded paths
-    if (
-      result.filePath.includes('node_modules') ||
-      result.filePath.includes('out-tsc') ||
-      result.filePath.includes('dist') ||
-      result.filePath.includes('/scripts/')
-    ) {
+    if (core.isExcludedPath(result.filePath, ROOT_DIR, exclude)) {
       continue;
     }
 
@@ -457,10 +357,10 @@ async function analyzeESLint(targetPaths: string[]): Promise<ESLintAnalysisResul
  * enter the map first, which sets the repair order.
  */
 function mergeIssues(
-  tsDiagnostics: TypeScriptDiagnostic[],
-  eslintIssues: ESLintIssue[]
-): FileIssueMap {
-  const map: FileIssueMap = new Map();
+  tsDiagnostics: core.TypeScriptDiagnostic[],
+  eslintIssues: core.ESLintIssue[]
+): core.FileIssueMap {
+  const map: core.FileIssueMap = new Map();
 
   // Add TypeScript diagnostics
   for (const diag of tsDiagnostics) {
@@ -483,7 +383,7 @@ function mergeIssues(
  * Computes the report totals from the merged issues. `totalFiles` is ESLint's scanned-file count,
  * because the compiler pass reports no count of its own.
  */
-function calculateStatistics(issueMap: FileIssueMap, totalFiles: number): AnalysisResult {
+function calculateStatistics(issueMap: core.FileIssueMap, totalFiles: number): AnalysisResult {
   let tsErrors = 0;
   let tsWarnings = 0;
   let eslintErrors = 0;
@@ -541,7 +441,7 @@ function calculateStatistics(issueMap: FileIssueMap, totalFiles: number): Analys
  * Prints the boxed analysis summary: the totals, the top rules and, except with `--quiet`, up to 15
  * files by issue count. Prints nothing with `--json`.
  */
-function displayAnalysisReport(result: AnalysisResult, options: CliOptions): void {
+function displayAnalysisReport(result: AnalysisResult, { options, out }: RunContext): void {
   if (options.json) return; // Skip console output in JSON mode
 
   const timestamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -558,7 +458,7 @@ function displayAnalysisReport(result: AnalysisResult, options: CliOptions): voi
   const headerPad = width - title.length - timestamp.length - 2;
   const header = ` ${title}${' '.repeat(headerPad)}${timestamp} `;
 
-  console.log(`
+  out.line(`
 ${CYAN}${line}${RESET}
 ${CYAN}${header}${RESET}
 ${CYAN}${line}${RESET}
@@ -575,27 +475,27 @@ ${dim(thinLine)}
 `);
 
   if (result.topViolations.length > 0) {
-    console.log(` ${bold('Top violations:')}`);
+    out.line(` ${bold('Top violations:')}`);
     for (const { rule, count } of result.topViolations) {
       const paddedRule = rule.padEnd(width - numWidth - 4);
-      console.log(`   ${dim(paddedRule)}${rAlign(count)}`);
+      out.line(`   ${dim(paddedRule)}${rAlign(count)}`);
     }
-    console.log();
+    out.line();
   }
 
   if (!options.quiet && result.filesByIssueCount.length > 0) {
-    console.log(` ${bold('Files by issue count:')}`);
+    out.line(` ${bold('Files by issue count:')}`);
     const filesToShow = result.filesByIssueCount.slice(0, 15);
     const pathWidth = width - numWidth - 4;
     for (const { file, count } of filesToShow) {
       const relPath = path.relative(ROOT_DIR, file);
       const paddedPath = relPath.length > pathWidth ? '...' + relPath.slice(-(pathWidth - 3)) : relPath.padEnd(pathWidth);
-      console.log(`   ${dim(paddedPath)}${rAlign(count)}`);
+      out.line(`   ${dim(paddedPath)}${rAlign(count)}`);
     }
     if (result.filesByIssueCount.length > 15) {
-      console.log(`   ${dim(`... and ${result.filesByIssueCount.length - 15} more files`)}`);
+      out.line(`   ${dim(`... and ${result.filesByIssueCount.length - 15} more files`)}`);
     }
-    console.log();
+    out.line();
   }
 }
 
@@ -604,8 +504,9 @@ ${dim(thinLine)}
  * repair, the repair counts and the unresolved files with relative paths.
  */
 function displayJsonReport(
+  out: core.Output,
   analysisResult: AnalysisResult,
-  repairResult?: RepairResult
+  repairResult?: core.RepairResult
 ): void {
   const report = {
     timestamp: new Date().toISOString(),
@@ -630,7 +531,7 @@ function displayJsonReport(
     })),
   };
 
-  console.log(JSON.stringify(report, null, 2));
+  out.report(JSON.stringify(report, null, 2));
 }
 
 
@@ -648,7 +549,7 @@ function displayJsonReport(
  * TypeScript code maps to `code-style/typecheck-recommendations/TS<code>.md`; this package has no
  * such folder yet. A missing file is skipped without a message. Each guide is added once.
  */
-function loadCodeStyleGuidance(issues: FileIssues): string {
+function loadCodeStyleGuidance(issues: core.FileIssues): string {
   const guidanceLines: string[] = [];
   const loadedRules = new Set<string>();
 
@@ -726,19 +627,22 @@ function wrapText(text: string, width: number): string[] {
  *
  * The prompt forbids `eslint-disable`, `@ts-ignore` and `@ts-expect-error` and adds the matching
  * `code-style/` guidance. The agent runs in the working folder with the project's Claude Code
- * settings and, except in a dry run, with `bypassPermissions`: it can edit any file and run any
- * command without a prompt, and no time limit applies. When the agent ends, ESLint and the compiler
- * re-check this file only; success means that no message remains, warnings included.
- * `remainingIssues` holds what the permissive pass must still fix, or the original issues when the
- * agent call throws. `fileIndex` and `totalFiles` only label the console line.
+ * settings, the model of `agentModel` (else the SDK's default) and, except in a dry run, with
+ * `dontAsk` and `REPAIR_TOOLS`: it can read and edit files and run ESLint and the compiler
+ * without a prompt, and nothing else. The run is
+ * aborted after `timeoutPerFile` (`withTimeout`), and a run that times out counts as a failed
+ * agent call. When the agent ends, ESLint and the compiler re-check this file only; success means
+ * that no message remains, warnings included. `remainingIssues` holds what the permissive pass
+ * must still fix, or the original issues when the agent call throws. `fileIndex` and `totalFiles`
+ * only label the console line.
  */
 async function repairFileStrict(
   filePath: string,
-  issues: FileIssues,
-  options: CliOptions,
+  issues: core.FileIssues,
+  { options, settings, out }: RunContext,
   fileIndex?: number,
   totalFiles?: number
-): Promise<{ success: boolean; remainingIssues?: FileIssues }> {
+): Promise<{ success: boolean; remainingIssues?: core.FileIssues }> {
   const relPath = path.relative(ROOT_DIR, filePath);
   const fileCounter = fileIndex !== undefined && totalFiles !== undefined
     ? `(${fileIndex + 1}/${totalFiles}) `
@@ -787,119 +691,129 @@ ${guidance ? `PROJECT-SPECIFIC GUIDANCE:\n${guidance}` : ''}
 Read the file, make the necessary fixes, validate with linting, and fix any remaining issues.`;
 
   if (options.verbose) {
-    console.log(`\n${cyan('─')} ${fileCounter}${bold(relPath)} ${dim('(strict)')}`);
-    console.log(dim('  Prompt:'));
+    out.line(`\n${cyan('─')} ${fileCounter}${bold(relPath)} ${dim('(strict)')}`);
+    out.line(dim('  Prompt:'));
     for (const line of prompt.split('\n')) {
       if (line.trim() === '') {
-        console.log(''); // Preserve blank lines
+        out.line(''); // Preserve blank lines
       } else {
         const wrapped = wrapText(line, 120);
         for (const wline of wrapped) {
-          console.log(dim(`    ${wline}`));
+          out.line(dim(`    ${wline}`));
         }
       }
     }
   }
 
   try {
-    const stream = query({
-      prompt,
-      options: {
-        cwd: ROOT_DIR,
-        // All tools enabled without permission prompts
-        permissionMode: options.dryRun ? 'default' : 'bypassPermissions',
-        settingSources: ['project'],
-      },
-    });
-
     let toolCallCount = 0;
     let toolErrorCount = 0;
     let editCount = 0;
     const pendingToolCalls = new Map<string, { name: string; startTime: number }>();
 
-    for await (const item of stream) {
-      if (options.verbose) {
-        if (item.type === 'assistant') {
-          for (const block of item.message.content) {
-            if (block.type === 'text') {
-              // Wrap and display agent text in white, preserving blank lines
-              for (const line of block.text.split('\n')) {
-                if (line.trim() === '') {
-                  console.log(''); // Preserve blank lines
-                } else {
-                  const wrapped = wrapText(line, 120);
-                  for (const wline of wrapped) {
-                    console.log(`    ${wline}`);
+    // The agent run, aborted after timeoutPerFile
+    out.debug(`agent: ${relPath} (strict), model ${settings.agentModel ?? 'SDK default'}, limit ${settings.timeoutPerFile} ms`);
+    await core.withTimeout(settings.timeoutPerFile, async (abortController) => {
+      const stream = query({
+        prompt,
+        options: core.agentOptions(settings, {
+          dryRun: options.dryRun,
+          cwd: ROOT_DIR,
+          abortController,
+          ...(options.debug ? { stderr: (data: string) => out.debug(`agent stderr: ${data.trimEnd()}`) } : {}),
+        }),
+      });
+
+      for await (const item of stream) {
+        if (item.type === 'result') {
+          out.debug(
+            `agent: ${relPath} (strict) ended: ${item.subtype}, ${item.num_turns} turns, ` +
+              `${item.duration_ms} ms, $${item.total_cost_usd.toFixed(4)}`
+          );
+        }
+        if (options.verbose) {
+          if (item.type === 'assistant') {
+            for (const block of item.message.content) {
+              if (block.type === 'text') {
+                // Wrap and display agent text in white, preserving blank lines
+                for (const line of block.text.split('\n')) {
+                  if (line.trim() === '') {
+                    out.line(''); // Preserve blank lines
+                  } else {
+                    const wrapped = wrapText(line, 120);
+                    for (const wline of wrapped) {
+                      out.line(`    ${wline}`);
+                    }
                   }
                 }
-              }
-            } else if (block.type === 'tool_use') {
-              toolCallCount++;
-              pendingToolCalls.set(block.id, { name: block.name, startTime: Date.now() });
-              const input = block.input as Record<string, unknown>;
-              console.log(''); // Space before tool
-              if (block.name === 'Read') {
-                const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
-                console.log(cyan(`    ▶ Read: ${fp}`));
-              } else if (block.name === 'Edit') {
-                editCount++;
-                const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
-                const oldStr = String(input.old_string || '');
-                const newStr = String(input.new_string || '');
-                const oldPreview = oldStr.slice(0, 50).replace(/\n/g, '↵');
-                const newPreview = newStr.slice(0, 50).replace(/\n/g, '↵');
-                console.log(cyan(`    ▶ Edit: ${fp}`));
-                console.log(dim(`      - "${oldPreview}${oldStr.length > 50 ? '...' : ''}"`));
-                console.log(dim(`      + "${newPreview}${newStr.length > 50 ? '...' : ''}"`));
-              } else if (block.name === 'Bash') {
-                const cmd = String(input.command || '');
-                const cmdPreview = cmd.length > 80 ? cmd.slice(0, 80) + '...' : cmd;
-                console.log(cyan(`    ▶ Bash: ${cmdPreview}`));
-              } else if (block.name === 'Glob') {
-                const pattern = String(input.pattern || '');
-                const globPath = input.path ? path.relative(ROOT_DIR, String(input.path)) : '.';
-                console.log(cyan(`    ▶ Glob: ${pattern} in ${globPath}`));
-              } else if (block.name === 'Grep') {
-                const pattern = String(input.pattern || '');
-                const grepPath = input.path ? path.relative(ROOT_DIR, String(input.path)) : '.';
-                console.log(cyan(`    ▶ Grep: "${pattern}" in ${grepPath}`));
-              } else if (block.name === 'Write') {
-                const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
-                console.log(cyan(`    ▶ Write: ${fp}`));
-              } else if (block.name === 'Task') {
-                const desc = String(input.description || input.prompt || '').slice(0, 60);
-                console.log(cyan(`    ▶ Task: ${desc}...`));
-              } else {
-                // Any other tool - just show the name
-                console.log(cyan(`    ▶ ${block.name}`));
+              } else if (block.type === 'tool_use') {
+                toolCallCount++;
+                pendingToolCalls.set(block.id, { name: block.name, startTime: Date.now() });
+                const input = block.input as Record<string, unknown>;
+                out.line(''); // Space before tool
+                if (block.name === 'Read') {
+                  const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
+                  out.line(cyan(`    ▶ Read: ${fp}`));
+                } else if (block.name === 'Edit') {
+                  editCount++;
+                  const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
+                  const oldStr = String(input.old_string || '');
+                  const newStr = String(input.new_string || '');
+                  const oldPreview = oldStr.slice(0, 50).replace(/\n/g, '↵');
+                  const newPreview = newStr.slice(0, 50).replace(/\n/g, '↵');
+                  out.line(cyan(`    ▶ Edit: ${fp}`));
+                  out.line(dim(`      - "${oldPreview}${oldStr.length > 50 ? '...' : ''}"`));
+                  out.line(dim(`      + "${newPreview}${newStr.length > 50 ? '...' : ''}"`));
+                } else if (block.name === 'Bash') {
+                  const cmd = String(input.command || '');
+                  const cmdPreview = cmd.length > 80 ? cmd.slice(0, 80) + '...' : cmd;
+                  out.line(cyan(`    ▶ Bash: ${cmdPreview}`));
+                } else if (block.name === 'Glob') {
+                  const pattern = String(input.pattern || '');
+                  const globPath = input.path ? path.relative(ROOT_DIR, String(input.path)) : '.';
+                  out.line(cyan(`    ▶ Glob: ${pattern} in ${globPath}`));
+                } else if (block.name === 'Grep') {
+                  const pattern = String(input.pattern || '');
+                  const grepPath = input.path ? path.relative(ROOT_DIR, String(input.path)) : '.';
+                  out.line(cyan(`    ▶ Grep: "${pattern}" in ${grepPath}`));
+                } else if (block.name === 'Write') {
+                  const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
+                  out.line(cyan(`    ▶ Write: ${fp}`));
+                } else if (block.name === 'Task') {
+                  const desc = String(input.description || input.prompt || '').slice(0, 60);
+                  out.line(cyan(`    ▶ Task: ${desc}...`));
+                } else {
+                  // Any other tool - just show the name
+                  out.line(cyan(`    ▶ ${block.name}`));
+                }
               }
             }
-          }
-        } else if (item.type === 'user' && item.tool_use_result !== undefined) {
-          // Tool result received - clear from pending
-          const toolId = (item as { tool_use_id?: string }).tool_use_id;
-          if (toolId) {
-            pendingToolCalls.delete(toolId);
-          }
+          } else if (item.type === 'user' && item.tool_use_result !== undefined) {
+            // Tool result received - clear from pending
+            const toolId = (item as { tool_use_id?: string }).tool_use_id;
+            if (toolId) {
+              pendingToolCalls.delete(toolId);
+            }
 
-          // Check for actual tool errors (not just strings containing "error")
-          const result = item.tool_use_result;
-          const isError = typeof result === 'object' && result !== null &&
-            ('is_error' in result || 'error' in result);
-          if (isError) {
-            toolErrorCount++;
-            const resultStr = JSON.stringify(result);
-            const errorMatch = resultStr.match(/"message"\s*:\s*"([^"]+)"/);
-            const errorMsg = errorMatch ? errorMatch[1] : resultStr.slice(0, 80);
-            console.log(errorColor(`      ✗ ${errorMsg}`));
+            // Check for actual tool errors (not just strings containing "error")
+            const result = item.tool_use_result;
+            const isError = typeof result === 'object' && result !== null &&
+              ('is_error' in result || 'error' in result);
+            if (isError) {
+              toolErrorCount++;
+              const resultStr = JSON.stringify(result);
+              const errorMatch = resultStr.match(/"message"\s*:\s*"([^"]+)"/);
+              const errorMsg = errorMatch ? errorMatch[1] : resultStr.slice(0, 80);
+              out.line(errorColor(`      ✗ ${errorMsg}`));
+            }
           }
         }
       }
-    }
+    });
 
     if (options.verbose) {
-      console.log('');
-      console.log(dim(`    [${toolCallCount} tools, ${editCount} edits, ${toolErrorCount} errors]`));
+      out.line('');
+      out.line(dim(`    [${toolCallCount} tools, ${editCount} edits, ${toolErrorCount} errors]`));
     }
 
     // Re-analyze the file to check if issues are resolved
@@ -910,9 +824,9 @@ Read the file, make the necessary fixes, validate with linting, and fix any rema
       const remainingEslintIssues = results[0]?.messages ?? [];
 
       // Re-run TypeScript checking for this file
-      const remainingTsIssues: TypeScriptDiagnostic[] = [];
+      const remainingTsIssues: core.TypeScriptDiagnostic[] = [];
       try {
-        const tsDiagnostics = analyzeTypeScript([relPath]);
+        const tsDiagnostics = analyzeTypeScript([relPath], settings.exclude);
         for (const diag of tsDiagnostics) {
           if (diag.file === filePath) {
             remainingTsIssues.push(diag);
@@ -925,12 +839,12 @@ Read the file, make the necessary fixes, validate with linting, and fix any rema
       const totalRemaining = remainingEslintIssues.length + remainingTsIssues.length;
 
       if (totalRemaining === 0) {
-        console.log(success(`  ✓ ${fileCounter}${relPath}: Fixed`));
+        out.line(success(`  ✓ ${fileCounter}${relPath}: Fixed`));
         return { success: true };
       }
 
       // Build remaining issues
-      const remaining: FileIssues = {
+      const remaining: core.FileIssues = {
         typescript: remainingTsIssues,
         eslint: remainingEslintIssues.map((m) => ({
           file: filePath,
@@ -948,15 +862,16 @@ Read the file, make the necessary fixes, validate with linting, and fix any rema
       const countMsg = tsCount > 0 && eslintCount > 0
         ? `${tsCount} TS + ${eslintCount} ESLint`
         : tsCount > 0 ? `${tsCount} TS` : `${eslintCount} ESLint`;
-      console.log(warning(`  ⚠ ${fileCounter}${relPath}: ${countMsg} issues remain`));
+      out.line(warning(`  ⚠ ${fileCounter}${relPath}: ${countMsg} issues remain`));
       return { success: false, remainingIssues: remaining };
     }
 
-    console.log(success(`  ✓ ${fileCounter}${relPath}: Fixed (dry-run)`));
+    out.line(success(`  ✓ ${fileCounter}${relPath}: Fixed (dry-run)`));
     return { success: true };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.log(errorColor(`  ✗ ${fileCounter}${relPath}: ${errorMsg.slice(0, 50)}`));
+    out.line(errorColor(`  ✗ ${fileCounter}${relPath}: ${errorMsg.slice(0, 50)}`));
+    out.debug(`agent: ${relPath} (strict) failed: ${error instanceof Error ? error.stack ?? errorMsg : errorMsg}`);
     return { success: false, remainingIssues: issues };
   }
 }
@@ -966,12 +881,13 @@ Read the file, make the necessary fixes, validate with linting, and fix any rema
  * prompt allows `eslint-disable` and `@ts-expect-error` comments that give a reason.
  *
  * It re-checks the file the same way but returns no remaining issues, so the caller keeps the list
- * of the strict pass. The permission and time-limit notes of `repairFileStrict` apply here too.
+ * of the strict pass. The model, permission and time-limit notes of `repairFileStrict` apply here
+ * too: the permissive run gets a time limit of its own.
  */
 async function repairFilePermissive(
   filePath: string,
-  issues: FileIssues,
-  options: CliOptions,
+  issues: core.FileIssues,
+  { options, settings, out }: RunContext,
   fileIndex?: number,
   totalFiles?: number
 ): Promise<{ success: boolean }> {
@@ -1026,111 +942,121 @@ ${guidance ? `PROJECT-SPECIFIC GUIDANCE:\n${guidance}` : ''}
 Read the file, make the necessary fixes, validate with linting and type checking, and fix any remaining issues.`;
 
   if (options.verbose) {
-    console.log(`\n${warning('─')} ${fileCounter}${bold(relPath)} ${warning('(permissive)')}`);
-    console.log(dim('  Prompt:'));
+    out.line(`\n${warning('─')} ${fileCounter}${bold(relPath)} ${warning('(permissive)')}`);
+    out.line(dim('  Prompt:'));
     for (const line of prompt.split('\n')) {
       if (line.trim() === '') {
-        console.log(''); // Preserve blank lines
+        out.line(''); // Preserve blank lines
       } else {
         const wrapped = wrapText(line, 120);
         for (const wline of wrapped) {
-          console.log(dim(`    ${wline}`));
+          out.line(dim(`    ${wline}`));
         }
       }
     }
   }
 
   try {
-    const stream = query({
-      prompt,
-      options: {
-        cwd: ROOT_DIR,
-        // All tools enabled without permission prompts
-        permissionMode: options.dryRun ? 'default' : 'bypassPermissions',
-        settingSources: ['project'],
-      },
-    });
-
     let toolCallCount = 0;
     let toolErrorCount = 0;
     let editCount = 0;
 
-    for await (const item of stream) {
-      if (options.verbose) {
-        if (item.type === 'assistant') {
-          for (const block of item.message.content) {
-            if (block.type === 'text') {
-              // Wrap and display agent text in white, preserving blank lines
-              for (const line of block.text.split('\n')) {
-                if (line.trim() === '') {
-                  console.log(''); // Preserve blank lines
-                } else {
-                  const wrapped = wrapText(line, 120);
-                  for (const wline of wrapped) {
-                    console.log(`    ${wline}`);
+    // The agent run, aborted after timeoutPerFile
+    out.debug(`agent: ${relPath} (permissive), model ${settings.agentModel ?? 'SDK default'}, limit ${settings.timeoutPerFile} ms`);
+    await core.withTimeout(settings.timeoutPerFile, async (abortController) => {
+      const stream = query({
+        prompt,
+        options: core.agentOptions(settings, {
+          dryRun: options.dryRun,
+          cwd: ROOT_DIR,
+          abortController,
+          ...(options.debug ? { stderr: (data: string) => out.debug(`agent stderr: ${data.trimEnd()}`) } : {}),
+        }),
+      });
+
+      for await (const item of stream) {
+        if (item.type === 'result') {
+          out.debug(
+            `agent: ${relPath} (permissive) ended: ${item.subtype}, ${item.num_turns} turns, ` +
+              `${item.duration_ms} ms, $${item.total_cost_usd.toFixed(4)}`
+          );
+        }
+        if (options.verbose) {
+          if (item.type === 'assistant') {
+            for (const block of item.message.content) {
+              if (block.type === 'text') {
+                // Wrap and display agent text in white, preserving blank lines
+                for (const line of block.text.split('\n')) {
+                  if (line.trim() === '') {
+                    out.line(''); // Preserve blank lines
+                  } else {
+                    const wrapped = wrapText(line, 120);
+                    for (const wline of wrapped) {
+                      out.line(`    ${wline}`);
+                    }
                   }
                 }
-              }
-            } else if (block.type === 'tool_use') {
-              toolCallCount++;
-              const input = block.input as Record<string, unknown>;
-              console.log(''); // Space before tool
-              if (block.name === 'Read') {
-                const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
-                console.log(cyan(`    ▶ Read: ${fp}`));
-              } else if (block.name === 'Edit') {
-                editCount++;
-                const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
-                const oldStr = String(input.old_string || '');
-                const newStr = String(input.new_string || '');
-                const oldPreview = oldStr.slice(0, 50).replace(/\n/g, '↵');
-                const newPreview = newStr.slice(0, 50).replace(/\n/g, '↵');
-                console.log(cyan(`    ▶ Edit: ${fp}`));
-                console.log(dim(`      - "${oldPreview}${oldStr.length > 50 ? '...' : ''}"`));
-                console.log(dim(`      + "${newPreview}${newStr.length > 50 ? '...' : ''}"`));
-              } else if (block.name === 'Bash') {
-                const cmd = String(input.command || '');
-                const cmdPreview = cmd.length > 80 ? cmd.slice(0, 80) + '...' : cmd;
-                console.log(cyan(`    ▶ Bash: ${cmdPreview}`));
-              } else if (block.name === 'Glob') {
-                const pattern = String(input.pattern || '');
-                const globPath = input.path ? path.relative(ROOT_DIR, String(input.path)) : '.';
-                console.log(cyan(`    ▶ Glob: ${pattern} in ${globPath}`));
-              } else if (block.name === 'Grep') {
-                const pattern = String(input.pattern || '');
-                const grepPath = input.path ? path.relative(ROOT_DIR, String(input.path)) : '.';
-                console.log(cyan(`    ▶ Grep: "${pattern}" in ${grepPath}`));
-              } else if (block.name === 'Write') {
-                const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
-                console.log(cyan(`    ▶ Write: ${fp}`));
-              } else if (block.name === 'Task') {
-                const desc = String(input.description || input.prompt || '').slice(0, 60);
-                console.log(cyan(`    ▶ Task: ${desc}...`));
-              } else {
-                // Any other tool - just show the name
-                console.log(cyan(`    ▶ ${block.name}`));
+              } else if (block.type === 'tool_use') {
+                toolCallCount++;
+                const input = block.input as Record<string, unknown>;
+                out.line(''); // Space before tool
+                if (block.name === 'Read') {
+                  const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
+                  out.line(cyan(`    ▶ Read: ${fp}`));
+                } else if (block.name === 'Edit') {
+                  editCount++;
+                  const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
+                  const oldStr = String(input.old_string || '');
+                  const newStr = String(input.new_string || '');
+                  const oldPreview = oldStr.slice(0, 50).replace(/\n/g, '↵');
+                  const newPreview = newStr.slice(0, 50).replace(/\n/g, '↵');
+                  out.line(cyan(`    ▶ Edit: ${fp}`));
+                  out.line(dim(`      - "${oldPreview}${oldStr.length > 50 ? '...' : ''}"`));
+                  out.line(dim(`      + "${newPreview}${newStr.length > 50 ? '...' : ''}"`));
+                } else if (block.name === 'Bash') {
+                  const cmd = String(input.command || '');
+                  const cmdPreview = cmd.length > 80 ? cmd.slice(0, 80) + '...' : cmd;
+                  out.line(cyan(`    ▶ Bash: ${cmdPreview}`));
+                } else if (block.name === 'Glob') {
+                  const pattern = String(input.pattern || '');
+                  const globPath = input.path ? path.relative(ROOT_DIR, String(input.path)) : '.';
+                  out.line(cyan(`    ▶ Glob: ${pattern} in ${globPath}`));
+                } else if (block.name === 'Grep') {
+                  const pattern = String(input.pattern || '');
+                  const grepPath = input.path ? path.relative(ROOT_DIR, String(input.path)) : '.';
+                  out.line(cyan(`    ▶ Grep: "${pattern}" in ${grepPath}`));
+                } else if (block.name === 'Write') {
+                  const fp = path.relative(ROOT_DIR, String(input.file_path || ''));
+                  out.line(cyan(`    ▶ Write: ${fp}`));
+                } else if (block.name === 'Task') {
+                  const desc = String(input.description || input.prompt || '').slice(0, 60);
+                  out.line(cyan(`    ▶ Task: ${desc}...`));
+                } else {
+                  // Any other tool - just show the name
+                  out.line(cyan(`    ▶ ${block.name}`));
+                }
               }
             }
-          }
-        } else if (item.type === 'user' && item.tool_use_result !== undefined) {
-          // Check for actual tool errors (not just strings containing "error")
-          const result = item.tool_use_result;
-          const isError = typeof result === 'object' && result !== null &&
-            ('is_error' in result || 'error' in result);
-          if (isError) {
-            toolErrorCount++;
-            const resultStr = JSON.stringify(result);
-            const errorMatch = resultStr.match(/"message"\s*:\s*"([^"]+)"/);
-            const errorMsg = errorMatch ? errorMatch[1] : resultStr.slice(0, 80);
-            console.log(errorColor(`      ✗ ${errorMsg}`));
+          } else if (item.type === 'user' && item.tool_use_result !== undefined) {
+            // Check for actual tool errors (not just strings containing "error")
+            const result = item.tool_use_result;
+            const isError = typeof result === 'object' && result !== null &&
+              ('is_error' in result || 'error' in result);
+            if (isError) {
+              toolErrorCount++;
+              const resultStr = JSON.stringify(result);
+              const errorMatch = resultStr.match(/"message"\s*:\s*"([^"]+)"/);
+              const errorMsg = errorMatch ? errorMatch[1] : resultStr.slice(0, 80);
+              out.line(errorColor(`      ✗ ${errorMsg}`));
+            }
           }
         }
       }
-    }
+    });
 
     if (options.verbose) {
-      console.log('');
-      console.log(dim(`    [${toolCallCount} tools, ${editCount} edits, ${toolErrorCount} errors]`));
+      out.line('');
+      out.line(dim(`    [${toolCallCount} tools, ${editCount} edits, ${toolErrorCount} errors]`));
     }
 
     // Re-check with ESLint and TypeScript
@@ -1143,7 +1069,7 @@ Read the file, make the necessary fixes, validate with linting and type checking
       // Re-run TypeScript checking for this file
       let remainingTs = 0;
       try {
-        const tsDiagnostics = analyzeTypeScript([relPath]);
+        const tsDiagnostics = analyzeTypeScript([relPath], settings.exclude);
         remainingTs = tsDiagnostics.filter((d) => d.file === filePath).length;
       } catch {
         // TypeScript check failed, continue with ESLint results only
@@ -1152,22 +1078,23 @@ Read the file, make the necessary fixes, validate with linting and type checking
       const totalRemaining = remainingEslint + remainingTs;
 
       if (totalRemaining === 0) {
-        console.log(warning(`  ⚠ ${fileCounter}${relPath}: Fixed (permissive pass)`));
+        out.line(warning(`  ⚠ ${fileCounter}${relPath}: Fixed (permissive pass)`));
         return { success: true };
       }
 
       const countMsg = remainingTs > 0 && remainingEslint > 0
         ? `${remainingTs} TS + ${remainingEslint} ESLint`
         : remainingTs > 0 ? `${remainingTs} TS` : `${remainingEslint} ESLint`;
-      console.log(errorColor(`  ✗ ${fileCounter}${relPath}: ${countMsg} issues remain after permissive pass`));
+      out.line(errorColor(`  ✗ ${fileCounter}${relPath}: ${countMsg} issues remain after permissive pass`));
       return { success: false };
     }
 
-    console.log(warning(`  ⚠ ${fileCounter}${relPath}: Fixed (permissive pass, dry-run)`));
+    out.line(warning(`  ⚠ ${fileCounter}${relPath}: Fixed (permissive pass, dry-run)`));
     return { success: true };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.log(errorColor(`  ✗ ${fileCounter}${relPath}: ${errorMsg.slice(0, 80)}`));
+    out.line(errorColor(`  ✗ ${fileCounter}${relPath}: ${errorMsg.slice(0, 80)}`));
+    out.debug(`agent: ${relPath} (permissive) failed: ${error instanceof Error ? error.stack ?? errorMsg : errorMsg}`);
     return { success: false };
   }
 }
@@ -1177,19 +1104,17 @@ Read the file, make the necessary fixes, validate with linting and type checking
 // ============================================================================
 
 /**
- * Repairs each file of `issueMap` in turn: the strict pass, then the permissive pass when the
- * strict pass leaves issues.
+ * Repairs each file of `issueMap`: the strict pass, then the permissive pass when the strict pass
+ * leaves issues.
  *
- * Files are repaired one at a time. `--max-files` caps the count, and `--fail-fast` ends this
- * iteration at the first file that both passes leave unfixed. The config argument is ignored. A
- * progress bar shows unless `--quiet`, `--json` or `--verbose` is set.
+ * Up to `maxConcurrentAgents` files are repaired at once (`runPool` of `clean-core.ts`), in map
+ * order. `--max-files` caps the count, and `--fail-fast` starts no further file of this iteration
+ * after the first file that both passes leave unfixed. A progress bar shows unless `--quiet`,
+ * `--json` or `--verbose` is set.
  */
-async function runRepairLoop(
-  issueMap: FileIssueMap,
-  options: CliOptions,
-  _config: CleanConfig
-): Promise<RepairResult> {
-  const result: RepairResult = {
+async function runRepairLoop(issueMap: core.FileIssueMap, ctx: RunContext): Promise<core.RepairResult> {
+  const { options, settings, out } = ctx;
+  const result: core.RepairResult = {
     success: 0,
     partial: 0,
     failed: 0,
@@ -1210,12 +1135,12 @@ async function runRepairLoop(
     cliProgress.Presets.shades_classic
   );
 
-  // Don't use progress bar in verbose mode - it conflicts with output
-  const useProgressBar = !options.quiet && !options.json && !options.verbose;
+  // Don't use progress bar in verbose or debug mode - it conflicts with output
+  const useProgressBar = !options.quiet && !options.json && !options.verbose && !options.debug;
 
   if (useProgressBar) {
-    console.log(`\n ${bold('Repair Progress')}`);
-    console.log(dim('───────────────────────────────────────────────────────────'));
+    out.line(`\n ${bold('Repair Progress')}`);
+    out.line(dim('───────────────────────────────────────────────────────────'));
     progressBar.start(filesToProcess.length, 0, {
       success: 0,
       partial: 0,
@@ -1223,11 +1148,9 @@ async function runRepairLoop(
     });
   }
 
-  for (let i = 0; i < filesToProcess.length; i++) {
-    const [filePath, issues] = filesToProcess[i];
-
+  await core.runPool(filesToProcess, settings.maxConcurrentAgents, async ([filePath, issues], i) => {
     if (useProgressBar) {
-      progressBar.update(i, {
+      progressBar.update(result.success + result.partial + result.failed, {
         success: result.success,
         partial: result.partial,
         failed: result.failed,
@@ -1235,20 +1158,20 @@ async function runRepairLoop(
     }
 
     // Step 1: Try strict repair (no suppressions allowed)
-    const strictResult = await repairFileStrict(filePath, issues, options, i, filesToProcess.length);
+    const strictResult = await repairFileStrict(filePath, issues, ctx, i, filesToProcess.length);
 
     if (strictResult.success) {
       result.success++;
-      continue;
+      return 'continue';
     }
 
     // Step 2: Strict failed - try permissive repair (suppressions allowed)
     const remainingIssues = strictResult.remainingIssues ?? issues;
-    const permissiveResult = await repairFilePermissive(filePath, remainingIssues, options, i, filesToProcess.length);
+    const permissiveResult = await repairFilePermissive(filePath, remainingIssues, ctx, i, filesToProcess.length);
 
     if (permissiveResult.success) {
       result.partial++;
-      continue;
+      return 'continue';
     }
 
     // Step 3: Both failed - mark as unresolved
@@ -1260,10 +1183,11 @@ async function runRepairLoop(
         progressBar.stop();
       }
       const relPath = path.relative(ROOT_DIR, filePath);
-      console.log(errorColor(`\nFail-fast: stopping after ${relPath}`));
-      break;
+      out.line(errorColor(`\nFail-fast: stopping after ${relPath}`));
+      return 'stop';
     }
-  }
+    return 'continue';
+  });
 
   if (useProgressBar) {
     progressBar.update(filesToProcess.length, {
@@ -1272,7 +1196,7 @@ async function runRepairLoop(
       failed: result.failed,
     });
     progressBar.stop();
-    console.log();
+    out.line();
   }
 
   return result;
@@ -1292,7 +1216,7 @@ async function runRepairLoop(
 async function writeReport(
   reportDir: string,
   analysisResult: AnalysisResult,
-  repairResult?: RepairResult
+  repairResult?: core.RepairResult
 ): Promise<void> {
   if (!fs.existsSync(reportDir)) {
     fs.mkdirSync(reportDir, { recursive: true });
@@ -1336,6 +1260,37 @@ async function writeReport(
 // ============================================================================
 
 /**
+ * Ends the process with `code` once standard output has taken every earlier write: a
+ * `process.exit` right after a large `--json` report could cut it off when standard output is a
+ * pipe, where Node writes asynchronously.
+ */
+async function exitAfterOutput(code: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    process.stdout.write('', () => resolve());
+  });
+  process.exit(code);
+}
+
+/** Writes the `--debug` line of one analysis: the paths it checked and the files with issues. */
+function debugAnalysis(out: core.Output, targets: ReadonlyArray<string>, issues: core.FileIssueMap): void {
+  const scope = targets.length > 0 ? targets.join(', ') : 'src, test (default)';
+  out.debug(`analysis of ${scope}: ${issues.size} file(s) with issues`);
+}
+
+/**
+ * The commander parser of `--max-files` and `--timeout` (`parseIntegerOption` of
+ * `clean-core.ts`). A value that is not a whole number of at least 1 ends the run with commander's
+ * usage error, before any analysis.
+ */
+function integerFlag(value: string): number {
+  const parsed = core.parseIntegerOption(value);
+  if (parsed === undefined) {
+    throw new InvalidArgumentError('Not a whole number of at least 1.');
+  }
+  return parsed;
+}
+
+/**
  * The CLI: parses the flags, analyses, then repairs in up to three global iterations, each followed
  * by a fresh analysis.
  *
@@ -1344,8 +1299,8 @@ async function writeReport(
  * file, and with code 0 otherwise, even when the final analysis still finds issues. A thrown error
  * exits with code 1.
  *
- * Every analysis after the first checks the default scope (`src` and `test`), not the paths given
- * on the command line, so a targeted run can go on to repair other files. When a dry run writes
+ * Every analysis checks only the paths given on the command line (all of the default scope, `src`
+ * and `test`, when none is given), so a targeted run repairs no other file. When a dry run writes
  * nothing, the same issues remain, so each file goes to the agent once in each of the three
  * iterations.
  */
@@ -1359,170 +1314,164 @@ async function main(): Promise<void> {
     .option('-v, --verbose', 'Show agent prompts and tool calls', false)
     .option('-q, --quiet', 'Statistics only', false)
     .option('--dry-run', 'Preview changes without writing', false)
-    .option('--max-files <n>', 'Limit files processed', parseInt)
+    .option('--max-files <n>', 'Limit files processed', integerFlag)
     .option('--fail-fast', 'Stop on first unresolved file', false)
     .option('--json', 'JSON output for CI integration', false)
     .option('--report <dir>', 'Write detailed report files')
-    .option('--timeout <ms>', 'Timeout per file in ms', parseInt, 600_000)
+    .option('--timeout <ms>', 'Timeout per file in ms (default: timeoutPerFile of clean.config.ts, else 600000)', integerFlag)
     .option('--debug', 'Enable debug logging', false)
     .parse();
 
   const options: CliOptions = program.opts();
   const targetPaths = program.args;
+  const out = core.createOutput(options, {
+    stdout: (text) => process.stdout.write(text),
+    stderr: (text) => process.stderr.write(text),
+  });
 
   // Load configuration
-  const config = await loadConfig();
+  const config = await loadConfig(out);
+  const ctx: RunContext = { options, settings: core.resolveSettings(config, options), out };
+  out.debug(
+    `settings: exclude ${JSON.stringify(ctx.settings.exclude)}, ${ctx.settings.maxConcurrentAgents} agent(s) at once, ` +
+      `model ${ctx.settings.agentModel ?? 'SDK default'}, limit ${ctx.settings.timeoutPerFile} ms per agent run`
+  );
 
   // Display banner
   if (!options.quiet && !options.json) {
     if (options.dryRun) {
       const line = '═'.repeat(50);
-      console.log(`
+      out.line(`
 ${YELLOW}${line}${RESET}
 ${YELLOW}${BOLD}  DRY RUN MODE - No changes will be written  ${RESET}
 ${YELLOW}${line}${RESET}
 `);
     }
 
-    console.log(info('Starting code analysis...'));
+    out.line(info('Starting code analysis...'));
   }
 
   // Phase 1: Analysis
   if (!options.quiet && !options.json) {
-    console.log(dim('  → Running TypeScript compiler...'));
+    out.line(dim('  → Running TypeScript compiler...'));
   }
-  const tsDiagnostics = analyzeTypeScript(targetPaths);
+  const tsDiagnostics = analyzeTypeScript(targetPaths, ctx.settings.exclude);
 
   if (!options.quiet && !options.json) {
-    console.log(dim('  → Running ESLint...'));
+    out.line(dim('  → Running ESLint...'));
   }
-  const eslintResult = await analyzeESLint(targetPaths);
+  const eslintResult = await analyzeESLint(targetPaths, ctx.settings.exclude);
 
   // Merge results
   const issueMap = mergeIssues(tsDiagnostics, eslintResult.issues);
+  debugAnalysis(out, targetPaths, issueMap);
 
   // Calculate statistics using actual file count from ESLint
   const totalFiles = eslintResult.filesScanned;
   const analysisResult = calculateStatistics(issueMap, totalFiles);
 
   // Display analysis report
-  displayAnalysisReport(analysisResult, options);
+  displayAnalysisReport(analysisResult, ctx);
 
   // If analyze-only mode, stop here
   if (options.analyzeOnly || issueMap.size === 0) {
     if (options.json) {
-      displayJsonReport(analysisResult);
+      displayJsonReport(out, analysisResult);
     }
 
     if (options.report) {
       await writeReport(options.report, analysisResult);
       if (!options.quiet && !options.json) {
-        console.log(success(`Report written to ${options.report}`));
+        out.line(success(`Report written to ${options.report}`));
       }
     }
 
     if (issueMap.size === 0) {
       if (!options.quiet && !options.json) {
-        console.log(success('\n✓ No issues found!'));
+        out.line(success('\n✓ No issues found!'));
       }
     }
 
-    process.exit(0);
+    return exitAfterOutput(0);
   }
 
   // Phase 2: Repair with global iteration
   const maxGlobalIterations = 3;
-  let globalIteration = 0;
-  let currentIssueMap = issueMap;
-  const repairResult: RepairResult = { success: 0, partial: 0, failed: 0, unresolved: [] };
-
-  while (globalIteration < maxGlobalIterations) {
-    globalIteration++;
-
-    if (globalIteration > 1 && !options.quiet && !options.json) {
-      console.log();
-      console.log(highlight(`═══ Global Iteration ${globalIteration}/${maxGlobalIterations} ═══`));
-      console.log(dim('  Re-analyzing after previous repairs...'));
-    }
-
-    // Run repair on current issues
-    const iterationResult = await runRepairLoop(currentIssueMap, options, config);
-
-    // Accumulate results
-    repairResult.success += iterationResult.success;
-    repairResult.partial += iterationResult.partial;
-    repairResult.failed = iterationResult.failed; // Only count final failed
-    repairResult.unresolved = iterationResult.unresolved;
-
-    // Re-run analysis to check for any remaining or new issues
-    if (!options.quiet && !options.json && globalIteration < maxGlobalIterations) {
-      console.log(dim('\n  → Re-running analysis to check for remaining issues...'));
-    }
-
-    const newTsDiagnostics = analyzeTypeScript([]);
-    const newEslintResult = await analyzeESLint([]);
-    const newIssueMap = mergeIssues(newTsDiagnostics, newEslintResult.issues);
-
-    if (newIssueMap.size === 0) {
-      // All issues resolved
-      if (!options.quiet && !options.json && globalIteration > 1) {
-        console.log(success('  ✓ All issues resolved!'));
-      }
-      repairResult.failed = 0;
-      repairResult.unresolved = [];
-      break;
-    }
-
-    // Check if we should continue
-    if (globalIteration >= maxGlobalIterations) {
-      if (!options.quiet && !options.json) {
-        console.log(warning(`\n  ⚠ Max global iterations (${maxGlobalIterations}) reached with ${newIssueMap.size} files still having issues`));
-      }
-      break;
-    }
-
-    // Continue with remaining issues
-    currentIssueMap = newIssueMap;
-    if (!options.quiet && !options.json) {
-      console.log(warning(`  → ${newIssueMap.size} files still have issues, starting iteration ${globalIteration + 1}...`));
-    }
-  }
+  const talk = !options.quiet && !options.json;
+  const { result: repairResult, iterations: globalIteration } = await core.repairUntilClean(
+    issueMap,
+    targetPaths,
+    options.failFast,
+    {
+      analyze: async (paths) => {
+        const issues = mergeIssues(
+          analyzeTypeScript([...paths], ctx.settings.exclude),
+          (await analyzeESLint([...paths], ctx.settings.exclude)).issues
+        );
+        debugAnalysis(out, paths, issues);
+        return issues;
+      },
+      repair: (issues) => runRepairLoop(issues, ctx),
+      progress: (event) => {
+        if (!talk) return;
+        switch (event.kind) {
+          case 'iteration-start':
+            out.line();
+            out.line(highlight(`═══ Global Iteration ${event.iteration}/${event.max} ═══`));
+            out.line(dim('  Re-analyzing after previous repairs...'));
+            break;
+          case 'reanalysing':
+            out.line(dim('\n  → Re-running analysis to check for remaining issues...'));
+            break;
+          case 'all-resolved':
+            if (event.iteration > 1) out.line(success('  ✓ All issues resolved!'));
+            break;
+          case 'max-reached':
+            out.line(warning(`\n  ⚠ Max global iterations (${event.max}) reached with ${event.remaining} files still having issues`));
+            break;
+          case 'continuing':
+            out.line(warning(`  → ${event.remaining} files still have issues, starting iteration ${event.next}...`));
+            break;
+          case 'fail-fast':
+            out.line(errorColor(`  Fail-fast: no further global iteration after iteration ${event.iteration}`));
+            break;
+        }
+      },
+    },
+    maxGlobalIterations
+  );
 
   // Display final results
   if (!options.quiet && !options.json) {
-    console.log();
-    console.log(` ${bold('Final Results')}`);
-    console.log(dim('───────────────────────────────────────────────────────────'));
-    console.log(`   ${success(`✓ ${repairResult.success} files fixed completely`)}`);
+    out.line();
+    out.line(` ${bold('Final Results')}`);
+    out.line(dim('───────────────────────────────────────────────────────────'));
+    out.line(`   ${success(`✓ ${repairResult.success} files fixed completely`)}`);
     if (repairResult.partial > 0) {
-      console.log(`   ${warning(`⚠ ${repairResult.partial} files fixed (permissive pass)`)}`);
+      out.line(`   ${warning(`⚠ ${repairResult.partial} files fixed (permissive pass)`)}`);
     }
     if (repairResult.failed > 0) {
-      console.log(`   ${errorColor(`✗ ${repairResult.failed} files could not be fixed`)}`);
+      out.line(`   ${errorColor(`✗ ${repairResult.failed} files could not be fixed`)}`);
     }
     if (globalIteration > 1) {
-      console.log(dim(`   (completed in ${globalIteration} global iteration${globalIteration > 1 ? 's' : ''})`));
+      out.line(dim(`   (completed in ${globalIteration} global iteration${globalIteration > 1 ? 's' : ''})`));
     }
-    console.log();
+    out.line();
   }
 
   if (options.json) {
-    displayJsonReport(analysisResult, repairResult);
+    displayJsonReport(out, analysisResult, repairResult);
   }
 
   if (options.report) {
     await writeReport(options.report, analysisResult, repairResult);
     if (!options.quiet && !options.json) {
-      console.log(success(`Report written to ${options.report}`));
+      out.line(success(`Report written to ${options.report}`));
     }
   }
 
   // Exit with error code if there are unresolved issues
-  if (repairResult.failed > 0) {
-    process.exit(1);
-  }
-
-  process.exit(0);
+  return exitAfterOutput(repairResult.failed > 0 ? 1 : 0);
 }
 
 // Run main

@@ -33,9 +33,9 @@ export interface SimulatedTimeout {
   readonly timeout: number
   /**
    * The callback the timeout runs once. The clock removes the timeout before it calls `fn`, so
-   * `fn` may set or clear other timeouts. `fn` must not throw: the throw leaves `increment` or
-   * `set` with the clock still marked as flushing, so `makeSimulatedClock`'s clock fires no
-   * later timeout (upstream's flush behaves the same).
+   * `fn` may set or clear other timeouts. A throw from `fn` stops the flush and reaches the
+   * caller of `increment` or `set`; the clock stays usable, and the next `increment` or `set`
+   * fires the timeouts still due (upstream's clock fires none after the throw, DEV-75).
    */
   readonly fn: () => void
 }
@@ -86,6 +86,15 @@ export interface SyncSimulatedClock extends Clock {
  * A SimulatedClock allows you to control time in tests, making it possible
  * to test delayed events and timeouts without waiting for real time to pass.
  *
+ * `increment` and `set` fire the due timeouts, the earliest end first, before they return. A
+ * callback that sets or clears a timeout makes the flush sort the timeouts again before the
+ * next one, as upstream's flush does. The clock keeps no flag while a callback runs, so a
+ * throw from a callback stops the flush, reaches the caller of `increment` or `set` and leaves
+ * the clock usable: the next `increment` or `set` fires the timeouts still due. Upstream's
+ * clock stays marked as flushing after the throw and fires no later timeout. For the same
+ * reason, a callback that calls `increment` or `set` fires the timeouts due then inside that
+ * call, where upstream fires them after the callback returns (DEV-75).
+ *
  * @example
  * ```ts
  * const clock = makeSimulatedClock()
@@ -105,27 +114,28 @@ export const makeSimulatedClock = (): SyncSimulatedClock => {
   let timeouts: HashMap.HashMap<number, SimulatedTimeout> = HashMap.empty()
   let currentTime = 0
   let nextId = 0
-  let flushing = false
-  let flushingInvalidated = false
+  /**
+   * Counts the calls that change the timer table or the time (`setTimeout`, `clearTimeout`,
+   * `increment`, `set`). A flush compares it with the count it started from, in place of
+   * upstream's `_flushing`/`_flushingInvalidated` flags: a count never needs a reset, so a
+   * callback that throws leaves no state behind (DEV-75).
+   */
+  let changes = 0
 
-  const flushTimeouts = () => {
-    if (flushing) {
-      flushingInvalidated = true
-      return
-    }
-    flushing = true
-
-    // Sort timeouts by when they should fire
+  /**
+   * Fires the due timeouts, the earliest end first. When a callback has changed the table or
+   * the time, the flush sorts the timeouts again before the next one (upstream's restart).
+   */
+  const flushTimeouts = (): void => {
     const sorted = [...HashMap.entries(timeouts)].sort(([, a], [, b]) => {
       const endA = a.start + a.timeout
       const endB = b.start + b.timeout
       return endA - endB
     })
+    const startedAt = changes
 
     for (const [id, timeout] of sorted) {
-      if (flushingInvalidated) {
-        flushingInvalidated = false
-        flushing = false
+      if (changes !== startedAt) {
         flushTimeouts()
         return
       }
@@ -134,15 +144,13 @@ export const makeSimulatedClock = (): SyncSimulatedClock => {
         timeout.fn()
       }
     }
-
-    flushing = false
   }
 
   return {
     now: () => currentTime,
 
     setTimeout: (fn: () => void, timeout: number) => {
-      flushingInvalidated = flushing
+      changes += 1
       const id = nextId++
       timeouts = HashMap.set(timeouts, id, {
         id,
@@ -154,11 +162,12 @@ export const makeSimulatedClock = (): SyncSimulatedClock => {
     },
 
     clearTimeout: (id: number) => {
-      flushingInvalidated = flushing
+      changes += 1
       timeouts = HashMap.remove(timeouts, id)
     },
 
     increment: (ms: number) => {
+      changes += 1
       currentTime += ms
       flushTimeouts()
     },
@@ -167,6 +176,7 @@ export const makeSimulatedClock = (): SyncSimulatedClock => {
       if (currentTime > time) {
         return false
       }
+      changes += 1
       currentTime = time
       flushTimeouts()
       return true
@@ -309,6 +319,9 @@ const firstDue = (timers: HashMap.HashMap<number, PendingTimer>, now: number): O
  * time fails with `TimeTravelError` (`Unable to travel back in time`) and keeps the time. A
  * call made while the clock fires its timers moves the end of the move and returns at once;
  * the timers that are then due fire in the call that is firing (upstream's restarted flush).
+ * A `setTimeout` callback that throws is a defect of the `increment` or `set` that fires it,
+ * and the clock stays usable: the next `increment` or `set` fires the timers still due, where
+ * upstream's clock fires none after the throw (DEV-75).
  *
  * @example
  * ```ts

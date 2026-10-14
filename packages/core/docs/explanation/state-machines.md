@@ -21,9 +21,11 @@ In this example, the system can be `idle`, `loading`, or `success` - but never m
 **Events** are external inputs that can cause the system to change state. Events represent things that happen - user actions, API responses, timer expirations.
 
 ```typescript
-{ type: "FETCH" }           // User requests data
-{ type: "SUCCESS", data }   // API returned data
-{ type: "ERROR", message }  // API failed
+// Each event is an object with a `type`; an event can also carry data
+export type FetchEvent =
+  | { type: "FETCH" }                    // User requests data
+  | { type: "SUCCESS"; data: string[] }  // API returned data
+  | { type: "ERROR"; message: string }   // API failed
 ```
 
 ### Transitions
@@ -44,11 +46,26 @@ idle ──────────▶ loading ──────────▶
 **Context** is the extended state - data associated with the machine that isn't captured by the finite states. While states are finite (limited set of values), context can be any data.
 
 ```typescript
-context: {
-  user: { id: "123", name: "Alice" },  // Extended state
-  retryCount: 2,
-  lastError: null
-}
+import { createMachine } from "@jambudipa/xstate-effect"
+
+export const userMachine = createMachine({
+  types: {} as {
+    context: {
+      user: { id: string; name: string }
+      retryCount: number
+      lastError: string | null
+    }
+  },
+  initial: "idle",
+  context: {
+    user: { id: "123", name: "Alice" },  // Extended state
+    retryCount: 2,
+    lastError: null
+  },
+  states: {
+    idle: {}
+  }
+})
 ```
 
 ## Finite vs Extended State
@@ -66,15 +83,27 @@ Understanding the difference between **finite state** and **extended state** is 
 - Counters and metrics
 
 ```typescript
-// Finite state: the mode
-value: "loading"
+import { Effect } from "effect"
+import { createActor, createMachine } from "@jambudipa/xstate-effect"
 
-// Extended state: the data
-context: {
-  url: "/api/users",
-  startTime: 1699999999999,
-  attempts: 1
-}
+const requestMachine = createMachine({
+  initial: "loading",
+  context: { url: "/api/users", startTime: 1699999999999, attempts: 1 },
+  states: {
+    loading: {}
+  }
+})
+
+export const program = Effect.gen(function* () {
+  const actor = yield* createActor(requestMachine)
+  const snapshot = yield* actor.getSnapshot
+
+  // Finite state: the mode
+  console.log(snapshot.value) // "loading"
+
+  // Extended state: the data
+  console.log(snapshot.context) // { url: "/api/users", startTime: 1699999999999, attempts: 1 }
+})
 ```
 
 ### When to Use State vs Context
@@ -90,16 +119,24 @@ Use **context** when:
 - The value doesn't change fundamental behavior
 
 ```typescript
+import { createMachine } from "@jambudipa/xstate-effect"
+
 // Good: Using state for mode
-states: {
-  editing: { /* can type, can save */ },
-  saving: { /* shows spinner, blocks input */ },
-  saved: { /* shows confirmation */ }
-}
+export const editor = createMachine({
+  initial: "editing",
+  states: {
+    editing: { /* can type, can save */ },
+    saving: { /* shows spinner, blocks input */ },
+    saved: { /* shows confirmation */ }
+  }
+})
 
 // Bad: Using context for mode
-context: { mode: "editing" | "saving" | "saved" }
-// This loses the benefits of explicit state modeling
+export const modeInContext = createMachine({
+  types: {} as { context: { mode: "editing" | "saving" | "saved" } },
+  context: { mode: "editing" }
+})
+// This loses the benefits of explicit state modelling
 ```
 
 ## Determinism
@@ -110,9 +147,28 @@ State machines are **deterministic** - given the same current state and event, t
 - **Testable**: Same inputs always produce same outputs
 - **Debuggable**: State history reveals exactly what happened
 
+`getNextSnapshot` computes the next snapshot without starting an actor. In this package it
+returns an Effect, because a transition can run guards and actions:
+
 ```typescript
-// Always produces the same result
-getNextSnapshot(machine, currentSnapshot, { type: "SUBMIT" })
+import { Effect } from "effect"
+import { createMachine, getInitialSnapshot, getNextSnapshot } from "@jambudipa/xstate-effect"
+
+const formMachine = createMachine({
+  initial: "editing",
+  states: {
+    editing: { on: { SUBMIT: "submitted" } },
+    submitted: {}
+  }
+})
+
+export const program = Effect.gen(function* () {
+  const currentSnapshot = yield* getInitialSnapshot(formMachine)
+
+  // Always produces the same result
+  const nextSnapshot = yield* getNextSnapshot(formMachine, currentSnapshot, { type: "SUBMIT" })
+  console.log(nextSnapshot.value) // "submitted"
+})
 ```
 
 ## State Machine Variants
@@ -122,11 +178,16 @@ getNextSnapshot(machine, currentSnapshot, { type: "SUBMIT" })
 The simplest form - a fixed set of states with transitions between them.
 
 ```typescript
-states: {
-  green: { on: { TIMER: "yellow" } },
-  yellow: { on: { TIMER: "red" } },
-  red: { on: { TIMER: "green" } }
-}
+import { createMachine } from "@jambudipa/xstate-effect"
+
+export const trafficLight = createMachine({
+  initial: "green",
+  states: {
+    green: { on: { TIMER: "yellow" } },
+    yellow: { on: { TIMER: "red" } },
+    red: { on: { TIMER: "green" } }
+  }
+})
 ```
 
 ### Hierarchical State Machine (Statechart)
@@ -134,19 +195,24 @@ states: {
 States can contain nested states, allowing for complex behavior organization.
 
 ```typescript
-states: {
-  active: {
-    initial: "idle",
-    states: {
-      idle: { /* ... */ },
-      working: { /* ... */ }
+import { createMachine } from "@jambudipa/xstate-effect"
+
+export const sessionMachine = createMachine({
+  initial: "active",
+  states: {
+    active: {
+      initial: "idle",
+      states: {
+        idle: { on: { START: "working" } },
+        working: { on: { FINISH: "idle" } }
+      },
+      on: {
+        LOGOUT: "inactive"  // Exits all nested states
+      }
     },
-    on: {
-      LOGOUT: "inactive"  // Exits all nested states
-    }
-  },
-  inactive: { /* ... */ }
-}
+    inactive: { on: { LOGIN: "active" } }
+  }
+})
 ```
 
 ### Parallel State Machine
@@ -154,27 +220,32 @@ states: {
 Multiple state regions that operate independently and simultaneously.
 
 ```typescript
-states: {
-  player: {
-    type: "parallel",
-    states: {
-      video: {
-        initial: "paused",
-        states: {
-          playing: {},
-          paused: {}
-        }
-      },
-      audio: {
-        initial: "unmuted",
-        states: {
-          muted: {},
-          unmuted: {}
+import { createMachine } from "@jambudipa/xstate-effect"
+
+export const mediaMachine = createMachine({
+  initial: "player",
+  states: {
+    player: {
+      type: "parallel",
+      states: {
+        video: {
+          initial: "paused",
+          states: {
+            playing: {},
+            paused: {}
+          }
+        },
+        audio: {
+          initial: "unmuted",
+          states: {
+            muted: {},
+            unmuted: {}
+          }
         }
       }
     }
   }
-}
+})
 ```
 
 ## The State Machine Mental Model
@@ -186,39 +257,42 @@ Think of a state machine as answering three questions:
 3. **How do events change state?** → Define your transitions
 
 ```typescript
-// 1. States the system can be in
-states: {
-  idle: {},
-  loading: {},
-  success: {},
-  failure: {}
+import { createMachine } from "@jambudipa/xstate-effect"
+
+interface Data {
+  items: string[]
 }
 
 // 2. Events that can occur
-events:
+type FetchEvent =
   | { type: "FETCH" }
   | { type: "SUCCESS"; data: Data }
   | { type: "ERROR"; message: string }
   | { type: "RETRY" }
 
-// 3. How events change state
-states: {
-  idle: {
-    on: { FETCH: "loading" }
-  },
-  loading: {
-    on: {
-      SUCCESS: "success",
-      ERROR: "failure"
+export const fetchMachine = createMachine({
+  types: {} as { events: FetchEvent },
+  initial: "idle",
+  // 1. States the system can be in: idle, loading, success, failure
+  // 3. How events change state: the `on` map of each state
+  states: {
+    idle: {
+      on: { FETCH: "loading" }
+    },
+    loading: {
+      on: {
+        SUCCESS: "success",
+        ERROR: "failure"
+      }
+    },
+    success: {
+      on: { FETCH: "loading" }
+    },
+    failure: {
+      on: { RETRY: "loading" }
     }
-  },
-  success: {
-    on: { FETCH: "loading" }
-  },
-  failure: {
-    on: { RETRY: "loading" }
   }
-}
+})
 ```
 
 ## Benefits of State Machines
@@ -228,13 +302,18 @@ states: {
 All possible states are declared upfront. No hidden states or impossible combinations.
 
 ```typescript
+import { createMachine } from "@jambudipa/xstate-effect"
+
 // Clear what states exist
-states: { idle, loading, success, failure }
+export const fetchMachine = createMachine({
+  initial: "idle",
+  states: { idle: {}, loading: {}, success: {}, failure: {} }
+})
 
 // vs implicit state scattered across variables
-let isLoading = false
-let hasError = false
-let data = null
+export let isLoading = false
+export let hasError = false
+export let data: string[] | null = null
 // What does isLoading=true, hasError=true mean?
 ```
 
@@ -252,17 +331,25 @@ State machines prevent invalid state combinations by design.
 You know exactly what events are valid in each state.
 
 ```typescript
-states: {
-  loading: {
-    on: {
-      // Only these events do anything in loading state
-      SUCCESS: "success",
-      ERROR: "failure",
-      CANCEL: "idle"
-    }
-    // RETRY event? Ignored. FETCH event? Ignored.
+import { createMachine } from "@jambudipa/xstate-effect"
+
+export const fetchMachine = createMachine({
+  initial: "loading",
+  states: {
+    idle: {},
+    loading: {
+      on: {
+        // Only these events do anything in loading state
+        SUCCESS: "success",
+        ERROR: "failure",
+        CANCEL: "idle"
+      }
+      // RETRY event? Ignored. FETCH event? Ignored.
+    },
+    success: {},
+    failure: {}
   }
-}
+})
 ```
 
 ### 4. Visual Documentation
@@ -289,53 +376,88 @@ State machines can be visualized, making the system behavior clear to everyone.
 ### Request/Response
 
 ```typescript
-states: {
-  idle: { on: { FETCH: "loading" } },
-  loading: {
-    invoke: {
-      src: "fetchData",
-      onDone: "success",
-      onError: "failure"
-    }
-  },
-  success: {},
-  failure: { on: { RETRY: "loading" } }
-}
+import { fromPromise, setup } from "@jambudipa/xstate-effect"
+
+export const requestMachine = setup({
+  actors: {
+    fetchData: fromPromise(async (): Promise<unknown> => {
+      const response = await fetch("/api/data")
+      return response.json()
+    })
+  }
+}).createMachine({
+  initial: "idle",
+  states: {
+    idle: { on: { FETCH: "loading" } },
+    loading: {
+      invoke: {
+        src: "fetchData",
+        onDone: "success",
+        onError: "failure"
+      }
+    },
+    success: {},
+    failure: { on: { RETRY: "loading" } }
+  }
+})
 ```
 
 ### Toggle
 
 ```typescript
-states: {
-  inactive: { on: { TOGGLE: "active" } },
-  active: { on: { TOGGLE: "inactive" } }
-}
+import { createMachine } from "@jambudipa/xstate-effect"
+
+export const toggleMachine = createMachine({
+  initial: "inactive",
+  states: {
+    inactive: { on: { TOGGLE: "active" } },
+    active: { on: { TOGGLE: "inactive" } }
+  }
+})
 ```
 
 ### Sequence
 
 ```typescript
-states: {
-  step1: { on: { NEXT: "step2" } },
-  step2: { on: { NEXT: "step3", BACK: "step1" } },
-  step3: { on: { NEXT: "complete", BACK: "step2" } },
-  complete: { type: "final" }
-}
+import { createMachine } from "@jambudipa/xstate-effect"
+
+export const wizardMachine = createMachine({
+  initial: "step1",
+  states: {
+    step1: { on: { NEXT: "step2" } },
+    step2: { on: { NEXT: "step3", BACK: "step1" } },
+    step3: { on: { NEXT: "complete", BACK: "step2" } },
+    complete: { type: "final" }
+  }
+})
 ```
 
 ### Guarded Transitions
 
 ```typescript
-states: {
-  editing: {
-    on: {
-      SUBMIT: [
-        { guard: "isValid", target: "submitting" },
-        { target: "invalid" }
-      ]
-    }
+import { setup } from "@jambudipa/xstate-effect"
+
+export const formMachine = setup({
+  types: {} as { context: { email: string } },
+  guards: {
+    isValid: ({ context }) => context.email.includes("@")
   }
-}
+}).createMachine({
+  context: { email: "" },
+  initial: "editing",
+  states: {
+    editing: {
+      on: {
+        SUBMIT: [
+          { guard: "isValid", target: "submitting" },
+          { target: "invalid" }
+        ]
+      }
+    },
+    submitting: {},
+    invalid: {}
+  }
+})
 ```
 
 ## Summary
@@ -353,5 +475,3 @@ This mental model helps you think clearly about complex systems and build reliab
 ## Further Reading
 
 - [The Actor Model](./actor-model.md) - How actors extend state machines
-- [When to Use State Machines](./when-to-use.md) - Problem fit analysis
-- [State Machine Theory](./theory.md) - Formal foundations

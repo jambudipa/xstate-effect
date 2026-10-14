@@ -216,6 +216,31 @@ describe("P4 Children and pending delayed events persist and resume", () => {
     })
   )
 
+  it.effect("[P4] the system's _scheduledEvents lists its keys in the order they were scheduled, as upstream's object does, and a rescheduled id keeps its place", () =>
+    Effect.gen(function* () {
+      const machine = createMachine({
+        context: {},
+        entry: [
+          raise({ type: "TICK" }, { id: "r1", delay: 100 }),
+          raise({ type: "TICK" }, { id: "s1", delay: 100 }),
+          raise({ type: "TICK" }, { id: "r2", delay: 100 }),
+          raise({ type: "TICK" }, { id: "s2", delay: 100 }),
+        ],
+        on: { AGAIN: { actions: raise({ type: "TICK" }, { id: "r1", delay: 100 }) } },
+      })
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      const ids = Effect.map(actor.system.getSnapshot, (snapshot) =>
+        Object.keys(snapshot._scheduledEvents).map((key) => key.slice(key.indexOf(".") + 1))
+      )
+      assert.deepStrictEqual(yield* ids, ["r1", "s1", "r2", "s2"])
+
+      // Upstream assigns an existing key in place, so r1 keeps the first place
+      yield* actor.send({ type: "AGAIN" })
+      assert.deepStrictEqual(yield* ids, ["r1", "s1", "r2", "s2"])
+    })
+  )
+
   it.effect("[P4] a pending delayed event persists with its id, event, delay, startedAt from the test clock and target, and resumes after the time left", () =>
     Effect.gen(function* () {
       yield* TestClock.adjust("25 millis")

@@ -438,6 +438,28 @@ describe("Actions", () => {
       const action = sendSelf<unknown, Event>({ type: "RETRY" })
 
       expect(action.type).toBe("xstate.sendTo")
+
+      // The action it creates works: run by an actor, it sends the event to that same actor
+      const { createActor, createMachine, waitFor } = await import("../src/index.js")
+      const machine = createMachine<object, Event>({
+        context: {},
+        initial: "idle",
+        states: {
+          idle: { on: { TRIGGER: { actions: action }, RETRY: "retried" } },
+          retried: {},
+        },
+      })
+      const value = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const actor = yield* createActor(machine)
+            yield* actor.start
+            yield* actor.send({ type: "TRIGGER" })
+            return (yield* waitFor(actor, (snapshot) => snapshot.matches("retried"))).value
+          })
+        )
+      )
+      expect(value).toBe("retried")
     })
   })
 

@@ -18,9 +18,9 @@ import { setup, assign, fromPromise } from "../src/index.js"
  * Context for the media scanner.
  */
 export interface MediaScannerContext {
-  /** The library root to scan; fixed at "/media". */
+  /** The library root to scan, from the input's `basePath`. */
   basePath: string
-  /** The folder that qualifying directories move to; fixed at "/media/4k". */
+  /** The folder that qualifying directories move to, from the input's `destinationPath`. */
   destinationPath: string
   /** The directories the scan found; the permission check reads them. */
   directoriesToCheck: string[]
@@ -45,12 +45,9 @@ export interface MediaScannerContext {
  * Input for the media scanner.
  */
 export interface MediaScannerInput {
-  /**
-   * The library root. The machine does not read an input: its context starts with the fixed
-   * paths, so this type only records the input shape.
-   */
+  /** The library root to scan; the context factory copies it into the context. */
   basePath: string
-  /** The destination folder; not read, like `basePath`. */
+  /** The folder that qualifying directories move to; the context factory copies it too. */
   destinationPath: string
 }
 
@@ -147,9 +144,13 @@ export const moveFilesActor = fromPromise<
  * 2. Checks file permissions
  * 3. Evaluates files (e.g., resolution)
  * 4. Moves qualifying files to destination
+ *
+ * Its input gives the library root and the destination folder, so an actor needs one:
+ * `createActor(mediaScannerMachine, { input: { basePath, destinationPath } })`.
  */
 export const mediaScannerMachine = setup({
   types: {
+    input: {} as MediaScannerInput,
     context: {} as MediaScannerContext,
     events: {} as MediaScannerEvent,
   },
@@ -167,9 +168,9 @@ export const mediaScannerMachine = setup({
 }).createMachine({
   id: "mediaScanner",
   initial: "idle",
-  context: {
-    basePath: "/media",
-    destinationPath: "/media/4k",
+  context: ({ input }) => ({
+    basePath: input.basePath,
+    destinationPath: input.destinationPath,
     directoriesToCheck: [],
     dirsToEvaluate: [],
     dirsToMove: [],
@@ -189,7 +190,7 @@ export const mediaScannerMachine = setup({
       "ts",
       "mts",
     ],
-  },
+  }),
   states: {
     idle: {
       on: {

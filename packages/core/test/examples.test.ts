@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
-import { getInitialSnapshot, getNextSnapshot } from "../src/index.js"
+import { createActor, fromPromise, getInitialSnapshot, getNextSnapshot, waitFor } from "../src/index.js"
 
 // Import all examples
 import {
@@ -18,6 +18,9 @@ import {
   simpleStopwatchMachine,
   fetchMachine,
   simpleFetchMachine,
+  creditCheckMachine,
+  mediaScannerMachine,
+  type MediaScannerInput,
 } from "../examples/index.js"
 
 describe("Examples", () => {
@@ -227,6 +230,40 @@ describe("Examples", () => {
         getNextSnapshot(toggleWithCountMachine, snapshot, { type: "reset" })
       )
       expect(snapshot.value).toBe("inactive")
+    })
+
+    it("should count each toggle, in both directions", async () => {
+      let snapshot = await Effect.runPromise(
+        getInitialSnapshot(toggleWithCountMachine, undefined)
+      )
+
+      for (const expected of [1, 2, 3]) {
+        snapshot = await Effect.runPromise(
+          getNextSnapshot(toggleWithCountMachine, snapshot, { type: "toggle" })
+        )
+        expect(snapshot.context.toggleCount).toBe(expected)
+      }
+      expect(snapshot.value).toBe("active")
+    })
+
+    it("should clear the count on reset", async () => {
+      let snapshot = await Effect.runPromise(
+        getInitialSnapshot(toggleWithCountMachine, undefined)
+      )
+
+      snapshot = await Effect.runPromise(
+        getNextSnapshot(toggleWithCountMachine, snapshot, { type: "toggle" })
+      )
+      snapshot = await Effect.runPromise(
+        getNextSnapshot(toggleWithCountMachine, snapshot, { type: "toggle" })
+      )
+      expect(snapshot.context.toggleCount).toBe(2)
+
+      snapshot = await Effect.runPromise(
+        getNextSnapshot(toggleWithCountMachine, snapshot, { type: "reset" })
+      )
+      expect(snapshot.value).toBe("inactive")
+      expect(snapshot.context.toggleCount).toBe(0)
     })
   })
 
@@ -568,6 +605,39 @@ describe("Examples", () => {
       expect(snapshot.context.retryCount).toBe(1)
     })
 
+    it("should total the retries across failed retries", async () => {
+      let snapshot = await Effect.runPromise(
+        getInitialSnapshot(fetchMachine, undefined)
+      )
+      const fail = { type: "ERROR", error: new Error("Failed") } as const
+
+      // FETCH -> failure, then two retries that fail too
+      snapshot = await Effect.runPromise(
+        getNextSnapshot(fetchMachine, snapshot, { type: "FETCH" })
+      )
+      snapshot = await Effect.runPromise(getNextSnapshot(fetchMachine, snapshot, fail))
+      expect(snapshot.context.retryCount).toBe(0)
+
+      snapshot = await Effect.runPromise(
+        getNextSnapshot(fetchMachine, snapshot, { type: "RETRY" })
+      )
+      snapshot = await Effect.runPromise(getNextSnapshot(fetchMachine, snapshot, fail))
+      expect(snapshot.value).toBe("failure")
+      expect(snapshot.context.retryCount).toBe(1)
+
+      snapshot = await Effect.runPromise(
+        getNextSnapshot(fetchMachine, snapshot, { type: "RETRY" })
+      )
+      snapshot = await Effect.runPromise(getNextSnapshot(fetchMachine, snapshot, fail))
+      expect(snapshot.context.retryCount).toBe(2)
+
+      // RESET starts the total again
+      snapshot = await Effect.runPromise(
+        getNextSnapshot(fetchMachine, snapshot, { type: "RESET" })
+      )
+      expect(snapshot.context.retryCount).toBe(0)
+    })
+
     it("should reset from success state", async () => {
       let snapshot = await Effect.runPromise(
         getInitialSnapshot(fetchMachine, undefined)
@@ -668,6 +738,96 @@ describe("Examples", () => {
       )
       expect(snapshot.value).toBe("success")
       expect(snapshot.context.data).toEqual({ greeting: "Test" })
+    })
+  })
+
+  // ============================================================
+  // MONGODB CREDIT CHECK EXAMPLE
+  // ============================================================
+  describe("Credit Check Machine", () => {
+    /** The bureau scores of one run, and the bureaus the run fetched a report from. */
+    interface CreditCheckRun {
+      readonly scores: readonly [number, number, number]
+      readonly bureausFetched: ReadonlyArray<string>
+    }
+
+    /**
+     * Runs the credit check for one applicant to "RatesProvided". The reports table answers
+     * from `cache` (a missing bureau is a cache miss) and each bureau fetch gives 650; the
+     * mock services' delays, randomness and console output are replaced.
+     */
+    const runCreditCheck = (cache: Readonly<Record<string, number>>): Promise<CreditCheckRun> => {
+      const bureausFetched: Array<string> = []
+      const machine = creditCheckMachine.provide({
+        actors: {
+          checkReportsTable: fromPromise<{ creditScore: number } | null, { ssn: string; bureauName: string }>(
+            async ({ input }) => {
+              const creditScore = cache[input.bureauName]
+              return creditScore === undefined ? null : { creditScore }
+            }
+          ),
+          checkBureau: fromPromise<number, { ssn: string; bureauName: string }>(async ({ input }) => {
+            bureausFetched.push(input.bureauName)
+            return 650
+          }),
+          determineMiddleScore: fromPromise<number, number[]>(async ({ input }) =>
+            [...input].sort((a, b) => a - b)[1] ?? 0
+          ),
+          generateInterestRates: fromPromise<number, number>(async ({ input }) => 3.5 + (850 - input) / 100),
+        },
+        actions: {
+          saveCreditProfile: () => undefined,
+          emailUser: () => undefined,
+          emailSalesTeam: () => undefined,
+        },
+      })
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const actor = yield* createActor(machine)
+            yield* actor.start
+            yield* actor.send({ type: "Submit", SSN: "123-45-6789", firstName: "Ada", lastName: "Lovelace" })
+            const done = yield* waitFor(
+              actor,
+              (snapshot) => snapshot.matches({ creditCheck: { DeterminingInterestRateOptions: "RatesProvided" } }),
+              { timeout: 5000 }
+            )
+            const { EquiGavinScore, GavUnionScore, GavperianScore } = done.context
+            return {
+              scores: [EquiGavinScore, GavUnionScore, GavperianScore] as const,
+              bureausFetched: [...bureausFetched].sort(),
+            }
+          })
+        )
+      )
+    }
+
+    it("should use a cached report and not fetch that bureau", async () => {
+      const run = await runCreditCheck({ EquiGavin: 720, GavUnion: 730, Gavperian: 740 })
+
+      expect(run.bureausFetched).toEqual([])
+      expect(run.scores).toEqual([720, 730, 740])
+    })
+
+    it("should fetch from the bureau on a cache miss only", async () => {
+      const run = await runCreditCheck({ GavUnion: 730 })
+
+      expect(run.bureausFetched).toEqual(["EquiGavin", "Gavperian"])
+      expect(run.scores).toEqual([650, 730, 650])
+    })
+  })
+
+  // ============================================================
+  // WORKFLOW MEDIA SCANNER EXAMPLE
+  // ============================================================
+  describe("Media Scanner Machine", () => {
+    it("should take its paths from the input", async () => {
+      const input: MediaScannerInput = { basePath: "/library", destinationPath: "/archive/4k" }
+      const snapshot = await Effect.runPromise(getInitialSnapshot(mediaScannerMachine, input))
+
+      expect(snapshot.value).toBe("idle")
+      expect(snapshot.context.basePath).toBe("/library")
+      expect(snapshot.context.destinationPath).toBe("/archive/4k")
     })
   })
 })

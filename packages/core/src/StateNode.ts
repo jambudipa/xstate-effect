@@ -39,7 +39,7 @@ import type {
  * @since 0.1.0
  * @category Type ID
  */
-export const StateNodeTypeId: unique symbol = Symbol.for("@xstate-effect/StateNode")
+export const StateNodeTypeId: unique symbol = Symbol.for("@jambudipa/xstate-effect/StateNode")
 
 /**
  * Type ID type for StateNode.

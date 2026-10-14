@@ -151,6 +151,11 @@ main differences:
 
 The suite needs a git checkout: one check lists the repository's files with git.
 
+`pnpm test:coverage` runs the suite with the coverage gate: 90 % lines and 85 % branches over
+`src/`. The pre-push hook and CI run it.
+[`docs/testing.md`](https://github.com/jambudipa/xstate-effect/blob/main/docs/testing.md) covers
+the gate, the hook and where a new test goes.
+
 ## Documentation
 
 - [`docs/`](./docs/README.md) — tutorials, how-to guides, reference and explanation pages. Some
@@ -175,10 +180,12 @@ pnpm lint                                    # ESLint over src/ and test/
 pnpm typecheck                               # src/, then src/ and test/ together
 pnpm exec tsc -p tsconfig.test.json --noEmit # the type check of the tests that CI runs
 pnpm test                                    # the whole suite, upstream rewrites included
+pnpm test:coverage                           # the suite with the coverage gate
 pnpm build                                   # dist/
 ```
 
-CI runs these five commands on Node 22 and 24 for every push and pull request to `main`.
+CI runs these commands on Node 22 and 24 for every push and pull request to `main`, with
+`pnpm test:coverage` in place of `pnpm test`.
 
 `pnpm test:upstream test/upstream/<file>.test.ts` runs one rewrite directly.
 
@@ -207,8 +214,8 @@ every change:
 - **Conventions.** Public exports carry JSDoc with `@since` and `@category`; an intentionally
   unused binding starts with `_`; generic types carry variance markers; runtime type checks use
   `TypeId` symbols.
-- **Gates.** `pnpm lint`, `pnpm typecheck`, the test type check, `pnpm test`, `pnpm build` and
-  `pnpm run docs:audit` all pass before a merge; CI runs them.
+- **Gates.** `pnpm lint`, `pnpm typecheck`, the test type check, `pnpm test:coverage`,
+  `pnpm build` and `pnpm run docs:audit` all pass before a merge; CI runs them.
 
 <!-- docs-audit:maintenance -->
 

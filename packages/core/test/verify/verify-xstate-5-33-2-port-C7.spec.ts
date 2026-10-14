@@ -273,6 +273,75 @@ describe("C7 A callback actor sends back from async code and cleans up on stop",
         yield* actor.stop
         assert.strictEqual(cleanups, 1)
         assert.deepStrictEqual(warnings(entries).filter((text) => text.includes("stopped actor")), [])
+        // No warning at all: upstream's `sendBack` does nothing once its actor is stopped
+        assert.deepStrictEqual(warnings(entries), [])
+      })
+    )
+  })
+
+  it.effect("[C7] a sendBack in the cleanup reaches the parent when the invoking state exits, as upstream runs the cleanup inside the xstate.stop transition", () =>
+    Effect.gen(function* () {
+      const logic = fromCallback(({ sendBack }) => () => {
+        sendBack({ type: "PING" })
+      })
+      const actor = yield* createActor(parentOf(logic))
+      yield* actor.start
+      const child = yield* childOf(actor)
+
+      // Leaving `a` stops the child; its cleanup sends PING while the child is not yet stopped
+      yield* actor.send({ type: "NEXT" })
+      assert.isTrue(yield* eventually(Effect.map(statusOf(child), (status) => status === "stopped")), "the child stops")
+      assert.isTrue(yield* eventually(Effect.map(receivedBy(actor), (received) => received.length > 0)), "the parent receives PING")
+      assert.deepStrictEqual(yield* receivedBy(actor), [{ type: "PING" }])
+    })
+  )
+
+  it.effect("[C7] a sendBack in the cleanup while the parent itself stops is dropped without a warning, as upstream clears it with the mailbox", () => {
+    const entries: Entries = []
+    return withLogger(
+      entries,
+      Effect.gen(function* () {
+        const logic = fromCallback(({ sendBack }) => () => {
+          sendBack({ type: "PING" })
+        })
+        const actor = yield* createActor(parentOf(logic))
+        yield* actor.start
+        const child = yield* childOf(actor)
+
+        // The parent's stop stops the child; upstream queues PING while the parent still runs
+        yield* actor.stop
+        assert.strictEqual(yield* statusOf(child), "stopped")
+        assert.deepStrictEqual(yield* receivedBy(actor), [])
+        assert.deepStrictEqual(warnings(entries).filter((text) => text.includes("stopped actor")), [])
+      })
+    )
+  })
+
+  it.effect("[C7] a sendBack in the cleanup while the parent reaches its final state is dropped without a warning, as upstream clears it with the mailbox", () => {
+    const entries: Entries = []
+    return withLogger(
+      entries,
+      Effect.gen(function* () {
+        const logic = fromCallback(({ sendBack }) => () => {
+          sendBack({ type: "PING" })
+        })
+        const machine = createMachine<Received, EventObject>({
+          context: { received: [] },
+          initial: "a",
+          states: {
+            a: { invoke: { id: "cb", src: logic }, on: { NEXT: "end" } },
+            end: { type: "final" },
+          },
+          on: { PING: { actions: record } },
+        })
+        const actor = yield* createActor(machine)
+        yield* actor.start
+
+        // The done parent stops the invoked child; upstream queues PING, then `_stopProcedure` clears it
+        yield* actor.send({ type: "NEXT" })
+        assert.strictEqual(yield* statusOf(actor), "done")
+        yield* settle
+        assert.deepStrictEqual(warnings(entries).filter((text) => text.includes("stopped actor")), [])
       })
     )
   })
@@ -306,6 +375,8 @@ describe("C7 A callback actor sends back from async code and cleans up on stop",
         assert.strictEqual(cleanups, 1)
         assert.deepStrictEqual(yield* receivedBy(actor), [{ type: "PING" }])
         assert.deepStrictEqual(warnings(entries).filter((text) => text.includes("stopped actor")), [])
+        // No warning at all: upstream's `sendBack` does nothing once its actor is stopped
+        assert.deepStrictEqual(warnings(entries), [])
       })
     )
   })

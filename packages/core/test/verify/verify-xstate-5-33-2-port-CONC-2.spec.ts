@@ -96,10 +96,19 @@ const sendWithinOneYield = (send: Effect.Effect<void>, returned: Array<boolean>)
     returned.push(succeeded(fiber))
   })
 
-/** Runs `program` with a logger that keeps the text of every warning. */
-const withWarningsCaptured = <A, E, R>(program: Effect.Effect<A, E, R>) => {
+/** Whether the fiber has ended with a success whose value is `undefined`: an Effect that completes with void. */
+const succeededWithVoid = (fiber: Fiber.Fiber<unknown, unknown>): boolean => {
+  const exit = fiber.pollUnsafe()
+  return exit !== undefined && Exit.isSuccess(exit) && exit.value === undefined
+}
+
+/**
+ * Runs the program that `make` builds with a logger that keeps the text of every warning;
+ * `make` receives the list, so the program can read the warnings kept so far.
+ */
+const withWarningsCaptured = <A, E, R>(make: (warnings: ReadonlyArray<string>) => Effect.Effect<A, E, R>) => {
   const warnings: Array<string> = []
-  return program.pipe(
+  return make(warnings).pipe(
     Effect.provide(
       Logger.layer([
         Logger.make((options) => {
@@ -309,8 +318,10 @@ describe("CONC-2 An external send is read-your-writes and actor-to-actor sends n
 
   it.effect("[CONC-2] a send racing stop completes with void whichever runs first; a send after stop drops with the warning", () =>
     Effect.gen(function* () {
+      // The count each offset ends with: 1 when the send ran first, 0 when the stop did
+      const outcomes: Array<number> = []
       for (let offset = 0; offset < 4; offset++) {
-        const { result, warnings } = yield* withWarningsCaptured(
+        const { result, warnings } = yield* withWarningsCaptured((kept) =>
           Effect.gen(function* () {
             const actor = yield* createActor(counterMachine(yield* makeGate), { id: `race-${offset}` })
             yield* actor.start
@@ -321,14 +332,18 @@ describe("CONC-2 An external send is read-your-writes and actor-to-actor sends n
             const stopping = yield* Effect.forkChild(actor.stop)
             yield* settle
             const racedEnded = { send: succeeded(sending), stop: succeeded(stopping) }
+            const racedVoid = { send: succeededWithVoid(sending), stop: succeededWithVoid(stopping) }
             const raced = yield* actor.getSnapshot
+            const warnedBeforeLateSend = [...kept]
 
             yield* actor.send({ type: "increment" })
-            return { racedEnded, raced, sessionId: actor.sessionId, last: yield* actor.getSnapshot }
+            return { racedEnded, racedVoid, raced, warnedBeforeLateSend, sessionId: actor.sessionId, last: yield* actor.getSnapshot }
           })
         )
 
         assert.deepStrictEqual(result.racedEnded, { send: true, stop: true }, `offset ${offset}`)
+        // Each completes with void, as upstream's `send` and `stop` return nothing to wait for
+        assert.deepStrictEqual(result.racedVoid, { send: true, stop: true }, `offset ${offset}`)
         assert.strictEqual(result.raced.status, "stopped", `offset ${offset}`)
         assert.isAtMost(result.raced.context.count, 1, `offset ${offset}`)
         assert.strictEqual(result.last.context.count, result.raced.context.count, `offset ${offset}`)
@@ -336,7 +351,16 @@ describe("CONC-2 An external send is read-your-writes and actor-to-actor sends n
         const expected = eventSentToStoppedActor({ type: "increment" }, `race-${offset}`, result.sessionId)
         assert.isTrue(warnings.length >= 1 && warnings.length <= 2, `offset ${offset}`)
         assert.isTrue(warnings.every((warning) => warning === expected), `offset ${offset}`)
+        // The send after stop adds exactly one warning, the upstream text (upstream `_send` on a
+        // stopped actor); a raced send that the macrostep took warned nothing
+        assert.deepStrictEqual(warnings, [...result.warnedBeforeLateSend, expected], `offset ${offset}`)
+        if (result.raced.context.count === 1) {
+          assert.deepStrictEqual(result.warnedBeforeLateSend, [], `offset ${offset}`)
+        }
+        outcomes.push(result.raced.context.count)
       }
+      // "Whichever runs first": the offsets reach both orders
+      assert.includeMembers(outcomes, [0, 1])
     })
   )
 })

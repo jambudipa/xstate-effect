@@ -5,15 +5,16 @@
  * and guard forms, and SD-8 gives `createActor` its Effect signature. This file proves:
  *
  * - the existing port test files are the twelve the port had when this SPEC started (the ten
- *   of the first implementation, `actor.test.ts` and `smoke.test.ts` of Phase 0), and the
- *   default suite collects them;
+ *   of the first implementation, `actor.test.ts` and `smoke.test.ts` of Phase 0) and
+ *   `scripts.test.ts`, the test of the dev scripts' pure logic (owner, 2026-10-12: "/goal Fix
+ *   those five issues"), and the default suite collects them;
  * - every existing test passes: the file runs each `test/*.test.ts` file on the disk through
  *   the default config with Vitest's node API in this process, in worker threads (SD-1 bans a
  *   child Vitest process, as HARNESS-2 does), and asserts on the result: each file is
  *   collected and has at least one test, every test passed, no test or suite is skipped, todo,
  *   `only` or `fails`, no file or run error, and the guards of the default config report
  *   nothing. The default run also runs these files itself (SD-1 includes `test/*.test.ts`), so
- *   they run twice there; a second run of the twelve files takes a few seconds;
+ *   they run twice there; a second run of the thirteen files takes a few seconds;
  * - the type check covers them and every example: `tsconfig.test.green.json` excludes no
  *   existing test file and no example (the COMPAT-1 legacy list is empty), the examples index
  *   re-exports every example module and `test/examples.test.ts` imports the index, and a
@@ -37,6 +38,7 @@ import type {
   ApplicantRequestInput,
   CollegeAppInput,
   CreditCheckInput,
+  MediaScannerInput,
   MonitorJobInput,
   PatientMonitorInput,
   ProvisionOrdersInput,
@@ -53,7 +55,10 @@ import {
 } from "../../src/index.js"
 import { PKG_ROOT } from "./parity.js"
 
-/** The existing port test files (SD-20): the first implementation's ten, then Phase 0's two. */
+/**
+ * The existing port test files (SD-20): the first implementation's ten, Phase 0's two, and the
+ * test of the dev scripts' pure logic (`scripts.test.ts`, 2026-10-12).
+ */
 const EXISTING_TEST_FILES: ReadonlyArray<string> = [
   "actions.test.ts",
   "actor.test.ts",
@@ -63,6 +68,7 @@ const EXISTING_TEST_FILES: ReadonlyArray<string> = [
   "examples.test.ts",
   "guards.test.ts",
   "machine.test.ts",
+  "scripts.test.ts",
   "smoke.test.ts",
   "snapshot.test.ts",
   "stateValue.test.ts",
@@ -91,6 +97,7 @@ const INPUTS: Readonly<Record<string, unknown>> = {
   sendCloudEventMachine: {
     orders: [{ id: "order-1", item: "laptop", quantity: "1" }],
   } satisfies SendCloudEventInput,
+  mediaScannerMachine: { basePath: "/media", destinationPath: "/media/4k" } satisfies MediaScannerInput,
 }
 
 /** The status and state value of the initial snapshot of each machine the examples index exports. */

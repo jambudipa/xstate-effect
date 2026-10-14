@@ -19,7 +19,7 @@ import type { EventObject } from "../Event.js"
  * @since 0.1.0
  * @category Symbols
  */
-export const WaitingDeliveryKey: unique symbol = Symbol.for("@xstate-effect/Actor/waitingDelivery")
+export const WaitingDeliveryKey: unique symbol = Symbol.for("@jambudipa/xstate-effect/Actor/waitingDelivery")
 
 /**
  * An actor's delivery as `send` makes it, without the inspection event (SD-23): from outside

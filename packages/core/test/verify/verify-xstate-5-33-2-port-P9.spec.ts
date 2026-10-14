@@ -338,6 +338,24 @@ describe("P9 waitFor supports a signal and rejects on termination", () => {
       yield* settle
 
       assert.strictEqual(predicate.mock.calls.length, calls)
+      // The predicate saw the current snapshot (a) and the one it matched (b), as upstream
+      // checks the current snapshot, then each later one until a match
+      assert.deepStrictEqual(
+        predicate.mock.calls.map(([snapshot]) => (snapshot.matches("a") ? "a" : snapshot.matches("b") ? "b" : "other")),
+        ["a", "b"]
+      )
+
+      // A wait that the current snapshot satisfies leaves nothing either: upstream resolves at
+      // once and never subscribes, so a later snapshot reaches no predicate (the annotated case)
+      const current = yield* createActor(steps())
+      yield* current.start
+      const immediate = vi.fn((s: { readonly matches: (value: string) => boolean }) => s.matches("a"))
+      const matched = yield* waitFor(current, immediate)
+      yield* current.send({ type: "NEXT" })
+      yield* settle
+
+      assert.strictEqual(matched.value, "a")
+      assert.strictEqual(immediate.mock.calls.length, 1)
     })
   )
 })

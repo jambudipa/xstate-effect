@@ -15,6 +15,7 @@ import {
   MutableHashMap,
   MutableRef,
   Option,
+  Order,
   Fiber,
   Predicate,
   Record,
@@ -69,7 +70,7 @@ export interface Clock {
 export class ActorSystem extends Context.Service<
   ActorSystem,
   ActorSystemService
->()("@xstate-effect/ActorSystem") {}
+>()("@jambudipa/xstate-effect/ActorSystem") {}
 
 // ============================================================
 // SCHEDULER TAG
@@ -84,7 +85,7 @@ export class ActorSystem extends Context.Service<
 export class Scheduler extends Context.Service<
   Scheduler,
   SchedulerService
->()("@xstate-effect/Scheduler") {}
+>()("@jambudipa/xstate-effect/Scheduler") {}
 
 // ============================================================
 // IMPLEMENTATION (one copy behind every constructor and layer)
@@ -211,6 +212,12 @@ const clockTimers = (clock: Clock, outbox: Outbox.Outbox): Timers => ({
 interface PendingEvent extends ScheduledEvent {
   /** Clears the event's timer so it never fires; `cancel` runs it after it drops the key. */
   readonly clear: Effect.Effect<void>
+  /**
+   * When its key was first recorded, among the scheduler's keys: upstream keeps the pending
+   * events in an object, so `_scheduledEvents` lists keys in that order, and assigning a key
+   * that is already pending keeps its place.
+   */
+  readonly order: number
 }
 
 /** The key of a scheduled event (upstream `createScheduledEventId`). */
@@ -228,6 +235,8 @@ const scheduledEventId = (source: ActorRefBase, id: string): string => `${source
 const makeScheduler = (timers: Timers, deliver: Deliver): Effect.Effect<SchedulerService> =>
   Effect.gen(function* () {
     const scheduled = yield* Ref.make(HashMap.empty<string, PendingEvent>())
+    // The next `order` a newly recorded key gets
+    const insertions = yield* Ref.make(0)
     const anonymousIds = yield* Ref.make(0)
 
     const cancel = (source: ActorRefBase, id: string): Effect.Effect<void> =>
@@ -257,7 +266,14 @@ const makeScheduler = (timers: Timers, deliver: Deliver): Effect.Effect<Schedule
         const fire = (waiting: boolean) =>
           Effect.andThen(Ref.update(scheduled, HashMap.remove(key)), deliver(event.source, event.target, event.event, waiting))
         const clear = yield* timers.start(remainingMs, fire)
-        yield* Ref.update(scheduled, HashMap.set(key, { ...event, clear }))
+        const fresh = yield* Ref.getAndUpdate(insertions, (n) => n + 1)
+        yield* Ref.update(scheduled, (events) =>
+          HashMap.set(events, key, {
+            ...event,
+            clear,
+            order: Option.match(HashMap.get(events, key), { onNone: () => fresh, onSome: (pending) => pending.order }),
+          })
+        )
       })
 
     return {
@@ -287,12 +303,12 @@ const makeScheduler = (timers: Timers, deliver: Deliver): Effect.Effect<Schedule
             : deliver(event.source, event.target, event.event, false)
         }),
 
+      // In the order the keys were first recorded, as upstream's object lists them
       scheduledEvents: Effect.map(Ref.get(scheduled), (events) =>
         Object.fromEntries(
-          Array.from(events, ([key, { source, target, event, delay, id, startedAt }]) => [
-            key,
-            { source, target, event, delay, id, startedAt },
-          ])
+          Arr.sortWith(Array.from(events), ([, pending]) => pending.order, Order.Number).map(
+            ([key, { source, target, event, delay, id, startedAt }]) => [key, { source, target, event, delay, id, startedAt }]
+          )
         )
       ),
     }

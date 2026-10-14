@@ -24,7 +24,7 @@ import type { Variance } from "./Types.js"
  * @since 0.1.0
  * @category Type ID
  */
-export const ActorRefTypeId: unique symbol = Symbol.for("@xstate-effect/ActorRef")
+export const ActorRefTypeId: unique symbol = Symbol.for("@jambudipa/xstate-effect/ActorRef")
 
 /**
  * Type ID type for ActorRef.

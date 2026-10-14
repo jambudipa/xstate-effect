@@ -347,7 +347,7 @@ const WALK_PROBLEM_ALLOWANCES: ReadonlyArray<readonly [file: string, problems: R
     `${DRAFT_SCRIPT}:14 createRequire(ROOT + "/package.json") is a loader reference that the walk cannot follow`,
     `${DRAFT_SCRIPT}: "typescript" names a package that no node_modules folder holds`
   ]],
-  [CLEAN_CLI, [`${CLEAN_CLI}:296 import(configPath) names a module the walk cannot read`]],
+  [CLEAN_CLI, [`${CLEAN_CLI}:59 import(configPath) names a module the walk cannot read`]],
   [DOCS_GATE, [`${DOCS_GATE}:77 createRequire(join(root, 'package.json')) is a loader reference that the walk cannot follow`]]
 ]
 
@@ -409,12 +409,15 @@ const git = (cwd: string, args: readonly ["init", "-q"] | readonly ["add", strin
   assert.strictEqual(result.status, 0, `git ${args.join(" ")} in a fixture folder: ${result.stderr}`)
 }
 
+/** The module of the cleanup CLI's pure logic, which the CLI imports and a port test reaches. */
+const CLEAN_CORE = "scripts/clean-core.ts"
+
 /** The cleanup CLI's walk problem, which its allowance names by exact text. */
-const CLEAN_ALLOWANCE = `${CLEAN_CLI}:296 import(configPath) names a module the walk cannot read`
+const CLEAN_ALLOWANCE = `${CLEAN_CLI}:59 import(configPath) names a module the walk cannot read`
 
 /**
  * A fixture repository with the layout of the public repository: the package in packages/core/
- * with the real cleanup CLI and a clean spec, the packages the CLI imports (links to this
+ * with the real cleanup CLI and the module of its pure logic that it imports, and a clean spec, the packages the CLI imports (links to this
  * package's installed dependencies), the repository's `.gitignore` (by default, `node_modules/`
  * alone), and no .claude/, .agents/ or _bmad-output/ folder but for the files that a case plants
  * (paths from the package root). Each call makes a fresh copy, and returns its package root.
@@ -424,6 +427,7 @@ const publicClone = (planted: ReadonlyArray<readonly [string, string]>, gitignor
     const base = yield* fixtureRoot([
       ["repo/.gitignore", gitignore],
       [`repo/packages/core/${CLEAN_CLI}`, readFileSync(join(PKG_ROOT, CLEAN_CLI), "utf8")],
+      [`repo/packages/core/${CLEAN_CORE}`, readFileSync(join(PKG_ROOT, CLEAN_CORE), "utf8")],
       ["repo/packages/core/test/verify/zz-public.spec.ts", CLEAN_SPEC],
       ...planted.map(([path, source]) => [`repo/packages/core/${path}`, source] as const)
     ])

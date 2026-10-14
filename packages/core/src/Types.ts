@@ -1973,8 +1973,9 @@ export interface InvokeDefinition<TContext, TEvent extends EventObject, TMeta = 
   /** The invocation's `systemId`, none when the config gives none. */
   readonly systemId: Option.Option<string>
   /**
-   * The config's input; none when the config gives `undefined` or `null`. A function is called on
-   * entry with the context, the event and `self`, once the src resolves to a logic.
+   * The config's input; none when the config gives none (`undefined`). `null` is a value, which
+   * the child receives as given (upstream). A function is called on entry with the context, the
+   * event and `self`, once the src resolves to a logic.
    */
   readonly input: Option.Option<InvokeInput<TContext, TEvent>>
   /** The transitions the invoked actor's done event takes, as the config writes them. */

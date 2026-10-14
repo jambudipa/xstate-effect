@@ -84,7 +84,7 @@ export interface SetupTypes<
 
 /**
  * Configuration for setup. `types` declares the types only (its values are not read):
- * `context`, `events`, the machine `input`, the `emitted` events, the `children` ids of the
+ * `context`, `events`, the machine `input` and `output`, the `emitted` events, the `children` ids of the
  * setup's actors, the state meta type `meta` and the transition meta type `transitionMeta`
  * (XState 5.33), which defaults to `meta`, and the `tags` its snapshots' `hasTag` takes.
  *
@@ -103,7 +103,8 @@ export interface SetupConfig<
   TInput = NonReducibleUnknown,
   TEmitted extends EventObject = EventObject,
   TChildrenMap extends Record<string, string> = Record<never, never>,
-  TTag extends string = string
+  TTag extends string = string,
+  TOutput = unknown
 > {
   /**
    * The phantom types of the setup (XState `types`), conventionally written `{} as { ... }`.
@@ -122,6 +123,12 @@ export interface SetupConfig<
      * factory gets. Without it, the input type is upstream's default, `NonReducibleUnknown`.
      */
     readonly input?: TInput
+    /**
+     * The output of each machine of this setup (XState `types.output`): the type of its
+     * snapshots' `output` and of its done event's `output`, which its `output` config must give.
+     * Without it, the output type is `unknown`.
+     */
+    readonly output?: TOutput
     /**
      * The events each machine of this setup emits (XState `types.emitted`): `emit` and
      * `enqueue.emit` in its config take only these, and its actors' `on` listeners get them.
@@ -210,13 +217,39 @@ export type SetupConfigMembers<
 >
 
 /**
+ * What the Effect `T` requires; nothing for a value that is not an Effect, and nothing for
+ * `any` (a mock such as `vi.fn()` returns `any`, which would otherwise require `unknown`).
+ */
+type EffectRequirementsOf<T> = 0 extends 1 & T ? never : T extends Effect.Effect<infer _A, infer _E, infer R> ? R : never
+
+/** The services one action implementation needs: what the Effect it returns (or its `exec` returns) requires. */
+type ActionRequirementsOf<TAction> = TAction extends (...args: never) => infer TResult
+  ? EffectRequirementsOf<TResult>
+  : TAction extends { readonly exec: (...args: never) => infer TResult }
+    ? EffectRequirementsOf<TResult>
+    : never
+
+/**
+ * The services the machines of a setup need (their `R`, SD-8): what the Effect each action
+ * returns requires, and the requirements of each actor logic, so `createActor` of a setup
+ * machine asks the caller for them. A record not given (its `string`-keyed default) needs none.
+ *
+ * @since 0.1.0
+ * @category Setup
+ */
+export type SetupRequirements<TActions, TActors> =
+  | (string extends keyof TActions ? never : { readonly [K in keyof TActions]: ActionRequirementsOf<TActions[K]> }[keyof TActions])
+  | (string extends keyof TActors ? never : { readonly [K in keyof TActors]: ActorLogic.RequirementsOf<TActors[K]> }[keyof TActors])
+
+/**
  * The machine `setup(...).createMachine` returns: the setup's types, the route event of the
  * config's routable states (`RouteEventOf<TConfig>`, XState) beside the setup's events, the
  * state schema of the config as written (its state keys and ids, XState `ToStateSchema`), the
  * state value of the config (XState `ToStateValue`), the children its snapshots hold
  * (`TChildren`, see {@link SetupChildren}), and what its `provide` takes (`TProvided`, see
- * {@link SetupProvideImplementations}). A config typed as a whole (explicit type arguments)
- * gives the schema of its state keys and the wide `StateValue`.
+ * {@link SetupProvideImplementations}), and the services its implementations need
+ * (`TRequirements`, see {@link SetupRequirements}). A config typed as a whole (explicit type
+ * arguments) gives the schema of its state keys and the wide `StateValue`.
  *
  * @since 0.1.0
  * @category Setup
@@ -233,7 +266,8 @@ export type SetupMachine<
   TConfig,
   TProvided = MachineImplementations<TContext, TEvent>,
   TChildren extends Record<string, unknown> = Record<string, AnyActorRef>,
-  TTag extends string = string
+  TTag extends string = string,
+  TRequirements = never
 > = StateMachine<
   string,
   TContext,
@@ -241,7 +275,7 @@ export type SetupMachine<
   TInput,
   TOutput,
   TEmitted,
-  never,
+  TRequirements,
   TStateMeta,
   TTransitionMeta,
   SetupStateSchema<TConfig, TStateKeys>,
@@ -281,9 +315,12 @@ export type SetupCreateMachine<
   TSetupInput = NonReducibleUnknown,
   TSetupEmitted extends EventObject = EventObject,
   TChildrenMap extends Record<string, string> = Record<never, never>,
-  TTag extends string = string
+  TTag extends string = string,
+  TSetupOutput = unknown,
+  TRequirements = never
 > = <
-  TOutput = unknown,
+  // The setup's `types.output`, as upstream fixes the output type in `setup`
+  TOutput = TSetupOutput,
   TEmitted extends EventObject = TSetupEmitted,
   TStateKeys = Readonly<Record<string, unknown>>,
   const TConfig extends SetupConfigMembers<TContext, TEvent, TStateMeta, TTransitionMeta, TNames> =
@@ -302,7 +339,8 @@ export type SetupCreateMachine<
   TConfig,
   TProvided,
   SetupChildren<TChildrenMap, TNames["actorLogic"], TConfig>,
-  TTag
+  TTag,
+  TRequirements
 >
 
 /**
@@ -382,13 +420,15 @@ const setupCreateMachine = <
   TSetupInput,
   TSetupEmitted extends EventObject,
   TChildrenMap extends Record<string, string>,
-  TTag extends string
+  TTag extends string,
+  TSetupOutput,
+  TRequirements
 >(
   create: <TInput, TOutput, TEmitted extends EventObject>(
     config: MachineConfig<TContext, TEvent, TInput, TOutput, TStateMeta, TTransitionMeta>
   ) => StateMachine<string, TContext, TEvent, TInput, TOutput, TEmitted, never, TStateMeta, TTransitionMeta>
-): SetupCreateMachine<TContext, TEvent, TStateMeta, TTransitionMeta, TNames, TProvided, TSetupInput, TSetupEmitted, TChildrenMap, TTag> =>
-  create as unknown as SetupCreateMachine<TContext, TEvent, TStateMeta, TTransitionMeta, TNames, TProvided, TSetupInput, TSetupEmitted, TChildrenMap, TTag>
+): SetupCreateMachine<TContext, TEvent, TStateMeta, TTransitionMeta, TNames, TProvided, TSetupInput, TSetupEmitted, TChildrenMap, TTag, TSetupOutput, TRequirements> =>
+  create as unknown as SetupCreateMachine<TContext, TEvent, TStateMeta, TTransitionMeta, TNames, TProvided, TSetupInput, TSetupEmitted, TChildrenMap, TTag, TSetupOutput, TRequirements>
 
 /**
  * Return type of setup.
@@ -412,7 +452,8 @@ export interface SetupReturn<
   TInput = NonReducibleUnknown,
   TEmitted extends EventObject = EventObject,
   TChildrenMap extends Record<string, string> = Record<never, never>,
-  TTag extends string = string
+  TTag extends string = string,
+  TOutput = unknown
 > extends SetupHelpers<TContext, TEvent, SetupNames<TActions, TGuards, TDelays, TActors, TEmitted, TTag, TChildrenMap>> {
   /**
    * Creates a state machine with the configured types and implementations.
@@ -455,7 +496,9 @@ export interface SetupReturn<
     TInput,
     TEmitted,
     TChildrenMap,
-    TTag
+    TTag,
+    TOutput,
+    SetupRequirements<TActions, TActors>
   >
 
   /**
@@ -525,7 +568,8 @@ export interface SetupReturn<
     TInput,
     TEmitted,
     TChildrenMap,
-    TTag
+    TTag,
+    TOutput
   >
 
   /**
@@ -1052,11 +1096,12 @@ const buildSetup = <
   TInput,
   TEmitted extends EventObject,
   TChildrenMap extends Record<string, string>,
-  TTag extends string
+  TTag extends string,
+  TOutput = unknown
 >(
   implementations: SetupImplementations<TActors, TActions, TGuards, TDelays>,
   schemas: Option.Option<unknown>
-): SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag> => {
+): SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag, TOutput> => {
   // The records are the machine's implementations; only their types are the setup's
   const machineImplementations = implementations as MachineImplementations<TContext, TEvent>
   return {
@@ -1072,12 +1117,14 @@ const buildSetup = <
       TInput,
       TEmitted,
       TChildrenMap,
-      TTag
+      TTag,
+      TOutput,
+      SetupRequirements<TActions, TActors>
     >(
-      <TMachineInput, TOutput, TEmitted extends EventObject>(
-        machineConfig: MachineConfig<TContext, TEvent, TMachineInput, TOutput, TStateMeta, TTransitionMeta>
+      <TMachineInput, TMachineOutput, TEmitted extends EventObject>(
+        machineConfig: MachineConfig<TContext, TEvent, TMachineInput, TMachineOutput, TStateMeta, TTransitionMeta>
       ) =>
-        SM.make<TContext, TEvent, TMachineInput, TOutput, TEmitted, never, TStateMeta, TTransitionMeta>(
+        SM.make<TContext, TEvent, TMachineInput, TMachineOutput, TEmitted, never, TStateMeta, TTransitionMeta>(
           Option.match(schemas, { onNone: () => machineConfig, onSome: (given) => ({ ...machineConfig, schemas: given }) }),
           machineImplementations
         )
@@ -1096,7 +1143,8 @@ const buildSetup = <
         TInput,
         TEmitted,
         TChildrenMap,
-        TTag
+        TTag,
+        TOutput
       >(mergeImplementations<TContext, TEvent, TActors>(implementations, extension), schemas) as never,
     createStateConfig: (config) => config,
     createAction: (action) => action,
@@ -1197,14 +1245,16 @@ export const setup = <
   // The names of the record's actions, from the keys of its `actions` record: a built-in
   // action of the record may name a sibling, and no other action (upstream
   // `ToParameterizedObject<TActions>`)
-  TActionNames extends string = never
+  TActionNames extends string = never,
+  // The setup's `types.output` (upstream `SetupTypes.output`), last so no existing type argument moves
+  TOutput = unknown
 >(
   config:
-    & SetupConfig<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag>
+    & SetupConfig<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag, TOutput>
     & SetupChildrenActors<NoInfer<TChildrenMap>>
     & { readonly actions?: Readonly<Record<TActionNames, unknown>> }
-): SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag> =>
-  buildSetup<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag>(
+): SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag, TOutput> =>
+  buildSetup<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag, TOutput>(
     {
       // An absent record is empty: the type of its default (no names) says the same
       actors: config.actors ?? ({} as TActors),

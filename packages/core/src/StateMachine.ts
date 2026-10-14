@@ -85,7 +85,7 @@ import type {
  * @since 0.1.0
  * @category Type ID
  */
-export const StateMachineTypeId: unique symbol = Symbol.for("@xstate-effect/StateMachine")
+export const StateMachineTypeId: unique symbol = Symbol.for("@jambudipa/xstate-effect/StateMachine")
 
 /**
  * Type ID type for StateMachine.
@@ -1130,7 +1130,9 @@ const initializeTransitions = <TContext, TEvent extends EventObject, TStateMeta,
           src: inv.src,
           id,
           systemId: Option.fromNullishOr(inv.systemId),
-          input: Option.fromNullishOr(inv.input),
+          // Only an absent input is none: `null` is a value the child receives (upstream
+          // keeps the config's input as given)
+          input: Option.fromUndefinedOr(inv.input),
           // The config's transitions as written, each key there when the config has it
           // (upstream spreads the invoke config)
           ...(Object.hasOwn(inv, "onDone") ? { onDone: inv.onDone as ResultTransitions | undefined } : {}),

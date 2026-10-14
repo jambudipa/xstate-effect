@@ -581,6 +581,17 @@ amendment changes its decision from that date on.
   sync-to-Effect change). The port's existing synchronous `makeSimulatedClock` factory stays
   as a port extra (COMPAT-4). `waitFor` timeouts run on the Effect clock, not the
   SimulatedClock, as upstream uses the global timer.
+  Amendment (2026-10-12, owner: "/goal Fix those five issues"): a timeout callback that
+  throws no longer stops the clock. The throw still reaches the caller of `increment` or `set`
+  at the same point, and the next `increment` or `set` fires the timeouts still due; upstream's
+  clock stays marked as flushing after the throw and fires no later timeout. `src/` allows no
+  `try` statement, so `makeSimulatedClock` keeps no flag while a callback runs: a count of the
+  changes to its timer table and its time replaces upstream's two flags. A callback that sets
+  or clears a timeout still makes the flush sort again before the next timeout, but an
+  `increment` or `set` made inside a callback fires the timeouts due then inside that call,
+  where upstream fires them after the callback returns. The `SimulatedClock` class already
+  resets its flag in `Effect.ensuring`: the throw is a defect of its Effect, and a call made
+  inside a callback keeps upstream's deferral. Ledger row DEV-75.
 
 ## Task-phase plan (SD-2)
 

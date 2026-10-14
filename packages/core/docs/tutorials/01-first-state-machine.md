@@ -57,7 +57,9 @@ Let's break this down:
 ### The `setup` Function
 
 ```typescript
-setup({
+import { setup } from "@jambudipa/xstate-effect"
+
+export const toggleSetup = setup({
   types: {} as {
     context: {}
     events: { type: "TOGGLE" }
@@ -72,15 +74,26 @@ The `setup` function creates a type-safe factory for your machine. The `types` o
 ### The `createMachine` Method
 
 ```typescript
-.createMachine({
+import { setup } from "@jambudipa/xstate-effect"
+
+export const toggleMachine = setup({
+  types: {} as {
+    context: {}
+    events: { type: "TOGGLE" }
+  }
+}).createMachine({
   id: "toggle",
   initial: "inactive",
   context: {},
-  states: { ... }
+  states: {
+    // The next section adds the transitions
+    inactive: {},
+    active: {}
+  }
 })
 ```
 
-This creates the actual machine definition:
+Call `createMachine` on the result of `setup`. This creates the actual machine definition:
 - `id`: A unique identifier for the machine
 - `initial`: The starting state
 - `context`: The initial data
@@ -89,18 +102,30 @@ This creates the actual machine definition:
 ### State Definitions
 
 ```typescript
-states: {
-  inactive: {
-    on: {
-      TOGGLE: { target: "active" }
-    }
-  },
-  active: {
-    on: {
-      TOGGLE: { target: "inactive" }
+import { setup } from "@jambudipa/xstate-effect"
+
+export const toggleMachine = setup({
+  types: {} as {
+    context: {}
+    events: { type: "TOGGLE" }
+  }
+}).createMachine({
+  id: "toggle",
+  initial: "inactive",
+  context: {},
+  states: {
+    inactive: {
+      on: {
+        TOGGLE: { target: "active" }
+      }
+    },
+    active: {
+      on: {
+        TOGGLE: { target: "inactive" }
+      }
     }
   }
-}
+})
 ```
 
 Each state defines which events it responds to in the `on` property. When a `TOGGLE` event is received:
@@ -143,10 +168,10 @@ const program = Effect.gen(function* () {
   const actor = yield* createActor(toggleMachine)
 
   // Start the actor
-  yield* actor.start()
+  yield* actor.start
 
   // Get the initial state
-  const initialSnapshot = yield* actor.getSnapshot()
+  const initialSnapshot = yield* actor.getSnapshot
   console.log("Initial state:", initialSnapshot.value)
   // Output: Initial state: inactive
 
@@ -154,44 +179,70 @@ const program = Effect.gen(function* () {
   yield* actor.send({ type: "TOGGLE" })
 
   // Check the new state
-  const afterToggle = yield* actor.getSnapshot()
+  const afterToggle = yield* actor.getSnapshot
   console.log("After toggle:", afterToggle.value)
   // Output: After toggle: active
 
   // Toggle again
   yield* actor.send({ type: "TOGGLE" })
 
-  const final = yield* actor.getSnapshot()
+  const final = yield* actor.getSnapshot
   console.log("Final state:", final.value)
   // Output: Final state: inactive
 })
 
-// Run the program
-void Effect.runPromise(program)
+// Run the program. Effect.scoped gives the actor a scope: when the program ends, the scope
+// closes and the actor stops.
+void Effect.runPromise(Effect.scoped(program))
 ```
 
 ### Key Concepts
 
-1. **`createActor(machine)`**: Creates a new actor instance from a machine definition
-2. **`actor.start()`**: Starts the actor, entering the initial state
-3. **`actor.send(event)`**: Sends an event to the actor
-4. **`actor.getSnapshot()`**: Returns the current state of the actor
+1. **`createActor(machine)`**: An Effect that creates a new actor from a machine definition. The actor lives in the caller's `Scope`, so wrap the program in `Effect.scoped`
+2. **`actor.start`**: An Effect that starts the actor and enters the initial state
+3. **`actor.send(event)`**: Returns an Effect that sends an event to the actor. The Effect completes when the actor has processed the event
+4. **`actor.getSnapshot`**: An Effect that gives the current state of the actor
+
+`start`, `getSnapshot` and the result of `send` are Effects, not functions that return Promises: run each one with `yield*` inside `Effect.gen`.
 
 ## Step 3: Understanding Snapshots
 
 The snapshot contains all information about the actor's current state:
 
 ```typescript
-const snapshot = yield* actor.getSnapshot()
+import { setup, createActor } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
 
-// The current state value
-snapshot.value // "inactive" | "active"
+const toggleMachine = setup({
+  types: {} as {
+    context: {}
+    events: { type: "TOGGLE" }
+  }
+}).createMachine({
+  id: "toggle",
+  initial: "inactive",
+  context: {},
+  states: {
+    inactive: { on: { TOGGLE: { target: "active" } } },
+    active: { on: { TOGGLE: { target: "inactive" } } }
+  }
+})
 
-// The context (data)
-snapshot.context // {}
+export const inspectSnapshot = Effect.gen(function* () {
+  const actor = yield* createActor(toggleMachine)
+  yield* actor.start
 
-// The status of the actor
-snapshot.status // "active" | "done" | "error" | "stopped"
+  const snapshot = yield* actor.getSnapshot
+
+  // The current state value
+  console.log(snapshot.value) // "inactive" | "active"
+
+  // The context (data)
+  console.log(snapshot.context) // {}
+
+  // The status of the actor
+  console.log(snapshot.status) // "active" | "done" | "error" | "stopped"
+})
 ```
 
 ## Complete Example
@@ -230,26 +281,27 @@ const toggleMachine = setup({
 // 2. Create and run an actor
 const program = Effect.gen(function* () {
   const actor = yield* createActor(toggleMachine)
-  yield* actor.start()
+  yield* actor.start
 
   console.log("Toggle machine started!")
 
   // Get initial state
-  let snapshot = yield* actor.getSnapshot()
+  let snapshot = yield* actor.getSnapshot
   console.log(`State: ${snapshot.value}`) // inactive
 
   // Toggle on
   yield* actor.send({ type: "TOGGLE" })
-  snapshot = yield* actor.getSnapshot()
+  snapshot = yield* actor.getSnapshot
   console.log(`State: ${snapshot.value}`) // active
 
   // Toggle off
   yield* actor.send({ type: "TOGGLE" })
-  snapshot = yield* actor.getSnapshot()
+  snapshot = yield* actor.getSnapshot
   console.log(`State: ${snapshot.value}`) // inactive
 })
 
-void Effect.runPromise(program).then(() => {
+// 3. Run the program in a scope; the actor stops when the scope closes
+void Effect.runPromise(Effect.scoped(program)).then(() => {
   console.log("Done!")
 })
 ```

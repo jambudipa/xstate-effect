@@ -7,13 +7,13 @@ This guide shows patterns for retrying failed operations in your state machines.
 Track retry attempts in context:
 
 ```typescript
-import { setup, createActor, fromPromise, assign, guard } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
+import { setup, fromPromise, assign } from "@jambudipa/xstate-effect"
+import { Option } from "effect"
 
-const fetchWithRetry = setup({
+export const fetchWithRetry = setup({
   types: {} as {
     context: {
-      data: any
+      data: unknown
       error: string | null
       retryCount: number
       maxRetries: number
@@ -21,13 +21,14 @@ const fetchWithRetry = setup({
     events: { type: "FETCH" } | { type: "RETRY" }
   },
   guards: {
-    canRetry: guard("canRetry", ({ context }) => context.retryCount < context.maxRetries)
+    canRetry: ({ context }) => context.retryCount < context.maxRetries
   },
   actors: {
     fetchData: fromPromise(async () => {
       const response = await fetch("/api/data")
       if (!response.ok) throw new Error("Request failed")
-      return response.json()
+      const data: unknown = await response.json()
+      return data
     })
   },
   actions: {
@@ -36,12 +37,11 @@ const fetchWithRetry = setup({
     }),
     resetRetry: assign({ retryCount: 0 }),
     setError: assign({
-      error: ({ event }) =>
-        event.type === "xstate.error.actor.fetcher" ? event.error.message : null
+      error: (_, params: { error: unknown }) =>
+        params.error instanceof Error ? params.error.message : String(params.error)
     }),
     setData: assign({
-      data: ({ event }) =>
-        event.type === "xstate.done.actor.fetcher" ? event.output : null
+      data: (_, params: { data: unknown }) => params.data
     })
   }
 }).createMachine({
@@ -55,26 +55,25 @@ const fetchWithRetry = setup({
   },
   states: {
     idle: {
-      on: { FETCH: "fetching" }
+      on: { FETCH: { target: "fetching", actions: "resetRetry" } }
     },
     fetching: {
-      entry: "resetRetry",
       invoke: {
         id: "fetcher",
         src: "fetchData",
         onDone: {
           target: "success",
-          actions: "setData"
+          actions: { type: "setData", params: ({ event }) => ({ data: Option.getOrNull(event.output) }) }
         },
         onError: [
           {
             guard: "canRetry",
             target: "retrying",
-            actions: ["setError", "incrementRetry"]
+            actions: [{ type: "setError", params: ({ event }) => ({ error: event.error }) }, "incrementRetry"]
           },
           {
             target: "failure",
-            actions: "setError"
+            actions: { type: "setError", params: ({ event }) => ({ error: event.error }) }
           }
         ]
       }
@@ -85,21 +84,29 @@ const fetchWithRetry = setup({
       }
     },
     success: {
-      on: { FETCH: "fetching" }
+      on: { FETCH: { target: "fetching", actions: "resetRetry" } }
     },
     failure: {
-      on: { RETRY: "fetching" }
+      on: { RETRY: { target: "fetching", actions: "resetRetry" } }
     }
   }
 })
 ```
 
+The named actions of a `setup` see only the machine's own events, so the done and error
+events of the invocation pass their data to `setData` and `setError` as params. The `output`
+of a done event is an `Option`. The `FETCH` and `RETRY` transitions reset the counter: a reset
+on entry to `fetching` would also run on each automatic retry, and the count would never reach
+the limit.
+
 ## Exponential Backoff
 
-Increase delay between retries:
+Increase delay between retries. Named delays belong to `setup`, beside the guards and actors:
 
 ```typescript
-const exponentialBackoffMachine = setup({
+import { setup, fromPromise, assign } from "@jambudipa/xstate-effect"
+
+export const exponentialBackoffMachine = setup({
   types: {} as {
     context: {
       retryCount: number
@@ -109,10 +116,20 @@ const exponentialBackoffMachine = setup({
     events: { type: "FETCH" }
   },
   guards: {
-    canRetry: guard("canRetry", ({ context }) => context.retryCount < context.maxRetries)
+    canRetry: ({ context }) => context.retryCount < context.maxRetries
   },
   actors: {
-    fetchData: fromPromise(async () => { /* ... */ })
+    fetchData: fromPromise(async () => {
+      const response = await fetch("/api/data")
+      if (!response.ok) throw new Error("Request failed")
+      const data: unknown = await response.json()
+      return data
+    })
+  },
+  delays: {
+    // The entry action of "waiting" counts the retry before the delay is computed
+    RETRY_DELAY: ({ context }) =>
+      context.baseDelay * Math.pow(2, context.retryCount - 1)
   }
 }).createMachine({
   id: "exponentialBackoff",
@@ -146,11 +163,6 @@ const exponentialBackoffMachine = setup({
     success: {},
     failure: {}
   }
-}, {
-  delays: {
-    RETRY_DELAY: ({ context }) =>
-      context.baseDelay * Math.pow(2, context.retryCount)
-  }
 })
 ```
 
@@ -160,28 +172,24 @@ Use Effect's retry capabilities inside fromEffect:
 
 ```typescript
 import { setup, fromEffect, assign } from "@jambudipa/xstate-effect"
-import { Effect, Schedule } from "effect"
+import { Effect, Option, Schedule } from "effect"
 
 const fetchWithEffectRetry = fromEffect(() =>
   Effect.gen(function* () {
     const response = yield* Effect.tryPromise(() => fetch("/api/data"))
     if (!response.ok) {
-      yield* Effect.fail(new Error("Request failed"))
+      return yield* Effect.fail(new Error("Request failed"))
     }
-    return yield* Effect.tryPromise(() => response.json())
+    return yield* Effect.tryPromise((): Promise<unknown> => response.json())
   }).pipe(
     // Retry up to 3 times with exponential backoff
-    Effect.retry(
-      Schedule.exponential("1 second").pipe(
-        Schedule.compose(Schedule.recurs(3))
-      )
-    )
+    Effect.retry({ schedule: Schedule.exponential("1 second"), times: 3 })
   )
 )
 
-const machine = setup({
+export const machine = setup({
   types: {} as {
-    context: { data: any }
+    context: { data: unknown }
     events: { type: "FETCH" }
   },
   actors: {
@@ -200,7 +208,7 @@ const machine = setup({
         src: "fetch",
         onDone: {
           target: "success",
-          actions: assign({ data: ({ event }) => event.output })
+          actions: assign({ data: ({ event }) => Option.getOrNull(event.output) })
         },
         onError: "failure"
       }
@@ -216,13 +224,20 @@ const machine = setup({
 Add randomness to prevent thundering herd:
 
 ```typescript
-delays: {
-  RETRY_DELAY: ({ context }) => {
-    const baseDelay = context.baseDelay * Math.pow(2, context.retryCount)
-    const jitter = Math.random() * 0.3 * baseDelay // Up to 30% jitter
-    return baseDelay + jitter
+import { setup } from "@jambudipa/xstate-effect"
+
+export const jitterSetup = setup({
+  types: {} as {
+    context: { retryCount: number; baseDelay: number }
+  },
+  delays: {
+    RETRY_DELAY: ({ context }) => {
+      const baseDelay = context.baseDelay * Math.pow(2, context.retryCount)
+      const jitter = Math.random() * 0.3 * baseDelay // Up to 30% jitter
+      return baseDelay + jitter
+    }
   }
-}
+})
 ```
 
 ## Manual Retry Trigger
@@ -230,13 +245,20 @@ delays: {
 Let users decide when to retry:
 
 ```typescript
-const manualRetryMachine = setup({
+import { setup, fromPromise, assign } from "@jambudipa/xstate-effect"
+
+export const manualRetryMachine = setup({
   types: {} as {
     context: { error: string | null }
     events: { type: "FETCH" } | { type: "RETRY" }
   },
   actors: {
-    fetchData: fromPromise(async () => { /* ... */ })
+    fetchData: fromPromise(async () => {
+      const response = await fetch("/api/data")
+      if (!response.ok) throw new Error("Request failed")
+      const data: unknown = await response.json()
+      return data
+    })
   }
 }).createMachine({
   id: "manualRetry",
@@ -252,7 +274,9 @@ const manualRetryMachine = setup({
         onDone: "success",
         onError: {
           target: "failure",
-          actions: assign({ error: ({ event }) => event.error.message })
+          actions: assign({
+            error: ({ event }) => event.error instanceof Error ? event.error.message : String(event.error)
+          })
         }
       }
     },
@@ -271,28 +295,35 @@ const manualRetryMachine = setup({
 
 ## Conditional Retry Based on Error Type
 
-Only retry certain errors:
+Only retry certain errors. A named guard sees only the machine's own events, so the error
+event passes its error to `isRetryableError` as params:
 
 ```typescript
-const conditionalRetryMachine = setup({
+import { setup, fromPromise, assign, and } from "@jambudipa/xstate-effect"
+
+const isRetryable = (error: unknown): boolean =>
+  error instanceof Error &&
+  // Only retry network errors, not validation errors
+  (error.name === "NetworkError" ||
+    error.message.includes("timeout") ||
+    error.message.includes("ECONNREFUSED"))
+
+export const conditionalRetryMachine = setup({
   types: {} as {
     context: { retryCount: number }
     events: { type: "FETCH" }
   },
   guards: {
-    isRetryableError: guard("isRetryableError", ({ event }) => {
-      if (event.type !== "xstate.error.actor.fetcher") return false
-      const error = event.error
-
-      // Only retry network errors, not validation errors
-      return error.name === "NetworkError" ||
-             error.message.includes("timeout") ||
-             error.message.includes("ECONNREFUSED")
-    }),
-    canRetry: guard("canRetry", ({ context }) => context.retryCount < 3)
+    isRetryableError: (_, params: { error: unknown }) => isRetryable(params.error),
+    canRetry: ({ context }) => context.retryCount < 3
   },
   actors: {
-    fetchData: fromPromise(async () => { /* ... */ })
+    fetchData: fromPromise(async () => {
+      const response = await fetch("/api/data")
+      if (!response.ok) throw new Error("Request failed")
+      const data: unknown = await response.json()
+      return data
+    })
   }
 }).createMachine({
   id: "conditionalRetry",
@@ -309,7 +340,10 @@ const conditionalRetryMachine = setup({
         onDone: "success",
         onError: [
           {
-            guard: and(["isRetryableError", "canRetry"]),
+            guard: and([
+              { type: "isRetryableError", params: ({ event }) => ({ error: event.error }) },
+              "canRetry"
+            ]),
             target: "retrying",
             actions: assign({ retryCount: ({ context }) => context.retryCount + 1 })
           },
@@ -329,19 +363,26 @@ const conditionalRetryMachine = setup({
 ## Complete Pattern: Robust Fetch with Retry
 
 ```typescript
-import { setup, createActor, fromPromise, assign, guard, and } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
+import { setup, fromPromise, assign } from "@jambudipa/xstate-effect"
+import { Option } from "effect"
+
+class HttpError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message)
+    this.name = "HttpError"
+  }
+}
 
 interface FetchContext {
   url: string
-  data: any
+  data: unknown
   error: { message: string; code?: string } | null
   retryCount: number
   maxRetries: number
   lastAttempt: number | null
 }
 
-const robustFetchMachine = setup({
+export const robustFetchMachine = setup({
   types: {} as {
     context: FetchContext
     events:
@@ -352,20 +393,18 @@ const robustFetchMachine = setup({
     input: { maxRetries?: number }
   },
   guards: {
-    canRetry: guard("canRetry", ({ context }) =>
-      context.retryCount < context.maxRetries
-    ),
-    hasUrl: guard("hasUrl", ({ context }) => context.url.length > 0)
+    canRetry: ({ context }) =>
+      context.retryCount < context.maxRetries,
+    hasUrl: ({ event }) => event.type === "FETCH" && event.url.length > 0
   },
   actors: {
     fetchData: fromPromise(async ({ input }: { input: { url: string } }) => {
       const response = await fetch(input.url)
       if (!response.ok) {
-        const error = new Error(`HTTP ${response.status}`)
-        ;(error as any).code = `HTTP_${response.status}`
-        throw error
+        throw new HttpError(`HTTP_${response.status}`, `HTTP ${response.status}`)
       }
-      return response.json()
+      const data: unknown = await response.json()
+      return data
     })
   },
   actions: {
@@ -373,19 +412,15 @@ const robustFetchMachine = setup({
       url: ({ event }) => event.type === "FETCH" ? event.url : ""
     }),
     setData: assign({
-      data: ({ event }) =>
-        event.type === "xstate.done.actor.fetcher" ? event.output : null,
+      data: (_, params: { data: unknown }) => params.data,
       error: null
     }),
     setError: assign({
-      error: ({ event }) => {
-        if (event.type === "xstate.error.actor.fetcher") {
-          return {
-            message: event.error.message,
-            code: (event.error as any).code
-          }
+      error: (_, params: { error: unknown }) => {
+        if (params.error instanceof HttpError) {
+          return { message: params.error.message, code: params.error.code }
         }
-        return null
+        return { message: params.error instanceof Error ? params.error.message : String(params.error) }
       },
       lastAttempt: () => Date.now()
     }),
@@ -398,6 +433,14 @@ const robustFetchMachine = setup({
       retryCount: 0,
       lastAttempt: null
     })
+  },
+  delays: {
+    BACKOFF: ({ context }) => {
+      const base = 1000
+      const delay = base * Math.pow(2, context.retryCount - 1)
+      const jitter = Math.random() * 0.3 * delay
+      return Math.min(delay + jitter, 30000) // Cap at 30 seconds
+    }
   }
 }).createMachine({
   id: "robustFetch",
@@ -427,17 +470,17 @@ const robustFetchMachine = setup({
         input: ({ context }) => ({ url: context.url }),
         onDone: {
           target: "success",
-          actions: "setData"
+          actions: { type: "setData", params: ({ event }) => ({ data: Option.getOrNull(event.output) }) }
         },
         onError: [
           {
             guard: "canRetry",
             target: "retrying",
-            actions: ["setError", "incrementRetry"]
+            actions: [{ type: "setError", params: ({ event }) => ({ error: event.error }) }, "incrementRetry"]
           },
           {
             target: "failure",
-            actions: "setError"
+            actions: { type: "setError", params: ({ event }) => ({ error: event.error }) }
           }
         ]
       },
@@ -477,15 +520,6 @@ const robustFetchMachine = setup({
           actions: "resetState"
         }
       }
-    }
-  }
-}, {
-  delays: {
-    BACKOFF: ({ context }) => {
-      const base = 1000
-      const delay = base * Math.pow(2, context.retryCount - 1)
-      const jitter = Math.random() * 0.3 * delay
-      return Math.min(delay + jitter, 30000) // Cap at 30 seconds
     }
   }
 })

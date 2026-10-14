@@ -9,17 +9,17 @@ The following examples from the original XState repository cannot be directly po
 
 Uses `@xstate/store` to create a simple counter store. This is a simpler reactive store pattern, not a full state machine.
 
-```typescript
-// Original uses:
-import { createStore } from '@xstate/store';
+The original passes this config to `createStore` from `@xstate/store`. That library is not a dependency of this package, so the sample shows only the config: a context and one update function for each event, with no states and no transitions.
 
-const counterStore = createStore({
+```typescript
+// The config the original passes to `createStore`
+export const counterStoreConfig = {
   context: { count: 0 },
   on: {
-    increment: (context) => ({ count: context.count + 1 }),
-    decrement: (context) => ({ count: context.count - 1 }),
+    increment: (context: { count: number }) => ({ count: context.count + 1 }),
+    decrement: (context: { count: number }) => ({ count: context.count - 1 }),
   }
-});
+};
 ```
 
 **Why it cannot be ported:** `@xstate/store` is a lightweight reactive store that doesn't use state machines. It's a different paradigm focused on simple state updates without states, transitions, or the other features of state machines.

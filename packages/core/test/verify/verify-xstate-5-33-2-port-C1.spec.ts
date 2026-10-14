@@ -13,6 +13,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Option, Scope, Stream, SubscriptionRef } from "effect"
 import {
+  active,
   assign,
   createActor,
   createMachine,
@@ -20,6 +21,7 @@ import {
   fromCallback,
   fromPromise,
   getInitialSnapshot,
+  makeActorLogic,
   type SnapshotType,
 } from "../../src/index.js"
 import { initialStateNotFound } from "./upstream-messages.js"
@@ -256,6 +258,44 @@ describe("C1 createActor creates an actor from any logic", () => {
       assert.deepStrictEqual(cleanups, ["cleanup"])
       assert.strictEqual((yield* SubscriptionRef.get(callbackActor.snapshot)).status, "stopped")
       assert.strictEqual((yield* SubscriptionRef.get(machineActor.snapshot)).status, "stopped")
+    })
+  )
+
+  it.effect("[C1] a custom logic that gives status stopped for an event still takes each later event, as upstream's update has no case for stopped", () =>
+    Effect.gen(function* () {
+      const seen: Array<string> = []
+      const logic = makeActorLogic<SnapshotType, { readonly type: "HALT" | "AFTER" }, unknown>({
+        transition: (snapshot, event) =>
+          Effect.sync(() => {
+            seen.push(event.type)
+            const stopped: SnapshotType = { ...snapshot, status: "stopped" }
+            return event.type === "HALT" ? stopped : snapshot
+          }),
+        getInitialSnapshot: () => Effect.succeed(active()),
+        getPersistedSnapshot: (snapshot) => Effect.succeed(snapshot),
+      })
+      const actor = yield* createActor(logic)
+      yield* actor.start
+
+      // Upstream `_process` hands every event to the logic; only `done` and `error` end the actor
+      yield* actor.send({ type: "HALT" })
+      yield* actor.send({ type: "AFTER" })
+      assert.deepStrictEqual(seen, ["HALT", "AFTER"])
+      assert.strictEqual((yield* SubscriptionRef.get(actor.snapshot)).status, "stopped")
+    })
+  )
+
+  it.effect("[C1] an actor restored from a stopped machine snapshot takes each event through the machine, which moves it and keeps the status", () =>
+    Effect.gen(function* () {
+      const machine = goMachine(() => undefined)
+      const stopped = yield* machine.resolveState({ value: "idle", context: { count: 1 }, status: "stopped" })
+      const actor = yield* createActor(machine, { snapshot: yield* machine.getPersistedSnapshot(stopped) })
+      yield* actor.start
+
+      // Upstream `macrostep` reads no status before the first microstep; only its loop needs `active`
+      yield* actor.send({ type: "GO" })
+      const snapshot = yield* SubscriptionRef.get(actor.snapshot)
+      assert.deepStrictEqual([snapshot.value, snapshot.status], ["busy", "stopped"])
     })
   )
 })

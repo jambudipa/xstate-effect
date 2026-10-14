@@ -68,6 +68,12 @@ test('the root files must carry the upkeep marker', () => {
   mkdirSync(join(root, 'src'), { recursive: true });
 
   assert.equal(auditMaintenance(root).length, 3);
+  // Each of the three root files is named: none of them exists yet
+  assert.deepEqual(auditMaintenance(root), [
+    { file: 'README.md', reason: 'file missing' },
+    { file: 'AGENTS.md', reason: 'file missing' },
+    { file: 'CLAUDE.md', reason: 'file missing' },
+  ]);
 
   writeFileSync(join(root, 'README.md'), `Repo docs.\n\n${MAINTENANCE_MARKER}\nKeep them current.\n`);
   writeFileSync(join(root, 'AGENTS.md'), '@README.md\n');
@@ -100,6 +106,8 @@ test('overload signatures need blocks; the implementation they share does not', 
   ].join('\n');
   // The second signature is undocumented; the implementation is exempt, so exactly one gap.
   assert.deepEqual(auditDeclarations(ts, 'overloads.ts', source).length, 1);
+  // That gap is the second signature (line 3), not the documented first or the implementation.
+  assert.deepEqual(auditDeclarations(ts, 'overloads.ts', source), [{ line: 3, kind: 'function', name: 'over' }]);
 });
 
 test('a --dir that matches nothing fails loudly instead of reporting clean', () => {
