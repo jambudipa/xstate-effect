@@ -105,8 +105,10 @@ export const pathsFromEventsIn = <TSnapshot extends Snapshot, TEvent extends Eve
 /**
  * The path that the given events take from the start state (`fromState`, else the initial
  * snapshot for `input`), as one path; no path when `toState` does not hold for the state it
- * ends in. Fails with `Invalid transition from <state> with <event>` when an event of the
- * sequence leads nowhere from the state it meets, and as {@link getAdjacencyMap} fails.
+ * ends in. The sequence is the traversal's `events`, so an event the state it meets does not
+ * take leaves the path in that state. Fails with `Invalid transition from <state> with <event>`
+ * when an event has no adjacency entry from the state it meets (`filterEvents` left it out),
+ * and as {@link getAdjacencyMap} fails.
  *
  * @example
  * ```ts

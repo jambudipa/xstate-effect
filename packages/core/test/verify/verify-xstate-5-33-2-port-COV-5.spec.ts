@@ -18,13 +18,16 @@
  * - A path test that fails with a value that is not an `Error` fails with that value as it
  *   is: upstream appends the trace to `err.message`, which only an `Error` has.
  * - `serializeSnapshot` writes the value and the context of a snapshot, each only when the
- *   snapshot has it; `toDirectedGraph` gives a targetless transition an edge to its own node.
+ *   snapshot has it; `toDirectedGraph` gives a targetless transition an edge to its own node. * - `getPathsFromEvents` gives every event of the sequence an adjacency entry, so an event the
+ *   state does not take keeps the path in that state; an event `filterEvents` leaves out fails
+ *   the Effect (ledger DEV-49).
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Option } from "effect"
+import { Effect, Exit, Option } from "effect"
 import {
   createTestModel,
   getPathsFromEvents,
+  InvalidEventSequenceError,
   getShortestPaths,
   serializeSnapshot,
   type StatePath,
@@ -280,4 +283,27 @@ describe("COV-5 the graph entry point describes, keys and traces the paths of an
     })
     assert.strictEqual(graph.children[0]?.edges[0]?.target, machine.root.states.idle)
   })
+
+  it.effect("[COV-5] getPathsFromEvents: an event the state does not take leaves the path in that state, as upstream; one that filterEvents leaves out fails with InvalidEventSequenceError (ledger DEV-49)", () =>
+    Effect.gen(function* () {
+      const light = createMachine({
+        types: {} as { events: { type: "SWITCH" } | { type: "PAINT" } },
+        initial: "off",
+        states: {
+          off: { on: { SWITCH: "on" } },
+          on: { on: { SWITCH: "off" } },
+        },
+      })
+
+      const [path] = yield* getPathsFromEvents(light, [{ type: "PAINT" }, { type: "SWITCH" }])
+      const filtered = yield* Effect.exit(
+        getPathsFromEvents(light, [{ type: "PAINT" }], { filterEvents: (_, event) => event.type !== "PAINT" })
+      )
+
+      assert.deepStrictEqual(path?.steps.map((step) => [step.state.value, step.event.type]), [["off", "xstate.init"], ["off", "PAINT"], ["on", "SWITCH"]])
+      assert.strictEqual(path?.state.value, "on")
+      assert.isTrue(Exit.isFailure(filtered))
+      assert.isTrue(Exit.isFailure(filtered) && Option.exists(Exit.findErrorOption(filtered), (error) => error instanceof InvalidEventSequenceError))
+    })
+  )
 })
