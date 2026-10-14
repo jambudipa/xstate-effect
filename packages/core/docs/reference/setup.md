@@ -336,7 +336,11 @@ The type checker applies these rules to the config:
   `undefined`; otherwise the config writes `{ type, params }` with params of its type.
 - An `after` key is one of the setup's delay names, or a number.
 - An `invoke` `src` is one of the setup's actor names, or actor logic. A setup without an
-  `actors` record takes no `invoke`.
+  `actors` record takes no `invoke`. Inline logic takes no `id`, and its `onDone` gives
+  `event.output` as an `Option` of `unknown`, as in XState. An inline action under that `onDone`
+  is typed for each invocation the setup allows, so one that reads `event.output` does not
+  compile (XState gives the same error). To type the output, name the logic in `actors` and
+  invoke it by its name.
 - With `types.emitted`, `emit` and `enqueue.emit` take only those events.
 - A setup without a record takes no name of that kind.
 
