@@ -114,6 +114,13 @@ in the actor's own fiber. It restores the same guarantee from the other side: an
 is dropped. A `getSnapshot` right after the send shows the result, as in XState. A send never
 fails: what goes wrong inside the actor is the actor's failure, not the sender's.
 
+The `subscribe` callbacks get the same guarantee. Each call starts while the actor publishes the
+snapshot, so a callback that does not wait has finished when the send returns, as XState's
+synchronous observers have. A callback that waits goes on in a fiber of its own, and the actor
+does not wait for it: a callback that waits for the actor's next event would otherwise wait for
+ever, because the actor could not take that event. The calls of one callback still run one at a
+time, in order.
+
 The guarantee covers that one actor and that one macrostep. When the macrostep sends an event
 to another actor, the send returns once the event is in the other actor's mailbox, not once the
 other actor has processed it. A cascade across actors can still be in flight:
@@ -186,8 +193,14 @@ choose between them: the same `send` waits or queues depending on where it runs.
 A delayed transition (`after`) or a delayed send schedules the event on the actor system's
 clock. When the delay ends, the scheduler delivers the event to the mailbox like any other
 send from inside the system: it queues and does not wait. When an actor ends, the events it
-scheduled that are still pending are cancelled. `SimulatedClock` makes these delays
-deterministic in tests; see [How to test delayed transitions](../how-to/test-delayed-transitions.md).
+scheduled that are still pending are cancelled.
+
+`SimulatedClock` makes these delays deterministic in tests, and there the wait comes back,
+because the test drives time from outside every actor. `increment` waits for the macrostep of
+each event it delivers, then until every actor of the system has processed the events that it
+set off, such as a child's done event to its parent. So the cascade is over when `increment`
+returns, as with XState's synchronous clock; see
+[How to test delayed transitions](../how-to/test-delayed-transitions.md).
 
 ## Events that are dropped
 
@@ -225,7 +238,9 @@ and nothing after it runs.
 ## Consequences for you
 
 - Read the snapshot right after `yield* actor.send` when the result depends only on that actor.
-- Use `waitFor` when it depends on a child, a parent, a delayed event or any other actor.
+- Use `waitFor` when it depends on a child, a parent or any other actor, or on a delayed event
+  that the Effect clock fires. After `yield* clock.increment(ms)` on a `SimulatedClock`, read the
+  snapshot at once.
 - Do not send to an actor after it has ended; the warning in your log points at the sender.
 - Keep custom actions short, and move long work into invoked or spawned actors.
 

@@ -60,7 +60,8 @@ dropped (see [How an actor processes events](event-processing.md)). The delayed 
 actor scheduled are cancelled. The actor leaves its system, which frees its `systemId`. Then its
 lifetime closes: the lifetimes of its children close with it, so the whole subtree stops, and
 every finalizer in that subtree runs, once. Last, its `changes` streams end — or fail, for an
-actor that errored — and any sender still waiting for a macrostep returns.
+actor that errored — its `emissions` streams end after the last event they give, and any
+sender still waiting for a macrostep returns.
 
 The differences between the ways are small but deliberate:
 

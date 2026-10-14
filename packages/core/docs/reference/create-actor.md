@@ -54,7 +54,7 @@ All names on this page come from `@jambudipa/xstate-effect`.
 | [`snapshotStream`](#snapshotstream) | `SnapshotStream<TSnapshot, unknown>` | as `changes` | the actor's error |
 | [`subscribe`](#subscribe) | `(observer) => Effect.Effect<void, never, Scope>` | at once | never |
 | [`on`](#on) | `(type, handler) => Effect.Effect<void, never, Scope>` | at once | never |
-| [`emissions`](#emissions) | `Stream.Stream<TEmitted>` | never ends by itself | never |
+| [`emissions`](#emissions) | `Stream.Stream<TEmitted>` | ends when the actor stops, is done or errors | never |
 | [`select`](#select) | `(selector, equalityFn?) => Readable<TSelected>` | synchronous | never |
 | [Value members](#value-members) | `id`, `sessionId`, `systemId`, `system`, `clock`, `logic`, `src`, `ref`, … | — | — |
 
@@ -159,7 +159,7 @@ optional, except `input` when `RequiredActorOptionsKeys<TLogic>` is `"input"`.
 |---|---|---|
 | `id` | `string` | The actor's `id`. Default: the session id (`x:<n>`). |
 | `systemId` | `string` | The key under which the system registers the actor, for `system.get`. The system registers it at creation, before the initial snapshot is computed, and drops it again when that snapshot is not active. A key that another actor of the system holds is a defect: `Actor with system ID '<systemId>' already exists.` |
-| `input` | `ActorLogicType.InputOf<TLogic>` | The input that the logic's initial snapshot receives. Required when the logic's input type does not take `undefined`. |
+| `input` | `ActorLogic.InputOf<TLogic>` | The input that the logic's initial snapshot receives. Required when the logic's input type does not take `undefined`. |
 | `parent` | `AnyActorRef` | The parent actor. The new actor joins the parent's system and lives in the parent's scope. Its own `stop` then dies (see [`stop`](#stop)). |
 | `syncSnapshot` | `boolean` | With a `parent`: the actor sends each active snapshot that it publishes to the parent as `xstate.snapshot.<id>`, from the snapshot it starts with. |
 | `src` | `string \| AnyActorLogic` | The value of `actor.src`. Default: the logic. |
@@ -415,6 +415,9 @@ snapshot with status `error`. A stream that runs after the error fails too.
 
 - A running `changes` stream is an observer with an error listener. A root actor whose error
   reaches at least one such stream, and no `subscribe` observer, does not log the error.
+- The stream reads the actor when it runs, not when it is built. A stream forked with
+  `Effect.forkScoped` starts later, after the sends that follow the fork. Fork it with
+  `{ startImmediately: true }` to receive the snapshots of those sends.
 
 ```ts
 import { Effect, Fiber, Stream } from "effect"
@@ -505,8 +508,10 @@ void Effect.runPromise(Effect.scoped(program))
 - An observer that throws, fails or dies is reported through the logger and keeps its
   subscription.
 - An observer has no error listener: an actor that errors while it is subscribed logs the error.
-- The observer runs in a fiber of its own. A `send` can complete before the observer has
-  received the snapshot of that event.
+- Each call starts while the actor publishes the snapshot. A call that never waits ends before
+  the `send` of the event returns, as in XState. A call that waits goes on in a fiber of its
+  own, and the actor does not wait for it.
+- The calls of one observer run one at a time, in order.
 - The subscription ends when the caller's scope closes.
 
 ```ts
@@ -576,12 +581,18 @@ void Effect.runPromise(Effect.scoped(program))
 
 **Type:** `Stream.Stream<TEmitted>`
 
-**Gives:** each event that the actor emits after the stream starts to run.
+**Gives:** each event that the actor emits after the stream starts to run, after the macrostep
+that emits it commits.
 
-**Ends:** never by itself, also not when the actor stops, is done or errors. Interrupt it, or
-end it with a Stream operator such as `Stream.take`.
+**Ends:** when the actor ends (it stops, is done or errors), after the last event it gives. A
+stream that runs after the actor ended ends at once.
 
-**Fails with:** nothing.
+**Fails with:** nothing. An actor that errors ends the stream.
+
+- The stream subscribes when it runs, not when it is built. A stream forked with
+  `Effect.forkScoped` starts later, after the sends that follow the fork. Fork it with
+  `{ startImmediately: true }` to receive the events of those sends.
+- Each read of `actor.emissions` builds a new stream.
 
 ```ts
 import { Effect, Fiber, Stream } from "effect"
@@ -595,11 +606,14 @@ const notifier = setup({
 
 const program = Effect.gen(function* () {
   const actor = yield* createActor(notifier)
-  const firstTwo = yield* actor.emissions.pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped)
   yield* actor.start
+  // Start the fiber now, so that the stream receives the events of the sends below
+  const all = yield* actor.emissions.pipe(Stream.runCollect, Effect.forkScoped({ startImmediately: true }))
   yield* actor.send({ type: "PING" })
   yield* actor.send({ type: "PING" })
-  return yield* Fiber.join(firstTwo)
+  // The stream ends when the actor stops
+  yield* actor.stop
+  return yield* Fiber.join(all) // [{ type: "pong" }, { type: "pong" }]
 })
 
 void Effect.runPromise(Effect.scoped(program))
@@ -620,7 +634,7 @@ subscribed to.
 | Member | Type | Behaviour |
 |---|---|---|
 | `get` | `Effect.Effect<T>` | The selected value of the snapshot the actor holds now. It never waits. A selector that throws makes it die. |
-| `subscribe` | `(observer: (value: T) => Effect.Effect<void>) => Effect.Effect<void, never, Scope.Scope>` | As the actor's `subscribe`: nothing at subscription time, then the selected value of each published snapshot when `equalityFn` finds it different from the last value given. The first "last value" is the value at subscription time. What the selector, `equalityFn` or `observer` throws, fails or dies with is logged, and the subscription goes on. The observer runs in a fiber of its own. It ends when the caller's scope closes. |
+| `subscribe` | `(observer: (value: T) => Effect.Effect<void>) => Effect.Effect<void, never, Scope.Scope>` | As the actor's `subscribe`: nothing at subscription time, then the selected value of each published snapshot when `equalityFn` finds it different from the last value given. The first "last value" is the value at subscription time. What the selector, `equalityFn` or `observer` throws, fails or dies with is logged, and the subscription goes on. Its calls start and wait as those of the actor's `subscribe`. It ends when the caller's scope closes. |
 | `changes` | `Stream.Stream<T, unknown>` | The value of the current snapshot when the stream runs, then each value that `equalityFn` finds different from the last value given. It ends and fails as the actor's `changes`. |
 
 ```ts

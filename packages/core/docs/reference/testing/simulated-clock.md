@@ -9,7 +9,8 @@ sources: [packages/core/src/testing/SimulatedClock.ts]
 > **TL;DR:** `SimulatedClock` is a clock whose time moves only when `increment` or `set` moves
 > it. Give it to a root actor with `createActor(logic, { clock })`: the actor's system then
 > starts every delayed event on it. `increment` and `set` return Effects that fire the due
-> timers in order and wait for each delivered event's macrostep. `makeSimulatedClock` and
+> timers in order; after each delivered event, they wait until every actor of the system has
+> processed it and the events it set off. `makeSimulatedClock` and
 > `makeSimulatedClockEffect` make a separate, synchronous clock for timer tests without an
 > actor.
 
@@ -68,12 +69,17 @@ export declare class SimulatedClock implements testing.Clock {
 - **Lazy moves.** `increment` and `set` change nothing until their Effect runs.
 - **Order.** A move fires the due timers one at a time: the earliest end first and, for the same
   end, the first set first.
-- **Waiting.** A move waits for the macrostep of each event that a timer delivers before it
-  picks the next timer. When the Effect of `increment` or `set` completes, every delivered
-  event is processed.
+- **Waiting.** A move waits for the macrostep of each event that a timer delivers. Then it waits
+  for the actor system to settle: every actor processes the events queued for it, such as a
+  child's done event to its parent, round after round until a round processes nothing. Only
+  then does the move pick the next timer.
+- **When the Effect completes.** Every delivered event is processed. So is every event that
+  their macrosteps queued for an actor, and every event that those queued in turn: a parent has
+  taken its child's done event. XState's synchronous clock gives the same result.
 - **Time while a timer fires.** `now()` gives the end of the timer that fires. A timer that the
-  delivered event's macrostep starts counts from that time. When it is due before the end of
-  the move, it fires in the same move. XState's clock counts it from the end of the whole move.
+  delivered event's macrostep starts, or that another actor starts as it reacts, counts from
+  that time. When it is due before the end of the move, it fires in the same move. XState's
+  clock counts it from the end of the whole move.
 - **After the move.** `now()` gives the target time.
 - **Calls during a move.** An `increment` or `set` that a timer callback calls moves the end of
   the move and returns at once. The move that is firing fires the timers that are then due.

@@ -8,9 +8,10 @@ sources: [packages/core/src/testing/SimulatedClock.ts]
 
 > **TL;DR:** Create a `SimulatedClock`, give it to the root actor with
 > `createActor(machine, { clock })`, and move time with `yield* clock.increment(ms)`. Each
-> increment fires the timers that fall due, in order, and returns after the actor has processed
-> each delayed event, so the next `getSnapshot` shows the result. Effect's `TestClock` does not
-> drive a `SimulatedClock`: use `TestClock.adjust` only for an actor without a `clock` option.
+> increment fires the timers that fall due, in order, and returns after every actor has
+> processed each delayed event and the events it set off, so the next `getSnapshot` shows the
+> result, the parent's reaction to a child included. Effect's `TestClock` does not drive a
+> `SimulatedClock`: use `TestClock.adjust` only for an actor without a `clock` option.
 
 ## When you need this
 
@@ -36,8 +37,8 @@ To write the delays themselves, see
    then starts every delayed event on this clock, the delayed events of child actors included.
 3. Start the actor with `yield* actor.start`.
 4. Move time with `yield* clock.increment(ms)`. The increment fires each timer that falls due,
-   the earliest first, and waits for the macrostep of each delivered event before it fires the
-   next one.
+   the earliest first. After each delivered event, it waits for the event's macrostep and for
+   every actor to process the events that the macrostep sent, before it fires the next timer.
 5. Read the snapshot with `yield* actor.getSnapshot` and check it.
 
 This test drives a traffic light through its cycle. Each `console.log` marks a check: replace
@@ -157,13 +158,15 @@ export const setTimeTest = Effect.gen(function* () {
 Give the clock to the root actor only. A child actor joins its parent's system, so the root's
 clock already drives the child's timers; a `clock` option on a child does not change that.
 
-The increment waits for the macrostep of the event it delivers, which is the child's. The
-parent reacts to the child (for example to its `onDone`) in a later delivery, so wait for the
-parent's state with `waitFor` instead of reading the snapshot at once.
+The increment delivers the child's delayed event, then waits until every actor of the system has
+processed the events that the delivery set off. The child's done event reaches the parent, and
+the parent takes its `onDone`, before the increment returns. So read the parent's snapshot at
+once. A timer that the parent starts in that reaction counts from the time the child's timer
+fired, and fires in the same increment when it falls due within it.
 
 ```ts
 import { Effect } from "effect"
-import { createActor, createMachine, SimulatedClock, waitFor } from "@jambudipa/xstate-effect"
+import { createActor, createMachine, SimulatedClock } from "@jambudipa/xstate-effect"
 
 const countdown = createMachine({
   id: "countdown",
@@ -188,8 +191,8 @@ export const childDelayTest = Effect.gen(function* () {
   yield* actor.start
 
   yield* clock.increment(3_000)
-  const snapshot = yield* waitFor(actor, (current) => current.matches("over"))
-  console.log(snapshot.value) // "over"
+  // The parent has taken the child's done event already
+  console.log((yield* actor.getSnapshot).value) // "over"
 })
 ```
 

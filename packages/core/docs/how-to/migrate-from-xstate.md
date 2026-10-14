@@ -236,6 +236,11 @@ const program = Effect.gen(function* () {
 void Effect.runPromise(Effect.scoped(program))
 ```
 
+A `subscribe` callback runs as in XState: each call starts while the actor publishes the
+snapshot, so a callback that does not wait has run when `send` returns. A callback that waits goes
+on in a fiber of its own, and the actor does not wait for it. A stream reads the actor when its
+fiber runs: on an actor that runs already, fork it with `{ startImmediately: true }`.
+
 A `subscribe` callback, an `on` listener or an inspection function that throws is logged once
 and never changes the actor. See [How to react to snapshot changes](react-to-snapshot-changes.md)
 and [How to emit events and listen to them](emit-and-listen-to-events.md).
@@ -381,10 +386,12 @@ The helpers also behave differently in some cases:
 
 - `waitFor` on an actor that is stopped already fails at once with `WaitForTerminatedError`, and
   `toEffect` succeeds at once with `Option.none()`. XState waits for ever.
-- `SimulatedClock` fires the due timers one at a time, in deadline order, and waits for the
-  macrostep of each delivered event. A timer that such a macrostep starts counts from the firing
-  time, so it can fire in the same `increment`. `set` to an earlier time fails with
-  `TimeTravelError`. A timer callback that throws leaves the clock usable.
+- `SimulatedClock` fires the due timers one at a time, in deadline order. After each delivered
+  event, it waits until every actor has processed the event and the events it set off, so a
+  parent has taken its child's done event when `increment` returns, as in XState. A timer that
+  those macrosteps start counts from the firing time, so it can fire in the same `increment`.
+  `set` to an earlier time fails with `TimeTravelError`. A timer callback that throws leaves the
+  clock usable.
 - `createTestModel` fails with `UnsupportedTestMachineError` for a machine that it cannot test,
   and the `error` fields of a test result are `Option`s. The default `logger` of a test model
   does nothing.

@@ -8,8 +8,9 @@ sources: [packages/core/src/Actor.ts]
 
 > **TL;DR:** Run `actor.changes` as a `Stream` to receive the current snapshot and then each new
 > one, until the actor is done or stopped. Pass `actor.subscribe` a function that returns an
-> Effect to run it for each snapshot published after the call. Use `actor.select` to react to one
-> derived value only when it changes. Attach before `start`, so that no snapshot is missed.
+> Effect to run it for each snapshot published after the call; a callback that does not wait has
+> run when the `send` returns. Use `actor.select` to react to one derived value only when it
+> changes. On an actor that runs already, fork a stream with `{ startImmediately: true }`.
 
 ## When you need this
 
@@ -25,7 +26,8 @@ for one state, use [How to wait for a state or an output](wait-for-a-state.md) i
     done or stopped snapshot, and fails with the actor's error. Use it when you need Stream
     operators, or need to know that the actor ended.
   - `actor.subscribe(callback)` runs the callback for each snapshot published after the call,
-    until the caller's scope closes. It never receives a snapshot with status `error` or `stopped`.
+    until the caller's scope closes. A callback that does not wait has run when the `send` of
+    the event returns. It never receives a snapshot with status `error` or `stopped`.
   - `actor.select(selector, equalityFn?)` derives one value, and gives it as `get`, `subscribe`
     and `changes`, only when the value changes.
 
@@ -88,7 +90,8 @@ void Effect.runPromise(Effect.scoped(program))
 
 `actor.subscribe` takes a function that returns an Effect. A callback attached before `start`
 receives the snapshot the actor starts from once, at `start`, then one snapshot for each processed
-event. The subscription ends when the scope that ran `subscribe` closes.
+event. A callback attached after `start` receives the snapshots of the events processed after the
+call. The subscription ends when the scope that ran `subscribe` closes.
 
 ```ts
 import { Effect } from "effect"
@@ -118,6 +121,11 @@ void Effect.runPromise(Effect.scoped(program))
 // Logs: count 0, count 1, count 2
 ```
 
+- Each call starts while the actor publishes the snapshot. A callback that does not wait (no
+  `Effect.sleep`, no `Deferred.await`, no Promise) has finished when the `send` of that event
+  returns, as in XState.
+- A callback that waits goes on in a fiber of its own, and the actor does not wait for it. The
+  calls of one callback run one at a time, in order: a call starts when the call before it ends.
 - A callback that fails, dies or throws is reported through the logger, and the subscription goes
   on.
 - The callback never sees the actor's error. When the actor errors while a `subscribe` callback
@@ -241,15 +249,14 @@ void Effect.runPromise(Effect.scoped(program))
 
 ### Attach to an actor that already runs
 
-`subscribe` and a forked stream each run in a fiber of their own, and on a running actor that fiber
-can start after your next `send` returns. Until it starts, the snapshots the actor publishes reach
-a `subscribe` callback late, and a `changes` stream starts from the snapshot the actor holds when
-the fiber starts, so it misses the ones before. When the scope closes before the fiber starts, the
-callback never runs. Attach before `start` when you can. When the actor runs already, yield once
-with `Effect.yieldNow` after you attach, before you send the next event:
+`subscribe` and the `subscribe` of `actor.select` work the same after `start`: the callback
+receives each snapshot that the actor publishes after the call. A stream is different: it reads
+the actor when its fiber starts to run, not when you build it. `Effect.forkScoped` starts the fiber
+later, after the sends that follow the fork, so the stream misses their snapshots. Fork it with
+`{ startImmediately: true }`: the stream then starts at once, from the snapshot the actor holds.
 
 ```ts
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { createActor, createMachine } from "@jambudipa/xstate-effect"
 
 const toggleMachine = createMachine({
@@ -265,13 +272,22 @@ const toggleMachine = createMachine({
 const program = Effect.gen(function* () {
   const actor = yield* createActor(toggleMachine)
   yield* actor.start
-  yield* actor.subscribe((snapshot) => Effect.log(snapshot.value))
-  yield* Effect.yieldNow
+
+  // A callback receives each snapshot published after this call
+  yield* actor.subscribe((snapshot) => Effect.log("callback", snapshot.value))
+
+  // A stream starts from the snapshot the actor holds when its fiber runs: start it now
+  yield* actor.changes.pipe(
+    Stream.runForEach((snapshot) => Effect.log("stream", snapshot.value)),
+    Effect.forkScoped({ startImmediately: true })
+  )
+
+  yield* actor.send({ type: "toggle" })
   yield* actor.send({ type: "toggle" })
 })
 
 void Effect.runPromise(Effect.scoped(program))
-// Logs: on
+// Logs: stream off, stream on, callback on, stream off, callback off
 ```
 
 ### Stop reacting before the actor ends

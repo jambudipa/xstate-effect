@@ -118,7 +118,7 @@ export const main = Effect.runPromise(Effect.scoped(program))
 
 ### Read the events as a Stream
 
-`actor.emissions` is a `Stream` of every emitted event. It holds only the events emitted after the stream starts to run, and it does not end when the actor stops. So fork it with `startImmediately: true` before you send, and bound it with `Stream.take`, `Stream.takeUntil` or the scope that the fork belongs to.
+`actor.emissions` is a `Stream` of every emitted event. It gives only the events emitted after the stream starts to run, and it ends when the actor ends: after a stop, a done snapshot or an error. A stream forked with `Effect.forkScoped` starts later, after the sends that follow the fork, so fork it with `{ startImmediately: true }` before you send. To end it before the actor ends, bound it with `Stream.take` or `Stream.takeUntil`, or close the scope that the fork belongs to.
 
 ```ts
 import { createActor, createMachine, emit } from "@jambudipa/xstate-effect"
@@ -131,14 +131,16 @@ const sensor = createMachine({
 const program = Effect.gen(function* () {
   const actor = yield* createActor(sensor)
   yield* actor.start
-  const firstTwo = yield* actor.emissions.pipe(
-    Stream.take(2),
+  const readings = yield* actor.emissions.pipe(
     Stream.runCollect,
     Effect.forkScoped({ startImmediately: true })
   )
   yield* actor.send({ type: "READ" })
   yield* actor.send({ type: "READ" })
-  yield* Console.log(yield* Fiber.join(firstTwo))
+  // The stream ends when the actor stops, so the collection completes
+  yield* actor.stop
+  yield* Console.log(yield* Fiber.join(readings))
+  // [{ type: "reading", value: 21 }, { type: "reading", value: 21 }]
 })
 
 export const main = Effect.runPromise(Effect.scoped(program))
