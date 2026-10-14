@@ -10,7 +10,7 @@ Task-oriented recipes for a goal you already have. Each assumes you know the bas
 ## Types and services
 
 - [How to type a machine's context, events, input and output](./define-custom-types.md) — Declare the types once in `setup({ types: {} as { context; events; input; output } })`.
-- [How to type a machine from Effect Schemas](./validate-events-with-schema.md) — Pass a context Schema and an event Schema to `setupWithSchema`; each machine it creates takes its context and event types from the Schemas' decoded types.
+- [How to type a machine from Effect Schemas](./validate-events-with-schema.md) — Pass Schemas for the context and the events, and optionally for the input and the output, to `setupWithSchema`. Each machine it creates takes those types from the Schemas' decoded types and checks its values against them at run time.
 - [How to give a machine's actions and actors Effect services](./provide-services-to-a-machine.md) — Build the machine with `setup`.
 
 ## Machines
