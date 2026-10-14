@@ -1,430 +1,427 @@
-# Tutorial 3: Guards and Conditional Transitions
+---
+title: Guard your transitions
+doc-type: tutorial
+sources: [packages/core/src/guards/, packages/core/src/setup.ts]
+---
 
-In previous tutorials, transitions always happened when an event was received. Now you'll learn to use **guards** to conditionally allow or prevent transitions based on context or event data.
+# Guard your transitions
 
-## What You'll Learn
+> **TL;DR:** You give the turnstile a fare of 100p and make it unlock only when the credit reaches
+> the fare. You write **guards** in `setup`, give one event several transitions so that the first
+> one whose guard passes is taken, combine two guards with `and`, and ask a snapshot with `can`
+> whether it would accept an event.
 
-- How to define guard functions
-- How to use guards in transitions
-- How to combine guards with `and`, `or`, and `not`
-- How to use `stateIn` guards
+## What you will build
 
-## Why Guards?
+The turnstile from [Keep data in context](./02-working-with-context.md) unlocks for any coin. Now
+it asks for a fare. Coins below the fare add up until the credit reaches it, and a coin the
+turnstile does not accept, such as a 5p coin, is ignored. At the end of this tutorial the program
+asks the turnstile which events it would accept, and prints:
 
-Consider a counter with a maximum value. Without guards, you'd need separate states for "at maximum" and "not at maximum". With guards, you can conditionally prevent the INCREMENT event:
-
-```typescript
-import { setup, createMachine, assign } from "@jambudipa/xstate-effect"
-
-// Without guards: complex state structure
-export const withoutGuards = createMachine({
-  initial: "belowMax",
-  states: {
-    belowMax: { on: { INCREMENT: "checkMax" } },
-    atMax: { on: { DECREMENT: "belowMax" } },
-    checkMax: { always: [ /* conditional transitions */ ] }
-  }
-})
-
-// With guards: simple and clear
-export const withGuards = setup({
-  types: {} as {
-    context: { count: number; max: number }
-    events: { type: "INCREMENT" }
-  },
-  guards: {
-    canIncrement: ({ context }) => context.count < context.max
-  },
-  actions: {
-    increment: assign({ count: ({ context }) => context.count + 1 })
-  }
-}).createMachine({
-  initial: "active",
-  context: { count: 0, max: 5 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: { guard: "canIncrement", actions: "increment" }
-      }
-    }
-  }
-})
+```text
+5p accepted: false
+50p accepted: true
+PUSH accepted: false
 ```
 
-## Step 1: Define a Guard
+## Before you start
 
-Guards are functions that return `true` (allow) or `false` (prevent). Define them in the `guards` object of `setup`:
+Complete [Keep data in context](./02-working-with-context.md). This tutorial continues in its
+`turnstile` project and changes its `turnstile.ts` file.
 
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
+## Step 1: Guard the `COIN` transition
 
-export const counterMachine = setup({
-  types: {} as {
-    context: { count: number; max: number }
-    events: { type: "INCREMENT" } | { type: "DECREMENT" }
-  },
-  guards: {
-    canIncrement: ({ context }) => context.count < context.max,
-    canDecrement: ({ context }) => context.count > 0
-  },
-  actions: {
-    increment: assign({ count: ({ context }) => context.count + 1 }),
-    decrement: assign({ count: ({ context }) => context.count - 1 })
-  }
-}).createMachine({
-  id: "boundedCounter",
-  initial: "active",
-  context: { count: 0, max: 5 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: {
-          guard: "canIncrement",
-          actions: "increment"
-        },
-        DECREMENT: {
-          guard: "canDecrement",
-          actions: "decrement"
-        }
-      }
-    }
-  }
-})
-```
+Replace the content of `turnstile.ts` with this program:
 
-### Guard Function Signature
-
-```typescript
-import type { GuardPredicate } from "@jambudipa/xstate-effect"
-
-type CounterContext = { count: number; max: number }
-type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" }
-
-// ({ context, event }) => boolean
-export const canIncrement: GuardPredicate<CounterContext, CounterEvent> = ({ context, event }) =>
-  event.type === "INCREMENT" && context.count < context.max
-```
-
-The guard receives:
-- `context`: Current machine context
-- `event`: The event that triggered the transition
-
-A guard can also return an `Effect<boolean>`; the machine runs the Effect and uses its result.
-
-## Step 2: Guards with Event Data
-
-Guards can inspect event payloads:
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const accountMachine = setup({
-  types: {} as {
-    context: { balance: number }
-    events: { type: "WITHDRAW"; amount: number }
-  },
-  guards: {
-    hasSufficientFunds: ({ context, event }) =>
-      event.type === "WITHDRAW" && context.balance >= event.amount
-  },
-  actions: {
-    withdraw: assign({
-      balance: ({ context, event }) =>
-        event.type === "WITHDRAW" ? context.balance - event.amount : context.balance
-    })
-  }
-}).createMachine({
-  id: "account",
-  initial: "active",
-  context: { balance: 100 },
-  states: {
-    active: {
-      on: {
-        WITHDRAW: {
-          guard: "hasSufficientFunds",
-          actions: "withdraw"
-        }
-      }
-    }
-  }
-})
-```
-
-## Step 3: Multiple Transitions with Guards
-
-Define multiple transitions for the same event. The first matching guard wins:
-
-```typescript
-import { setup } from "@jambudipa/xstate-effect"
-
-export const trafficLightMachine = setup({
-  types: {} as {
-    context: { emergencyMode: boolean }
-    events: { type: "NEXT" }
-  },
-  guards: {
-    isEmergency: ({ context }) => context.emergencyMode
-  }
-}).createMachine({
-  id: "trafficLight",
-  initial: "green",
-  context: { emergencyMode: false },
-  states: {
-    green: {
-      on: {
-        NEXT: [
-          // First check for emergency
-          { guard: "isEmergency", target: "flashingRed" },
-          // Default transition
-          { target: "yellow" }
-        ]
-      }
-    },
-    yellow: {
-      on: {
-        NEXT: [
-          { guard: "isEmergency", target: "flashingRed" },
-          { target: "red" }
-        ]
-      }
-    },
-    red: {
-      on: {
-        NEXT: [
-          { guard: "isEmergency", target: "flashingRed" },
-          { target: "green" }
-        ]
-      }
-    },
-    flashingRed: {
-      on: {
-        NEXT: { target: "red" }
-      }
-    }
-  }
-})
-```
-
-## Step 4: Combining Guards
-
-Use `and`, `or`, and `not` to compose guards:
-
-```typescript
-import { setup, and, or, not } from "@jambudipa/xstate-effect"
-
-export const accessMachine = setup({
-  types: {} as {
-    context: {
-      isAdmin: boolean
-      isVerified: boolean
-      isBanned: boolean
-    }
-    events: { type: "ACCESS_ADMIN" } | { type: "ACCESS_REPORTS" }
-  },
-  guards: {
-    isAdmin: ({ context }) => context.isAdmin,
-    isVerified: ({ context }) => context.isVerified,
-    isBanned: ({ context }) => context.isBanned,
-
-    // Combine guards
-    canAccessAdmin: and(["isAdmin", "isVerified", not("isBanned")]),
-    canAccessReports: or(["isAdmin", "isVerified"])
-  }
-}).createMachine({
-  id: "access",
-  initial: "home",
-  context: { isAdmin: true, isVerified: true, isBanned: false },
-  states: {
-    home: {
-      on: {
-        ACCESS_ADMIN: {
-          guard: "canAccessAdmin",
-          target: "admin"
-        },
-        ACCESS_REPORTS: {
-          guard: "canAccessReports",
-          target: "reports"
-        }
-      }
-    },
-    admin: {},
-    reports: {}
-  }
-})
-```
-
-### Guard Combinators
-
-```typescript
-import { setup, and, or, not } from "@jambudipa/xstate-effect"
-
-export const combinatorsMachine = setup({
-  types: {} as {
-    context: { a: boolean; b: boolean; c: boolean }
-    events: { type: "CHECK" }
-  },
-  guards: {
-    guard1: ({ context }) => context.a,
-    guard2: ({ context }) => context.b,
-    guard3: ({ context }) => context.c,
-
-    // All guards must pass
-    allPass: and(["guard1", "guard2", "guard3"]),
-
-    // At least one guard must pass
-    anyPasses: or(["guard1", "guard2"]),
-
-    // Inverts the guard result
-    notGuard1: not("guard1"),
-
-    // Nested combinations
-    nested: and(["guard1", or(["guard2", "guard3"])])
-  }
-}).createMachine({
-  initial: "waiting",
-  context: { a: true, b: false, c: true },
-  states: {
-    waiting: {
-      on: {
-        CHECK: [
-          { guard: "allPass", target: "all" },
-          { guard: "nested", target: "nested" },
-          { guard: "anyPasses", target: "some" },
-          { guard: "notGuard1", target: "none" }
-        ]
-      }
-    },
-    all: {},
-    nested: {},
-    some: {},
-    none: {}
-  }
-})
-```
-
-## Step 5: The stateIn Guard
-
-Check if the machine is in a specific state:
-
-```typescript
-import { setup, stateIn, stateNotIn } from "@jambudipa/xstate-effect"
-
-const _machine = setup({
-  types: {} as {
-    context: {}
-    events: { type: "SUBMIT" }
-  },
-  guards: {
-    isReady: stateIn("ready"),
-    isNotLoading: stateNotIn("loading")
-  }
-}).createMachine({
-  id: "form",
-  initial: "idle",
-  context: {},
-  states: {
-    idle: {
-      on: { SUBMIT: "loading" }
-    },
-    loading: {},
-    ready: {
-      on: {
-        SUBMIT: {
-          guard: "isReady",  // Only submits from ready state
-          target: "loading"
-        }
-      }
-    }
-  }
-})
-```
-
-## Complete Example: Password Validator
-
-```typescript
-import { setup, createActor, assign, and } from "@jambudipa/xstate-effect"
+```ts
+import { assign, createActor, setup } from "@jambudipa/xstate-effect"
 import { Effect } from "effect"
 
-const passwordMachine = setup({
+const turnstileMachine = setup({
   types: {} as {
-    context: {
-      password: string
-      minLength: number
-    }
-    events:
-      | { type: "SET_PASSWORD"; value: string }
-      | { type: "SUBMIT" }
-  },
-  guards: {
-    hasMinLength: ({ context }) => context.password.length >= context.minLength,
-    hasNumber: ({ context }) => /\d/.test(context.password),
-    hasUppercase: ({ context }) => /[A-Z]/.test(context.password),
-    isValidPassword: and(["hasMinLength", "hasNumber", "hasUppercase"])
+    context: { fare: number; credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
   },
   actions: {
-    setPassword: assign({
-      password: ({ event }) =>
-        event.type === "SET_PASSWORD" ? event.value : ""
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
+    }),
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
     })
+  },
+  guards: {
+    paysTheFare: ({ context, event }) =>
+      event.type === "COIN" && context.credit + event.amount >= context.fare
   }
 }).createMachine({
-  id: "passwordValidator",
-  initial: "editing",
-  context: { password: "", minLength: 8 },
+  id: "turnstile",
+  initial: "locked",
+  context: { fare: 100, credit: 0, passes: 0 },
   states: {
-    editing: {
+    locked: {
       on: {
-        SET_PASSWORD: { actions: "setPassword" },
-        SUBMIT: {
-          guard: "isValidPassword",
-          target: "submitted"
-        }
+        COIN: { guard: "paysTheFare", target: "unlocked", actions: "addCredit" }
       }
     },
-    submitted: {
-      type: "final"
+    unlocked: {
+      on: {
+        PUSH: { target: "locked", actions: "recordPass" }
+      }
     }
   }
 })
 
 const program = Effect.gen(function* () {
-  const actor = yield* createActor(passwordMachine)
+  const actor = yield* createActor(turnstileMachine)
   yield* actor.start
 
-  // Try weak password
-  yield* actor.send({ type: "SET_PASSWORD", value: "weak" })
-  yield* actor.send({ type: "SUBMIT" }) // Blocked by guard
+  const report = (label: string) =>
+    Effect.gen(function* () {
+      const snapshot = yield* actor.getSnapshot
+      console.log(`${label}: ${snapshot.value}`, snapshot.context)
+    })
 
-  let snapshot = yield* actor.getSnapshot
-  console.log(`State after weak password: ${snapshot.value}`) // editing
-
-  // Try strong password
-  yield* actor.send({ type: "SET_PASSWORD", value: "Strong1Password" })
-  yield* actor.send({ type: "SUBMIT" }) // Allowed
-
-  snapshot = yield* actor.getSnapshot
-  console.log(`State after strong password: ${snapshot.value}`) // submitted
+  yield* report("start")
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* report("after 50p")
+  yield* actor.send({ type: "COIN", amount: 100 })
+  yield* report("after 100p")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
 })
 
 void Effect.runPromise(Effect.scoped(program))
 ```
 
-## Exercises
+What changed:
 
-1. **Age verification**: Create a machine that only allows access if the user's age in context is 18 or above.
+- The context has a `fare` of 100p.
+- `setup` takes a `guards` record. A guard is a function that receives `context` and `event` and
+  returns `true` or `false`. `paysTheFare` is `true` when the credit with this coin reaches the
+  fare. The guard runs before the transition's actions, so `context.credit` does not hold the coin
+  yet: the guard adds `event.amount` itself.
+- `guard: "paysTheFare"` on the `COIN` transition makes the machine take the transition only when
+  the guard returns `true`. When it returns `false`, the event changes nothing: the state stays,
+  and the transition's actions do not run.
 
-2. **Rate limiter**: Add a guard that prevents more than 5 events within a time window. Store the event timestamps in context.
+Run the program:
 
-3. **Form validation**: Create a form machine with multiple fields. Only allow submission when all fields are valid.
+```bash
+npx tsx turnstile.ts
+```
 
-## Key Takeaways
+**What you should see:**
 
-- **Guards** conditionally allow or prevent transitions
-- Guards receive `context` and `event` and return a boolean
-- Use `and`, `or`, `not` to compose complex conditions
-- Multiple transitions can be defined for the same event - first matching guard wins
-- `stateIn` and `stateNotIn` check the current state
+```text
+start: locked { fare: 100, credit: 0, passes: 0 }
+after 50p: locked { fare: 100, credit: 0, passes: 0 }
+after 100p: unlocked { fare: 100, credit: 100, passes: 0 }
+after PUSH: locked { fare: 100, credit: 0, passes: 1 }
+```
 
-## What's Next
+The 50p coin does not pay the fare, so the guard blocks the transition, and `addCredit` does not
+run: the coin is lost. The 100p coin pays the fare and unlocks the turnstile.
 
-In the [next tutorial](./04-side-effects.md), you'll learn how to execute side effects with actions that run when entering states, exiting states, or during transitions.
+## Step 2: Let smaller coins add up
+
+A coin below the fare should still count. Give `COIN` a second transition for that case. Replace
+the content of `turnstile.ts` with this program:
+
+```ts
+import { assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const turnstileMachine = setup({
+  types: {} as {
+    context: { fare: number; credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
+  },
+  actions: {
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
+    }),
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
+    })
+  },
+  guards: {
+    paysTheFare: ({ context, event }) =>
+      event.type === "COIN" && context.credit + event.amount >= context.fare
+  }
+}).createMachine({
+  id: "turnstile",
+  initial: "locked",
+  context: { fare: 100, credit: 0, passes: 0 },
+  states: {
+    locked: {
+      on: {
+        COIN: [
+          { guard: "paysTheFare", target: "unlocked", actions: "addCredit" },
+          { actions: "addCredit" }
+        ]
+      }
+    },
+    unlocked: {
+      on: {
+        PUSH: { target: "locked", actions: "recordPass" }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(turnstileMachine)
+  yield* actor.start
+
+  const report = (label: string) =>
+    Effect.gen(function* () {
+      const snapshot = yield* actor.getSnapshot
+      console.log(`${label}: ${snapshot.value}`, snapshot.context)
+    })
+
+  yield* report("start")
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* report("after 50p")
+  yield* actor.send({ type: "COIN", amount: 20 })
+  yield* report("after 20p")
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* report("after 50p")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+`COIN` now has a list of transitions. The machine tries them in order and takes the first one
+whose guard passes:
+
+- The first transition unlocks the turnstile when the coin pays the fare.
+- The second has no guard, so it always passes. It has no `target` either, so the turnstile stays
+  `locked`, and only its action runs: the coin is added to the credit.
+
+Run the program again with `npx tsx turnstile.ts`.
+
+**What you should see:**
+
+```text
+start: locked { fare: 100, credit: 0, passes: 0 }
+after 50p: locked { fare: 100, credit: 50, passes: 0 }
+after 20p: locked { fare: 100, credit: 70, passes: 0 }
+after 50p: unlocked { fare: 100, credit: 120, passes: 0 }
+after PUSH: locked { fare: 100, credit: 0, passes: 1 }
+```
+
+The first two coins add up to 70p and leave the turnstile `locked`. The third brings the credit to
+120p, which pays the fare, so the first transition is taken and the turnstile unlocks.
+
+## Step 3: Combine two guards
+
+The turnstile takes only 10p, 20p, 50p, £1 and £2 coins. Add a guard for that, and combine it with
+`paysTheFare`. Replace the content of `turnstile.ts` with this program:
+
+```ts
+import { and, assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const turnstileMachine = setup({
+  types: {} as {
+    context: { fare: number; credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
+  },
+  actions: {
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
+    }),
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
+    })
+  },
+  guards: {
+    isAcceptedCoin: ({ event }) =>
+      event.type === "COIN" && [10, 20, 50, 100, 200].includes(event.amount),
+    paysTheFare: ({ context, event }) =>
+      event.type === "COIN" && context.credit + event.amount >= context.fare,
+    unlocksTurnstile: and(["isAcceptedCoin", "paysTheFare"])
+  }
+}).createMachine({
+  id: "turnstile",
+  initial: "locked",
+  context: { fare: 100, credit: 0, passes: 0 },
+  states: {
+    locked: {
+      on: {
+        COIN: [
+          { guard: "unlocksTurnstile", target: "unlocked", actions: "addCredit" },
+          { guard: "isAcceptedCoin", actions: "addCredit" }
+        ]
+      }
+    },
+    unlocked: {
+      on: {
+        PUSH: { target: "locked", actions: "recordPass" }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(turnstileMachine)
+  yield* actor.start
+
+  const report = (label: string) =>
+    Effect.gen(function* () {
+      const snapshot = yield* actor.getSnapshot
+      console.log(`${label}: ${snapshot.value}`, snapshot.context)
+    })
+
+  yield* report("start")
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* report("after 50p")
+  yield* actor.send({ type: "COIN", amount: 5 })
+  yield* report("after 5p")
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* report("after 50p")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+What changed:
+
+- `isAcceptedCoin` passes for the coins the turnstile takes.
+- `and([...])`, imported beside `assign`, builds a guard that passes only when every guard it
+  names passes. `unlocksTurnstile` names `isAcceptedCoin` and `paysTheFare`, and the first `COIN`
+  transition uses it.
+- The second transition now has the guard `isAcceptedCoin`, so a coin the turnstile does not take
+  matches neither transition, and the machine ignores it.
+
+Run the program again with `npx tsx turnstile.ts`.
+
+**What you should see:**
+
+```text
+start: locked { fare: 100, credit: 0, passes: 0 }
+after 50p: locked { fare: 100, credit: 50, passes: 0 }
+after 5p: locked { fare: 100, credit: 50, passes: 0 }
+after 50p: unlocked { fare: 100, credit: 100, passes: 0 }
+after PUSH: locked { fare: 100, credit: 0, passes: 1 }
+```
+
+The 5p coin leaves the credit at 50p. The second 50p coin brings it to the fare, and the turnstile
+unlocks.
+
+## Step 4: Ask before you send
+
+A snapshot can tell you whether the machine would accept an event, without sending it. Replace the
+`program` at the end of `turnstile.ts`, so that the whole file reads:
+
+```ts
+import { and, assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const turnstileMachine = setup({
+  types: {} as {
+    context: { fare: number; credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
+  },
+  actions: {
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
+    }),
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
+    })
+  },
+  guards: {
+    isAcceptedCoin: ({ event }) =>
+      event.type === "COIN" && [10, 20, 50, 100, 200].includes(event.amount),
+    paysTheFare: ({ context, event }) =>
+      event.type === "COIN" && context.credit + event.amount >= context.fare,
+    unlocksTurnstile: and(["isAcceptedCoin", "paysTheFare"])
+  }
+}).createMachine({
+  id: "turnstile",
+  initial: "locked",
+  context: { fare: 100, credit: 0, passes: 0 },
+  states: {
+    locked: {
+      on: {
+        COIN: [
+          { guard: "unlocksTurnstile", target: "unlocked", actions: "addCredit" },
+          { guard: "isAcceptedCoin", actions: "addCredit" }
+        ]
+      }
+    },
+    unlocked: {
+      on: {
+        PUSH: { target: "locked", actions: "recordPass" }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(turnstileMachine)
+  yield* actor.start
+
+  const snapshot = yield* actor.getSnapshot
+  const takes5p = yield* snapshot.can({ type: "COIN", amount: 5 })
+  const takes50p = yield* snapshot.can({ type: "COIN", amount: 50 })
+  const takesPush = yield* snapshot.can({ type: "PUSH" })
+  console.log("5p accepted:", takes5p)
+  console.log("50p accepted:", takes50p)
+  console.log("PUSH accepted:", takesPush)
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+`snapshot.can(event)` checks whether the machine, in the snapshot's state, has a transition for
+the event whose guard passes. It runs the guards but no actions, and the actor's state does not
+change. A guard can return an Effect instead of a boolean, so `can` is an Effect too: run it with
+`yield*`, as you run `getSnapshot`.
+
+Run the program again with `npx tsx turnstile.ts`.
+
+**What you should see:**
+
+```text
+5p accepted: false
+50p accepted: true
+PUSH accepted: false
+```
+
+In the `locked` state, the 5p coin passes neither guard, the 50p coin passes `isAcceptedCoin`, and
+`PUSH` has no transition at all.
+
+## What you learned
+
+- A guard is a named function in the `guards` record of `setup`. It receives `context` and
+  `event` and returns `true` or `false`.
+- A transition with a `guard` is taken only when the guard passes. When it fails, the state stays
+  and the transition's actions do not run.
+- One event can have a list of transitions. The machine takes the first one whose guard passes,
+  and a transition without a guard always passes.
+- A transition without a `target` keeps the current state and runs only its actions.
+- `and` combines guards by name into one guard.
+- `snapshot.can(event)` is an Effect that tells you whether the machine would accept an event.
+
+## Next steps
+
+- [Run side effects](./04-side-effects.md): make the machine act on the world when it changes
+  state.
+- [How to combine guards](../how-to/compose-guards.md) shows the other ways to combine guards.
+- [Guards](../reference/guards.md) describes the guard forms and the built-in guards.
+- [Snapshots](../reference/snapshots.md) describes `can` and the other members of a snapshot.

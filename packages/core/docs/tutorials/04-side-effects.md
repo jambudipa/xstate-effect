@@ -1,512 +1,457 @@
-# Tutorial 4: Side Effects with Actions
+---
+title: Run side effects
+doc-type: tutorial
+sources: [packages/core/src/actions/, packages/core/src/setup.ts]
+---
 
-State machines aren't just about managing state - they also coordinate side effects. In this tutorial, you'll learn how actions execute effects at specific points in the machine lifecycle.
+# Run side effects
 
-## What You'll Learn
+> **TL;DR:** You make the turnstile act on the world: it reports its barrier, its credit and its
+> passes on the console, and it locks itself again when nobody passes in time. You write actions
+> that return Effects, run them on `entry`, on `exit` and on transitions, schedule an event with a
+> delayed `raise`, and call it off with `cancel`.
 
-- Entry and exit actions
-- Transition actions
-- Built-in actions: `log`, `raise`, `sendTo`
-- Creating custom Effect-based actions
+## What you will build
 
-## When Actions Execute
+The turnstile from [Guard your transitions](./03-guards-and-transitions.md) changes state, but it
+does nothing you can see. Now it writes a line for each thing that happens at the barrier. When it
+unlocks and nobody pushes within one second, it refunds the credit and locks again. At the end of
+this tutorial the program prints:
 
-Actions can be triggered at three points:
+```text
+Barrier locked
+Credit: 50p
+Credit: 100p
+Barrier open
+Barrier closing
+Passes: 1
+Barrier locked
+Credit: 100p
+Barrier open
+Barrier closing
+Timed out: refunding 100p
+Barrier locked
+end: locked { fare: 100, credit: 0, passes: 1 }
+```
 
-1. **Entry actions**: Run when entering a state
-2. **Exit actions**: Run when leaving a state
-3. **Transition actions**: Run during a specific transition
+## Before you start
 
-```typescript
-import { setup } from "@jambudipa/xstate-effect"
-import { Console } from "effect"
+Complete [Guard your transitions](./03-guards-and-transitions.md). This tutorial continues in its
+`turnstile` project and changes its `turnstile.ts` file.
 
-export const loadingMachine = setup({
+## Step 1: Report the barrier on entry
+
+Replace the content of `turnstile.ts` with this program:
+
+```ts
+import { and, assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Console, Effect } from "effect"
+
+const turnstileMachine = setup({
   types: {} as {
-    context: {}
-    events: { type: "SUCCESS" }
+    context: { fare: number; credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
   },
   actions: {
-    onEnterLoading: () => Console.log("Entering loading"),
-    onExitLoading: () => Console.log("Leaving loading"),
-    onSuccess: () => Console.log("Loaded")
-  }
-}).createMachine({
-  id: "loader",
-  initial: "loading",
-  context: {},
-  states: {
-    loading: {
-      entry: "onEnterLoading",   // Runs when entering "loading"
-      exit: "onExitLoading",     // Runs when leaving "loading"
-      on: {
-        SUCCESS: {
-          target: "success",
-          actions: "onSuccess"   // Runs during this transition
-        }
-      }
-    },
-    success: {}
-  }
-})
-```
-
-## Step 1: Entry and Exit Actions
-
-```typescript
-import { setup, createActor } from "@jambudipa/xstate-effect"
-import { Effect, Console } from "effect"
-
-const documentMachine = setup({
-  types: {} as {
-    context: { documentId: string }
-    events: { type: "SAVE" } | { type: "CLOSE" }
-  },
-  actions: {
-    logEnter: ({ context }) =>
-      Console.log(`Entered state with document: ${context.documentId}`),
-    logExit: ({ context }) =>
-      Console.log(`Exiting state with document: ${context.documentId}`),
-    saveDocument: ({ context }) =>
-      Console.log(`Saving document: ${context.documentId}`)
-  }
-}).createMachine({
-  id: "document",
-  initial: "editing",
-  context: { documentId: "doc-123" },
-  states: {
-    editing: {
-      entry: "logEnter",
-      exit: "logExit",
-      on: {
-        SAVE: { actions: "saveDocument" },
-        CLOSE: { target: "closed" }
-      }
-    },
-    closed: {
-      entry: "logEnter",
-      type: "final"
-    }
-  }
-})
-
-const program = Effect.gen(function* () {
-  const actor = yield* createActor(documentMachine)
-  yield* actor.start                   // Entered state with document: doc-123
-  yield* actor.send({ type: "SAVE" })  // Saving document: doc-123
-  yield* actor.send({ type: "CLOSE" }) // Exiting state with document: doc-123
-                                       // Entered state with document: doc-123
-})
-
-void Effect.runPromise(Effect.scoped(program))
-```
-
-## Step 2: Actions that Return Effects
-
-A custom action is a function that receives `{ context, event }`. When the function returns an Effect, the actor runs that Effect:
-
-```typescript
-import { setup } from "@jambudipa/xstate-effect"
-import { Effect, Console } from "effect"
-
-export const dataMachine = setup({
-  types: {} as {
-    context: { url: string }
-    events: { type: "LOAD" } | { type: "TRY" }
-  },
-  actions: {
-    // Basic action with logging
-    logAction: ({ event }) => Console.log(`Event ${event.type} received`),
-
-    // Action that performs async work
-    fetchData: ({ context }) =>
-      Effect.gen(function* () {
-        yield* Console.log(`Fetching ${context.url}...`)
-        yield* Effect.sleep("1 second")
-        yield* Console.log("Data fetched!")
-      }),
-
-    // Action that can fail: a failure sets the actor's status to "error"
-    riskyAction: () =>
-      Effect.gen(function* () {
-        const random = Math.random()
-        if (random < 0.5) {
-          yield* Effect.fail(new Error("Random failure"))
-        }
-        yield* Console.log("Success!")
-      })
-  }
-}).createMachine({
-  id: "data",
-  initial: "idle",
-  context: { url: "/api/data" },
-  states: {
-    idle: {
-      on: {
-        LOAD: { actions: ["logAction", "fetchData"] },
-        TRY: { actions: ["logAction", "riskyAction"] }
-      }
-    }
-  }
-})
-```
-
-The actor runs the returned Effect as part of the transition, so a slow Effect delays the transition. For long-running work, invoke an actor instead (see [Tutorial 5](./05-child-actors.md)). If the Effect fails, the actor stops processing and its status becomes `error`, with the failure as its error.
-
-## Step 3: Built-in Actions
-
-### log - Simple Logging
-
-```typescript
-import { setup, assign, log, logInfo } from "@jambudipa/xstate-effect"
-
-export const counterMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events: { type: "INCREMENT" }
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
-      entry: log(({ context }) => `Counter started at ${context.count}`),
-      on: {
-        INCREMENT: {
-          actions: [
-            logInfo("Incrementing counter"),
-            assign({ count: ({ context }) => context.count + 1 })
-          ]
-        }
-      }
-    }
-  }
-})
-```
-
-`log` writes at the info level by default. `logDebug`, `logInfo`, `logWarning` and `logError` write at their own level. Without a `logger` option on the actor, the entries go to Effect logging.
-
-### raise - Send Events to Self
-
-```typescript
-import { setup, raise } from "@jambudipa/xstate-effect"
-
-export const startupMachine = setup({
-  types: {} as {
-    context: {}
-    events: { type: "START" } | { type: "STARTED" }
-  }
-}).createMachine({
-  id: "example",
-  initial: "idle",
-  context: {},
-  states: {
-    idle: {
-      on: {
-        START: {
-          target: "starting",
-          actions: raise({ type: "STARTED" })  // Immediately raises STARTED
-        }
-      }
-    },
-    starting: {
-      on: {
-        STARTED: { target: "running" }
-      }
-    },
-    running: {}
-  }
-})
-```
-
-### sendTo - Send Events to Other Actors
-
-```typescript
-import { setup, sendTo, sendParent } from "@jambudipa/xstate-effect"
-
-// A child machine
-const otherMachine = setup({
-  types: {} as {
-    context: {}
-    events: { type: "PING" } | { type: "UPDATE"; value: number }
-  }
-}).createMachine({
-  id: "other",
-  context: {},
-  on: {
-    // Send to parent actor
-    PING: { actions: sendParent({ type: "CHILD_DONE" }) }
-  }
-})
-
-export const parentMachine = setup({
-  types: {} as {
-    context: { targetActorId: string; value: number }
-    events: { type: "PING_CHILD" } | { type: "UPDATE_CHILD" } | { type: "CHILD_DONE" }
-  },
-  actors: {
-    other: otherMachine
-  }
-}).createMachine({
-  id: "parent",
-  context: { targetActorId: "otherActorId", value: 42 },
-  invoke: { id: "otherActorId", src: "other" },
-  on: {
-    // Send to a specific actor by ID
-    PING_CHILD: { actions: sendTo("otherActorId", { type: "PING" }) },
-
-    // Dynamic target and event
-    UPDATE_CHILD: {
-      actions: sendTo(
-        ({ context }) => context.targetActorId,
-        ({ context }) => ({ type: "UPDATE", value: context.value })
-      )
-    }
-  }
-})
-```
-
-## Step 4: Multiple Actions
-
-Execute multiple actions in sequence:
-
-```typescript
-import { setup, assign, sendParent } from "@jambudipa/xstate-effect"
-import { Console } from "effect"
-
-export const counterMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events: { type: "INCREMENT" }
-  },
-  actions: {
-    increment: assign({ count: ({ context }) => context.count + 1 }),
-    logCount: ({ context }) => Console.log(`Count is now: ${context.count}`),
-    notifyParent: sendParent({ type: "COUNT_CHANGED" })
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: {
-          actions: ["increment", "logCount", "notifyParent"]
-        }
-      }
-    }
-  }
-})
-```
-
-Actions execute in order. The new context from `assign` is available to subsequent actions. The `notifyParent` action needs a parent: run this machine as a child actor (see [Tutorial 5](./05-child-actors.md)).
-
-## Step 5: Inline vs Named Actions
-
-**Inline actions** - defined directly in the machine:
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-import { Console } from "effect"
-
-export const inlineMachine = setup({
-  types: {} as {
-    context: { clicked: boolean }
-    events: { type: "CLICK" }
-  }
-}).createMachine({
-  id: "button",
-  initial: "active",
-  context: { clicked: false },
-  states: {
-    active: {
-      entry: () => Console.log("Entered!"),
-      on: {
-        CLICK: {
-          actions: assign({ clicked: true })
-        }
-      }
-    }
-  }
-})
-```
-
-**Named actions** - defined in setup, referenced by string:
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-import { Console } from "effect"
-
-export const namedMachine = setup({
-  types: {} as {
-    context: { clicked: boolean }
-    events: { type: "CLICK" }
-  },
-  actions: {
-    onEnter: () => Console.log("Entered!"),
-    onClick: assign({ clicked: true })
-  }
-}).createMachine({
-  id: "button",
-  initial: "active",
-  context: { clicked: false },
-  states: {
-    active: {
-      entry: "onEnter",
-      on: {
-        CLICK: { actions: "onClick" }
-      }
-    }
-  }
-})
-```
-
-Named actions are preferred for:
-- Reusability across transitions
-- Easier testing
-- Cleaner machine definitions
-
-## Complete Example: Notification System
-
-```typescript
-import { setup, createActor, assign } from "@jambudipa/xstate-effect"
-import { Effect, Console } from "effect"
-
-interface Notification {
-  id: string
-  message: string
-  type: "info" | "warning" | "error"
-}
-
-const notificationMachine = setup({
-  types: {} as {
-    context: {
-      notifications: Notification[]
-      lastId: number
-    }
-    events:
-      | { type: "ADD"; message: string; notificationType: "info" | "warning" | "error" }
-      | { type: "DISMISS"; id: string }
-      | { type: "CLEAR_ALL" }
-      | { type: "AUTO_DISMISS"; id: string }
-  },
-  actions: {
-    addNotification: assign({
-      notifications: ({ context, event }) => {
-        if (event.type !== "ADD") return context.notifications
-        const newNotification: Notification = {
-          id: `notif-${context.lastId + 1}`,
-          message: event.message,
-          type: event.notificationType
-        }
-        return [...context.notifications, newNotification]
-      },
-      lastId: ({ context }) => context.lastId + 1
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
     }),
-
-    dismissNotification: assign({
-      notifications: ({ context, event }) => {
-        if (event.type !== "DISMISS" && event.type !== "AUTO_DISMISS") {
-          return context.notifications
-        }
-        return context.notifications.filter(n => n.id !== event.id)
-      }
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
     }),
-
-    clearAll: assign({
-      notifications: []
-    }),
-
-    logNotification: ({ event }) =>
-      Effect.gen(function* () {
-        if (event.type === "ADD") {
-          yield* Console.log(`[${event.notificationType.toUpperCase()}] ${event.message}`)
-        }
-      }),
-
-    scheduleAutoDismiss: ({ context }) =>
-      Effect.gen(function* () {
-        const lastNotif = context.notifications[context.notifications.length - 1]
-        if (lastNotif) {
-          yield* Console.log(`Will auto-dismiss ${lastNotif.id} in 5 seconds`)
-        }
-      })
+    showLocked: () => Console.log("Barrier locked"),
+    showOpen: () => Console.log("Barrier open")
+  },
+  guards: {
+    isAcceptedCoin: ({ event }) =>
+      event.type === "COIN" && [10, 20, 50, 100, 200].includes(event.amount),
+    paysTheFare: ({ context, event }) =>
+      event.type === "COIN" && context.credit + event.amount >= context.fare,
+    unlocksTurnstile: and(["isAcceptedCoin", "paysTheFare"])
   }
 }).createMachine({
-  id: "notifications",
-  initial: "active",
-  context: {
-    notifications: [],
-    lastId: 0
-  },
+  id: "turnstile",
+  initial: "locked",
+  context: { fare: 100, credit: 0, passes: 0 },
   states: {
-    active: {
+    locked: {
+      entry: "showLocked",
       on: {
-        ADD: {
-          actions: ["addNotification", "logNotification", "scheduleAutoDismiss"]
-        },
-        DISMISS: {
-          actions: "dismissNotification"
-        },
-        AUTO_DISMISS: {
-          actions: "dismissNotification"
-        },
-        CLEAR_ALL: {
-          actions: "clearAll"
-        }
+        COIN: [
+          { guard: "unlocksTurnstile", target: "unlocked", actions: "addCredit" },
+          { guard: "isAcceptedCoin", actions: "addCredit" }
+        ]
+      }
+    },
+    unlocked: {
+      entry: "showOpen",
+      on: {
+        PUSH: { target: "locked", actions: "recordPass" }
       }
     }
   }
 })
 
 const program = Effect.gen(function* () {
-  const actor = yield* createActor(notificationMachine)
+  const actor = yield* createActor(turnstileMachine)
   yield* actor.start
-
-  yield* actor.send({
-    type: "ADD",
-    message: "Welcome to the app!",
-    notificationType: "info"
-  })
-
-  yield* actor.send({
-    type: "ADD",
-    message: "Your session will expire soon",
-    notificationType: "warning"
-  })
-
-  let snapshot = yield* actor.getSnapshot
-  console.log(`Active notifications: ${snapshot.context.notifications.length}`)
-
-  yield* actor.send({ type: "DISMISS", id: "notif-1" })
-
-  snapshot = yield* actor.getSnapshot
-  console.log(`After dismiss: ${snapshot.context.notifications.length}`)
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* actor.send({ type: "PUSH" })
 })
 
 void Effect.runPromise(Effect.scoped(program))
 ```
 
-## Exercises
+What changed:
 
-1. **Audit trail**: Create an action that logs all state transitions to an audit array in context.
+- `Console` comes from `effect`. `Console.log` gives an Effect that writes one line.
+- `showLocked` and `showOpen` are actions that return such an Effect. When an action returns an
+  Effect, the actor runs it.
+- `entry` names the actions that run each time the machine enters the state. For the initial
+  state, they run at `start`.
+- The program no longer prints snapshots: the actions now report what happens.
 
-2. **Analytics**: Add actions that track how long the machine spends in each state.
+Run the program:
 
-3. **Validation feedback**: Create a form machine where entry actions provide real-time validation feedback.
+```bash
+npx tsx turnstile.ts
+```
 
-## Key Takeaways
+**What you should see:**
 
-- **Entry actions** run when entering a state
-- **Exit actions** run when leaving a state
-- **Transition actions** run during a specific transition
-- A custom action can return an Effect, and the actor runs it
-- Built-in actions: `log`, `raise`, `sendTo`, `sendParent`
-- Multiple actions execute in sequence
-- Named actions (via setup) are cleaner than inline actions
+```text
+Barrier locked
+Barrier open
+Barrier locked
+```
 
-## What's Next
+The first line comes from `start`, which enters `locked`. The first 50p coin changes no state, so
+it prints nothing. The second unlocks the turnstile, and the push locks it again.
 
-In the [next tutorial](./05-child-actors.md), you'll learn how to spawn and communicate with child actors for parallel processing.
+## Step 2: Report the credit on each coin
+
+Replace the content of `turnstile.ts` with this program:
+
+```ts
+import { and, assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Console, Effect } from "effect"
+
+const turnstileMachine = setup({
+  types: {} as {
+    context: { fare: number; credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
+  },
+  actions: {
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
+    }),
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
+    }),
+    showLocked: () => Console.log("Barrier locked"),
+    showOpen: () => Console.log("Barrier open"),
+    showCredit: ({ context }) => Console.log(`Credit: ${context.credit}p`)
+  },
+  guards: {
+    isAcceptedCoin: ({ event }) =>
+      event.type === "COIN" && [10, 20, 50, 100, 200].includes(event.amount),
+    paysTheFare: ({ context, event }) =>
+      event.type === "COIN" && context.credit + event.amount >= context.fare,
+    unlocksTurnstile: and(["isAcceptedCoin", "paysTheFare"])
+  }
+}).createMachine({
+  id: "turnstile",
+  initial: "locked",
+  context: { fare: 100, credit: 0, passes: 0 },
+  states: {
+    locked: {
+      entry: "showLocked",
+      on: {
+        COIN: [
+          { guard: "unlocksTurnstile", target: "unlocked", actions: ["addCredit", "showCredit"] },
+          { guard: "isAcceptedCoin", actions: ["addCredit", "showCredit"] }
+        ]
+      }
+    },
+    unlocked: {
+      entry: "showOpen",
+      on: {
+        PUSH: { target: "locked", actions: "recordPass" }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(turnstileMachine)
+  yield* actor.start
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* actor.send({ type: "PUSH" })
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+What changed:
+
+- `showCredit` writes the credit from the context.
+- Both `COIN` transitions now list two actions: `addCredit`, then `showCredit`. The actions of a
+  list run in that order, and each one reads the context that the actions before it left.
+
+Run the program again with `npx tsx turnstile.ts`.
+
+**What you should see:**
+
+```text
+Barrier locked
+Credit: 50p
+Credit: 100p
+Barrier open
+Barrier locked
+```
+
+`showCredit` runs after `addCredit`, so it shows the credit with the new coin. On the second coin,
+`Credit: 100p` comes before `Barrier open`: the transition's actions run before the entry actions
+of the state it goes to.
+
+## Step 3: Report the passes when the barrier closes
+
+Replace the content of `turnstile.ts` with this program:
+
+```ts
+import { and, assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Console, Effect } from "effect"
+
+const turnstileMachine = setup({
+  types: {} as {
+    context: { fare: number; credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
+  },
+  actions: {
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
+    }),
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
+    }),
+    showLocked: () => Console.log("Barrier locked"),
+    showOpen: () => Console.log("Barrier open"),
+    showClosing: () => Console.log("Barrier closing"),
+    showCredit: ({ context }) => Console.log(`Credit: ${context.credit}p`),
+    showPasses: ({ context }) => Console.log(`Passes: ${context.passes}`)
+  },
+  guards: {
+    isAcceptedCoin: ({ event }) =>
+      event.type === "COIN" && [10, 20, 50, 100, 200].includes(event.amount),
+    paysTheFare: ({ context, event }) =>
+      event.type === "COIN" && context.credit + event.amount >= context.fare,
+    unlocksTurnstile: and(["isAcceptedCoin", "paysTheFare"])
+  }
+}).createMachine({
+  id: "turnstile",
+  initial: "locked",
+  context: { fare: 100, credit: 0, passes: 0 },
+  states: {
+    locked: {
+      entry: "showLocked",
+      on: {
+        COIN: [
+          { guard: "unlocksTurnstile", target: "unlocked", actions: ["addCredit", "showCredit"] },
+          { guard: "isAcceptedCoin", actions: ["addCredit", "showCredit"] }
+        ]
+      }
+    },
+    unlocked: {
+      entry: "showOpen",
+      exit: "showClosing",
+      on: {
+        PUSH: { target: "locked", actions: ["recordPass", "showPasses"] }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(turnstileMachine)
+  yield* actor.start
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* actor.send({ type: "PUSH" })
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+What changed:
+
+- `exit` names the actions that run each time the machine leaves the state. `unlocked` now runs
+  `showClosing` when it exits.
+- The `PUSH` transition runs `showPasses` after `recordPass`.
+
+Run the program again with `npx tsx turnstile.ts`.
+
+**What you should see:**
+
+```text
+Barrier locked
+Credit: 50p
+Credit: 100p
+Barrier open
+Barrier closing
+Passes: 1
+Barrier locked
+```
+
+Look at the last three lines, which the push gives. When a transition changes the state, the
+actor runs the exit actions of the old state first, then the actions of the transition, then the
+entry actions of the new state.
+
+## Step 4: Lock again when nobody passes
+
+Replace the content of `turnstile.ts` with this program:
+
+```ts
+import { and, assign, cancel, createActor, raise, setup, waitFor } from "@jambudipa/xstate-effect"
+import { Console, Effect } from "effect"
+
+const turnstileMachine = setup({
+  types: {} as {
+    context: { fare: number; credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" } | { type: "TIMEOUT" }
+  },
+  actions: {
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
+    }),
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
+    }),
+    refund: assign({ credit: 0 }),
+    showLocked: () => Console.log("Barrier locked"),
+    showOpen: () => Console.log("Barrier open"),
+    showClosing: () => Console.log("Barrier closing"),
+    showCredit: ({ context }) => Console.log(`Credit: ${context.credit}p`),
+    showPasses: ({ context }) => Console.log(`Passes: ${context.passes}`),
+    showRefund: ({ context }) => Console.log(`Timed out: refunding ${context.credit}p`),
+    startTimer: raise({ type: "TIMEOUT" }, { delay: 1000, id: "relock" }),
+    stopTimer: cancel("relock")
+  },
+  guards: {
+    isAcceptedCoin: ({ event }) =>
+      event.type === "COIN" && [10, 20, 50, 100, 200].includes(event.amount),
+    paysTheFare: ({ context, event }) =>
+      event.type === "COIN" && context.credit + event.amount >= context.fare,
+    unlocksTurnstile: and(["isAcceptedCoin", "paysTheFare"])
+  }
+}).createMachine({
+  id: "turnstile",
+  initial: "locked",
+  context: { fare: 100, credit: 0, passes: 0 },
+  states: {
+    locked: {
+      entry: "showLocked",
+      on: {
+        COIN: [
+          { guard: "unlocksTurnstile", target: "unlocked", actions: ["addCredit", "showCredit"] },
+          { guard: "isAcceptedCoin", actions: ["addCredit", "showCredit"] }
+        ]
+      }
+    },
+    unlocked: {
+      entry: ["showOpen", "startTimer"],
+      exit: ["showClosing", "stopTimer"],
+      on: {
+        PUSH: { target: "locked", actions: ["recordPass", "showPasses"] },
+        TIMEOUT: { target: "locked", actions: ["showRefund", "refund"] }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(turnstileMachine)
+  yield* actor.start
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* actor.send({ type: "PUSH" })
+  yield* actor.send({ type: "COIN", amount: 100 })
+
+  const snapshot = yield* waitFor(actor, (current) => current.matches("locked"))
+  console.log(`end: ${snapshot.value}`, snapshot.context)
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+What changed:
+
+- The machine accepts a `TIMEOUT` event.
+- `raise`, imported beside `assign`, builds an action that sends an event to the actor itself.
+  `startTimer` raises `TIMEOUT` with a `delay` of 1000 milliseconds, so the event arrives one
+  second after the action runs. The `id` names this delayed event.
+- `cancel("relock")` builds an action that calls off the delayed event with the id `relock`,
+  if it has not arrived yet.
+- `unlocked` starts the timer on entry and stops it on exit. A push within the second leaves
+  `unlocked`, so its `TIMEOUT` never arrives.
+- When `TIMEOUT` arrives, the turnstile locks and refunds the credit. `showRefund` comes before
+  `refund`, so it still reads the credit.
+- After the last coin, the program waits. `waitFor` gives an Effect that succeeds with the first
+  snapshot for which the function returns `true`: here, the first one in the `locked` state.
+
+Run the program again with `npx tsx turnstile.ts`.
+
+**What you should see:** the first nine lines at once, and the last four about one second later.
+
+```text
+Barrier locked
+Credit: 50p
+Credit: 100p
+Barrier open
+Barrier closing
+Passes: 1
+Barrier locked
+Credit: 100p
+Barrier open
+Barrier closing
+Timed out: refunding 100p
+Barrier locked
+end: locked { fare: 100, credit: 0, passes: 1 }
+```
+
+The first passenger pushes in time, so the first timer is cancelled. Nobody pushes after the
+100p coin, so the second timer fires: the barrier closes and the credit goes back to 0.
+
+Keep `turnstile.ts` as it is: [Test your machine](./07-testing.md) tests this machine.
+
+## What you learned
+
+- An action can return an Effect, and the actor runs it. `Console.log` is one such Effect.
+- `entry` actions run when the machine enters a state, and `exit` actions when it leaves one.
+  On a change of state, the order is exit actions, then the transition's actions, then entry
+  actions.
+- The actions of a list run in order, and each reads the context the earlier ones left.
+- `raise` sends an event to the actor itself; with `delay`, the event arrives later, and `cancel`
+  calls it off by its `id`.
+- `waitFor` waits for a snapshot that matches a condition.
+
+## Next steps
+
+- [Invoke and spawn child actors](./05-child-actors.md): run several turnstiles as children of a
+  station, in the same project.
+- [raise](../reference/actions/raise.md) and [cancel](../reference/actions/cancel.md) describe
+  every option of the two actions.
+- [How to use delayed transitions and delayed events](../how-to/use-delayed-transitions.md) shows
+  the other ways to act after a delay.
+- [How an actor processes events](../explanation/event-processing.md) explains the order in which
+  an actor runs actions and handles events.
+- [Why Effect](../explanation/why-effect.md) explains why actions return Effects.

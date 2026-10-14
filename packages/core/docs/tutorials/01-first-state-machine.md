@@ -1,333 +1,261 @@
-# Tutorial 1: Your First State Machine
+---
+title: Build your first state machine
+doc-type: tutorial
+sources: [packages/core/src/StateMachine.ts, packages/core/src/Actor.ts, packages/core/src/setup.ts]
+---
 
-In this tutorial, you'll build a simple toggle switch - a light that can be turned on and off. This will teach you the fundamental concepts of state machines in @jambudipa/xstate-effect.
+# Build your first state machine
 
-## What You'll Learn
+> **TL;DR:** You build a coin-operated turnstile with two states, `locked` and `unlocked`, from an
+> empty folder. You define it with `setup` and `createMachine`, run it as an actor, send it events
+> and read its snapshot. The same turnstile grows through every tutorial that follows.
 
-- How to define a state machine with `setup` and `createMachine`
-- How to create and run an actor
-- How to send events to trigger transitions
-- How to read the current state
+## What you will build
 
-## Prerequisites
+A turnstile at a station barrier. It starts `locked`. A coin unlocks it; a push lets one person
+through and locks it again. A push while it is locked does nothing.
 
-Create a new project and install the dependencies:
+| State      | Event  | Next state |
+| ---------- | ------ | ---------- |
+| `locked`   | `COIN` | `unlocked` |
+| `unlocked` | `PUSH` | `locked`   |
+
+At the end of this tutorial you have a program that prints:
+
+```text
+start: locked (active)
+after COIN: unlocked (active)
+after PUSH: locked (active)
+after PUSH: locked (active)
+```
+
+## Before you start
+
+- Node.js 20 or later, with npm. `node --version` prints the version you have.
+- A terminal and a text editor.
+- Some TypeScript. You do not need to know Effect: this tutorial explains the few parts of it
+  that it uses.
+
+## Step 1: Create the project
+
+Run these commands in a terminal:
 
 ```bash
-mkdir my-state-machine
-cd my-state-machine
+mkdir turnstile
+cd turnstile
 npm init -y
-npm install @jambudipa/xstate-effect effect typescript
+npm pkg set type=module
+npm install @jambudipa/xstate-effect effect
+npm install --save-dev tsx typescript
 ```
 
-## Step 1: Define the Machine
+`@jambudipa/xstate-effect` is the state machine library, and `effect` is the library it is built
+on; your project needs both. `tsx` runs a TypeScript file directly, and `typescript` checks your
+types. The library ships as ES modules only, so `npm pkg set type=module` makes your project an ES
+module project too.
 
-A state machine describes all possible states and the events that cause transitions between them. Let's define a toggle switch:
+**What you should see:** each `npm install` ends without an error. `package.json` now lists
+`@jambudipa/xstate-effect` and `effect` under `dependencies`, `tsx` and `typescript` under
+`devDependencies`, and has `"type": "module"`. A recent npm can also warn that it did not run the
+install script of `esbuild`, a package that `tsx` uses; you can ignore that warning, because `tsx`
+works without the script.
 
-```typescript
-// toggle.ts
+## Step 2: Configure TypeScript
+
+Create a file named `tsconfig.json` in the `turnstile` folder:
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "module": "nodenext",
+    "target": "es2022",
+    "noEmit": true,
+    "skipLibCheck": true
+  }
+}
+```
+
+**What you should see:** nothing yet. The next step uses this file to check your machine.
+
+## Step 3: Define the machine
+
+Create a file named `turnstile.ts` with this content:
+
+```ts
 import { setup } from "@jambudipa/xstate-effect"
 
-const _toggleMachine = setup({
+export const turnstileMachine = setup({
   types: {} as {
-    context: {}
-    events: { type: "TOGGLE" }
+    events: { type: "COIN" } | { type: "PUSH" }
   }
 }).createMachine({
-  id: "toggle",
-  initial: "inactive",
-  context: {},
+  id: "turnstile",
+  initial: "locked",
   states: {
-    inactive: {
+    locked: {
       on: {
-        TOGGLE: { target: "active" }
+        COIN: { target: "unlocked" }
       }
     },
-    active: {
+    unlocked: {
       on: {
-        TOGGLE: { target: "inactive" }
+        PUSH: { target: "locked" }
       }
     }
   }
 })
 ```
 
-Let's break this down:
+`setup` takes the types of your machine. The `types: {} as { … }` line declares them for
+TypeScript only: the empty object carries no data. Here it says that the machine accepts two
+events, `COIN` and `PUSH`, and no others.
 
-### The `setup` Function
+`createMachine` takes the machine itself:
 
-```typescript
-import { setup } from "@jambudipa/xstate-effect"
+- `id` names the machine.
+- `initial` names the state the machine starts in.
+- `states` lists the states. In each state, `on` maps an event type to a transition, and `target`
+  names the state that the transition goes to.
 
-export const toggleSetup = setup({
-  types: {} as {
-    context: {}
-    events: { type: "TOGGLE" }
-  }
-})
+Check the types:
+
+```bash
+npx tsc
 ```
 
-The `setup` function creates a type-safe factory for your machine. The `types` object defines:
-- `context`: The data the machine holds (empty for now)
-- `events`: The events the machine can receive (just `TOGGLE`)
+**What you should see:** no output. `tsc` prints nothing when your types are correct.
 
-### The `createMachine` Method
+## Step 4: Run the machine in an actor
 
-```typescript
-import { setup } from "@jambudipa/xstate-effect"
+The machine is only a definition, and nothing runs yet. To run it, you create an **actor**: a
+running instance of the machine that holds its current state and takes events.
 
-export const toggleMachine = setup({
-  types: {} as {
-    context: {}
-    events: { type: "TOGGLE" }
-  }
-}).createMachine({
-  id: "toggle",
-  initial: "inactive",
-  context: {},
-  states: {
-    // The next section adds the transitions
-    inactive: {},
-    active: {}
-  }
-})
-```
+Replace the content of `turnstile.ts` with this program:
 
-Call `createMachine` on the result of `setup`. This creates the actual machine definition:
-- `id`: A unique identifier for the machine
-- `initial`: The starting state
-- `context`: The initial data
-- `states`: The possible states and their transitions
-
-### State Definitions
-
-```typescript
-import { setup } from "@jambudipa/xstate-effect"
-
-export const toggleMachine = setup({
-  types: {} as {
-    context: {}
-    events: { type: "TOGGLE" }
-  }
-}).createMachine({
-  id: "toggle",
-  initial: "inactive",
-  context: {},
-  states: {
-    inactive: {
-      on: {
-        TOGGLE: { target: "active" }
-      }
-    },
-    active: {
-      on: {
-        TOGGLE: { target: "inactive" }
-      }
-    }
-  }
-})
-```
-
-Each state defines which events it responds to in the `on` property. When a `TOGGLE` event is received:
-- In `inactive` state → transition to `active`
-- In `active` state → transition to `inactive`
-
-## Step 2: Create and Run an Actor
-
-A machine is just a definition - like a blueprint. To actually run it, we need to create an **actor**:
-
-```typescript
-import { setup, createActor } from "@jambudipa/xstate-effect"
+```ts
+import { createActor, setup } from "@jambudipa/xstate-effect"
 import { Effect } from "effect"
 
-const toggleMachine = setup({
+const turnstileMachine = setup({
   types: {} as {
-    context: {}
-    events: { type: "TOGGLE" }
+    events: { type: "COIN" } | { type: "PUSH" }
   }
 }).createMachine({
-  id: "toggle",
-  initial: "inactive",
-  context: {},
+  id: "turnstile",
+  initial: "locked",
   states: {
-    inactive: {
+    locked: {
       on: {
-        TOGGLE: { target: "active" }
+        COIN: { target: "unlocked" }
       }
     },
-    active: {
+    unlocked: {
       on: {
-        TOGGLE: { target: "inactive" }
+        PUSH: { target: "locked" }
       }
     }
   }
 })
 
 const program = Effect.gen(function* () {
-  // Create an actor from the machine
-  const actor = yield* createActor(toggleMachine)
-
-  // Start the actor
+  const actor = yield* createActor(turnstileMachine)
   yield* actor.start
 
-  // Get the initial state
-  const initialSnapshot = yield* actor.getSnapshot
-  console.log("Initial state:", initialSnapshot.value)
-  // Output: Initial state: inactive
+  const report = (label: string) =>
+    Effect.gen(function* () {
+      const snapshot = yield* actor.getSnapshot
+      console.log(`${label}: ${snapshot.value} (${snapshot.status})`)
+    })
 
-  // Send a TOGGLE event
-  yield* actor.send({ type: "TOGGLE" })
-
-  // Check the new state
-  const afterToggle = yield* actor.getSnapshot
-  console.log("After toggle:", afterToggle.value)
-  // Output: After toggle: active
-
-  // Toggle again
-  yield* actor.send({ type: "TOGGLE" })
-
-  const final = yield* actor.getSnapshot
-  console.log("Final state:", final.value)
-  // Output: Final state: inactive
+  yield* report("start")
+  yield* actor.send({ type: "COIN" })
+  yield* report("after COIN")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
 })
 
-// Run the program. Effect.scoped gives the actor a scope: when the program ends, the scope
-// closes and the actor stops.
 void Effect.runPromise(Effect.scoped(program))
 ```
 
-### Key Concepts
+The machine is the same as in step 3. The new parts are:
 
-1. **`createActor(machine)`**: An Effect that creates a new actor from a machine definition. The actor lives in the caller's `Scope`, so wrap the program in `Effect.scoped`
-2. **`actor.start`**: An Effect that starts the actor and enters the initial state
-3. **`actor.send(event)`**: Returns an Effect that sends an event to the actor. The Effect completes when the actor has processed the event
-4. **`actor.getSnapshot`**: An Effect that gives the current state of the actor
+- `Effect.gen(function* () { … })` describes a program as a sequence of steps. Each `yield*` runs
+  one step and gives back its result.
+- `createActor(turnstileMachine)` creates the actor, and `actor.start` starts it in its initial
+  state.
+- `actor.send(event)` gives the actor an event. When the step ends, the actor has processed the
+  event.
+- `actor.getSnapshot` reads the actor's current **snapshot**. `snapshot.value` is the current
+  state, and `snapshot.status` is `active` while the actor runs.
+- `report` prints the snapshot with a label. It is a small program of its own, so each
+  `yield* report(…)` reads a fresh snapshot.
+- `Effect.runPromise(Effect.scoped(program))` runs the program. `Effect.scoped` gives the actor a
+  scope: when the program ends, the scope closes and the actor stops.
 
-`start`, `getSnapshot` and the result of `send` are Effects, not functions that return Promises: run each one with `yield*` inside `Effect.gen`.
-
-## Step 3: Understanding Snapshots
-
-The snapshot contains all information about the actor's current state:
-
-```typescript
-import { setup, createActor } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
-
-const toggleMachine = setup({
-  types: {} as {
-    context: {}
-    events: { type: "TOGGLE" }
-  }
-}).createMachine({
-  id: "toggle",
-  initial: "inactive",
-  context: {},
-  states: {
-    inactive: { on: { TOGGLE: { target: "active" } } },
-    active: { on: { TOGGLE: { target: "inactive" } } }
-  }
-})
-
-export const inspectSnapshot = Effect.gen(function* () {
-  const actor = yield* createActor(toggleMachine)
-  yield* actor.start
-
-  const snapshot = yield* actor.getSnapshot
-
-  // The current state value
-  console.log(snapshot.value) // "inactive" | "active"
-
-  // The context (data)
-  console.log(snapshot.context) // {}
-
-  // The status of the actor
-  console.log(snapshot.status) // "active" | "done" | "error" | "stopped"
-})
-```
-
-## Complete Example
-
-Here's the complete working code:
-
-```typescript
-// toggle.ts
-import { setup, createActor } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
-
-// 1. Define the machine
-const toggleMachine = setup({
-  types: {} as {
-    context: {}
-    events: { type: "TOGGLE" }
-  }
-}).createMachine({
-  id: "toggle",
-  initial: "inactive",
-  context: {},
-  states: {
-    inactive: {
-      on: {
-        TOGGLE: { target: "active" }
-      }
-    },
-    active: {
-      on: {
-        TOGGLE: { target: "inactive" }
-      }
-    }
-  }
-})
-
-// 2. Create and run an actor
-const program = Effect.gen(function* () {
-  const actor = yield* createActor(toggleMachine)
-  yield* actor.start
-
-  console.log("Toggle machine started!")
-
-  // Get initial state
-  let snapshot = yield* actor.getSnapshot
-  console.log(`State: ${snapshot.value}`) // inactive
-
-  // Toggle on
-  yield* actor.send({ type: "TOGGLE" })
-  snapshot = yield* actor.getSnapshot
-  console.log(`State: ${snapshot.value}`) // active
-
-  // Toggle off
-  yield* actor.send({ type: "TOGGLE" })
-  snapshot = yield* actor.getSnapshot
-  console.log(`State: ${snapshot.value}`) // inactive
-})
-
-// 3. Run the program in a scope; the actor stops when the scope closes
-void Effect.runPromise(Effect.scoped(program)).then(() => {
-  console.log("Done!")
-})
-```
-
-Run it:
+Run the program:
 
 ```bash
-npx tsx toggle.ts
+npx tsx turnstile.ts
 ```
 
-## Exercises
+**What you should see:**
 
-1. **Add a third state**: Modify the machine to have three states: `off`, `dim`, and `bright`. The `TOGGLE` event should cycle through them.
+```text
+start: locked (active)
+after COIN: unlocked (active)
+after PUSH: locked (active)
+after PUSH: locked (active)
+```
 
-2. **Add multiple events**: Add `TURN_ON` and `TURN_OFF` events that go directly to specific states regardless of the current state.
+The coin unlocks the turnstile and the push locks it again. The second push arrives while the
+turnstile is `locked`, a state with no transition for `PUSH`, so the machine ignores it and stays
+`locked`.
 
-3. **Explore the snapshot**: Log the entire snapshot object and explore its properties.
+## Step 5: Let TypeScript check your events
 
-## Key Takeaways
+In `turnstile.ts`, change the line `yield* actor.send({ type: "COIN" })` to send an event the
+machine does not know:
 
-- A **machine** is a definition (blueprint) of states and transitions
-- An **actor** is a running instance of a machine
-- **Events** trigger transitions between states
-- **Snapshots** represent the current state of an actor
-- Everything runs inside `Effect.gen` for type-safe, composable code
+```text
+  yield* actor.send({ type: "KICK" })
+```
 
-## What's Next
+Run the type check:
 
-In the [next tutorial](./02-working-with-context.md), you'll learn how to add data to your machines with context and the `assign` action.
+```bash
+npx tsc
+```
+
+**What you should see:** an error like this one.
+
+```text
+turnstile.ts(36,23): error TS2322: Type '"KICK"' is not assignable to type '"COIN" | "PUSH"'.
+```
+
+The event types you gave `setup` reach every `send`. Change `KICK` back to `COIN` and run
+`npx tsc` again: it prints nothing.
+
+## What you learned
+
+- `setup` declares the types of a machine, and its `createMachine` defines the states and the
+  transitions between them.
+- A transition goes from one state to another when the state receives the event it names. A state
+  ignores an event it has no transition for.
+- `createActor` turns a machine into a running actor; `start`, `send` and `getSnapshot` are steps
+  that you run with `yield*` inside `Effect.gen`.
+- A snapshot holds the current state in `value` and the actor's status in `status`.
+- `Effect.runPromise(Effect.scoped(program))` runs the program, and the actor stops when it ends.
+
+## Next steps
+
+- [Keep data in context](./02-working-with-context.md): give the turnstile data of its own, in the
+  same project.
+- [createMachine and the machine](../reference/create-machine.md) describes the machine definition
+  and what it can hold.
+- [createActor and the actor](../reference/create-actor.md) describes the actor's options and
+  members.
+- [About state machines and statecharts](../explanation/state-machines.md) explains the ideas
+  behind states and transitions.

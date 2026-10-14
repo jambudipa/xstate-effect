@@ -1,389 +1,305 @@
-# Tutorial 2: Working with Context
+---
+title: Keep data in context
+doc-type: tutorial
+sources: [packages/core/src/actions/assign.ts, packages/core/src/setup.ts]
+---
 
-In the previous tutorial, you built a simple toggle switch. Now you'll learn how to add data to your machines using **context** - the internal data store of a state machine.
+# Keep data in context
 
-## What You'll Learn
+> **TL;DR:** You give the turnstile from the first tutorial data of its own: the credit paid so far
+> and the number of people who have passed. You declare the shape of that data, its **context**,
+> give the `COIN` event a payload, and update the context with `assign` — first on the transitions,
+> then as named actions in `setup`.
 
-- How to define typed context
-- How to initialize context
-- How to update context with the `assign` action
-- How to access context in snapshots
+## What you will build
 
-## The Counter Machine
+The turnstile now records money and passes. A `COIN` event carries the coin's value in pence, in
+`amount`, and the turnstile adds it to `credit` as it unlocks. A `PUSH` adds one to `passes` and
+clears the credit. At the end of this tutorial the program prints:
 
-We'll build a counter that can increment, decrement, and reset. The count value will be stored in context.
-
-## Step 1: Define Context Types
-
-First, define the shape of your context in the `types` object:
-
-```typescript
-import { setup } from "@jambudipa/xstate-effect"
-
-export const counterMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events:
-      | { type: "INCREMENT" }
-      | { type: "DECREMENT" }
-      | { type: "RESET" }
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },  // Initial context value
-  states: {
-    active: {
-      on: {
-        INCREMENT: { /* we'll add actions here */ },
-        DECREMENT: { /* we'll add actions here */ },
-        RESET: { /* we'll add actions here */ }
-      }
-    }
-  }
-})
+```text
+start: locked { credit: 0, passes: 0 }
+after COIN: unlocked { credit: 50, passes: 0 }
+after PUSH: locked { credit: 0, passes: 1 }
+after COIN: unlocked { credit: 20, passes: 1 }
+after PUSH: locked { credit: 0, passes: 2 }
 ```
 
-The `context` type defines:
-- `count: number` - the current count value
+## Before you start
 
-The initial context is set in `createMachine`:
-- `context: { count: 0 }` - starts at zero
+Complete [Build your first state machine](./01-first-state-machine.md). This tutorial continues
+in its `turnstile` project and changes its `turnstile.ts` file.
 
-## Step 2: Update Context with assign
+## Step 1: Declare the context and the event data
 
-The `assign` action updates context. Import it and add actions to your transitions:
+Replace the content of `turnstile.ts` with this program:
 
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const counterMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events:
-      | { type: "INCREMENT" }
-      | { type: "DECREMENT" }
-      | { type: "RESET" }
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: {
-          actions: assign({ count: ({ context }) => context.count + 1 })
-        },
-        DECREMENT: {
-          actions: assign({ count: ({ context }) => context.count - 1 })
-        },
-        RESET: {
-          actions: assign({ count: 0 })
-        }
-      }
-    }
-  }
-})
-```
-
-### The assign Action
-
-`assign` can be used in two ways:
-
-**Static assignment** - set a fixed value:
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const resetMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events: { type: "RESET" }
-  }
-}).createMachine({
-  context: { count: 5 },
-  on: {
-    RESET: { actions: assign({ count: 0 }) }
-  }
-})
-```
-
-**Dynamic assignment** - compute the new value:
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const incrementMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events: { type: "INCREMENT" }
-  }
-}).createMachine({
-  context: { count: 0 },
-  on: {
-    INCREMENT: { actions: assign({ count: ({ context }) => context.count + 1 }) }
-  }
-})
-```
-
-The function receives an object with:
-- `context`: The current context
-- `event`: The event that triggered the transition
-
-## Step 3: Access Event Data
-
-Events can carry data. Let's add an `ADD` event that specifies how much to add:
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const counterMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events:
-      | { type: "INCREMENT" }
-      | { type: "DECREMENT" }
-      | { type: "RESET" }
-      | { type: "ADD"; amount: number }
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: {
-          actions: assign({ count: ({ context }) => context.count + 1 })
-        },
-        DECREMENT: {
-          actions: assign({ count: ({ context }) => context.count - 1 })
-        },
-        RESET: {
-          actions: assign({ count: 0 })
-        },
-        ADD: {
-          actions: assign({
-            count: ({ context, event }) => context.count + event.amount
-          })
-        }
-      }
-    }
-  }
-})
-```
-
-Now you can send events with data:
-
-```typescript
-import { setup, assign, createActor } from "@jambudipa/xstate-effect"
+```ts
+import { createActor, setup } from "@jambudipa/xstate-effect"
 import { Effect } from "effect"
 
-const counterMachine = setup({
+const turnstileMachine = setup({
   types: {} as {
-    context: { count: number }
-    events: { type: "ADD"; amount: number }
+    context: { credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
   }
 }).createMachine({
-  context: { count: 0 },
-  on: {
-    ADD: { actions: assign({ count: ({ context, event }) => context.count + event.amount }) }
-  }
-})
-
-export const addFive = Effect.gen(function* () {
-  const actor = yield* createActor(counterMachine)
-  yield* actor.start
-  yield* actor.send({ type: "ADD", amount: 5 })
-
-  const snapshot = yield* actor.getSnapshot
-  console.log(snapshot.context.count) // 5
-})
-```
-
-## Step 4: Multiple Context Properties
-
-Context can have multiple properties:
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const counterMachine = setup({
-  types: {} as {
-    context: {
-      count: number
-      min: number
-      max: number
-      history: number[]
-    }
-    events:
-      | { type: "INCREMENT" }
-      | { type: "DECREMENT" }
-      | { type: "RESET" }
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: {
-    count: 0,
-    min: 0,
-    max: 10,
-    history: []
-  },
+  id: "turnstile",
+  initial: "locked",
+  context: { credit: 0, passes: 0 },
   states: {
-    active: {
+    locked: {
       on: {
-        INCREMENT: {
-          actions: assign({
-            count: ({ context }) => Math.min(context.count + 1, context.max),
-            history: ({ context }) => [...context.history, context.count]
-          })
-        },
-        DECREMENT: {
-          actions: assign({
-            count: ({ context }) => Math.max(context.count - 1, context.min),
-            history: ({ context }) => [...context.history, context.count]
-          })
-        },
-        RESET: {
-          actions: assign({
-            count: 0,
-            history: []
-          })
-        }
+        COIN: { target: "unlocked" }
       }
-    }
-  }
-})
-```
-
-## Step 5: Named Actions with setup
-
-For cleaner code, define actions in the `setup` function:
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const counterMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events:
-      | { type: "INCREMENT" }
-      | { type: "DECREMENT" }
-      | { type: "RESET" }
-  },
-  actions: {
-    increment: assign({ count: ({ context }) => context.count + 1 }),
-    decrement: assign({ count: ({ context }) => context.count - 1 }),
-    reset: assign({ count: 0 })
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
+    },
+    unlocked: {
       on: {
-        INCREMENT: { actions: "increment" },
-        DECREMENT: { actions: "decrement" },
-        RESET: { actions: "reset" }
-      }
-    }
-  }
-})
-```
-
-This approach:
-- Makes the machine definition cleaner
-- Allows action reuse across transitions
-- Keeps logic organized
-
-## Complete Example
-
-```typescript
-import { setup, createActor, assign } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
-
-const counterMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events:
-      | { type: "INCREMENT" }
-      | { type: "DECREMENT" }
-      | { type: "RESET" }
-      | { type: "ADD"; amount: number }
-  },
-  actions: {
-    increment: assign({ count: ({ context }) => context.count + 1 }),
-    decrement: assign({ count: ({ context }) => context.count - 1 }),
-    reset: assign({ count: 0 }),
-    add: assign({ count: ({ context, event }) => {
-      if (event.type === "ADD") {
-        return context.count + event.amount
-      }
-      return context.count
-    }})
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: { actions: "increment" },
-        DECREMENT: { actions: "decrement" },
-        RESET: { actions: "reset" },
-        ADD: { actions: "add" }
+        PUSH: { target: "locked" }
       }
     }
   }
 })
 
 const program = Effect.gen(function* () {
-  const actor = yield* createActor(counterMachine)
+  const actor = yield* createActor(turnstileMachine)
   yield* actor.start
 
-  let snapshot = yield* actor.getSnapshot
-  console.log(`Initial count: ${snapshot.context.count}`) // 0
+  const report = (label: string) =>
+    Effect.gen(function* () {
+      const snapshot = yield* actor.getSnapshot
+      console.log(`${label}: ${snapshot.value}`, snapshot.context)
+    })
 
-  yield* actor.send({ type: "INCREMENT" })
-  yield* actor.send({ type: "INCREMENT" })
-  yield* actor.send({ type: "INCREMENT" })
-
-  snapshot = yield* actor.getSnapshot
-  console.log(`After 3 increments: ${snapshot.context.count}`) // 3
-
-  yield* actor.send({ type: "ADD", amount: 10 })
-
-  snapshot = yield* actor.getSnapshot
-  console.log(`After adding 10: ${snapshot.context.count}`) // 13
-
-  yield* actor.send({ type: "RESET" })
-
-  snapshot = yield* actor.getSnapshot
-  console.log(`After reset: ${snapshot.context.count}`) // 0
+  yield* report("start")
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* report("after COIN")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
 })
 
-// Effect.scoped closes the actor's scope when the program ends
 void Effect.runPromise(Effect.scoped(program))
 ```
 
-## Exercises
+Three things changed:
 
-1. **Bounded counter**: Add `min` and `max` to context. Prevent the count from going below min or above max.
+- `context: { credit: number; passes: number }` in `types` declares the shape of the machine's
+  data, and `context: { credit: 0, passes: 0 }` in `createMachine` gives its starting value.
+- The `COIN` event now has an `amount` field, so every `COIN` you send must carry one:
+  `{ type: "COIN", amount: 50 }` is a 50p coin.
+- `report` prints `snapshot.context`, the machine's data, beside the state.
 
-2. **Undo feature**: Store history in context. Add an `UNDO` event that restores the previous count.
+Run the program:
 
-3. **Step size**: Add a `step` property to context. Use it in increment/decrement instead of hardcoding 1.
+```bash
+npx tsx turnstile.ts
+```
 
-## Key Takeaways
+**What you should see:**
 
-- **Context** stores the data associated with a machine
-- **assign** is the primary way to update context
-- assign can use static values or functions that receive context and event
-- Events can carry additional data (payload)
-- Named actions in `setup` keep machines organized
+```text
+start: locked { credit: 0, passes: 0 }
+after COIN: unlocked { credit: 0, passes: 0 }
+after PUSH: locked { credit: 0, passes: 0 }
+```
 
-## What's Next
+The context is there, but nothing changes it yet: the 50p coin unlocks the turnstile and is not
+counted. `npx tsc` still prints nothing.
 
-In the [next tutorial](./03-guards-and-transitions.md), you'll learn how to use guards to conditionally allow or prevent transitions.
+## Step 2: Update the context with `assign`
+
+Replace the content of `turnstile.ts` with this program:
+
+```ts
+import { assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const turnstileMachine = setup({
+  types: {} as {
+    context: { credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
+  }
+}).createMachine({
+  id: "turnstile",
+  initial: "locked",
+  context: { credit: 0, passes: 0 },
+  states: {
+    locked: {
+      on: {
+        COIN: {
+          target: "unlocked",
+          actions: assign({
+            credit: ({ context, event }) => context.credit + event.amount
+          })
+        }
+      }
+    },
+    unlocked: {
+      on: {
+        PUSH: {
+          target: "locked",
+          actions: assign({
+            credit: 0,
+            passes: ({ context }) => context.passes + 1
+          })
+        }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(turnstileMachine)
+  yield* actor.start
+
+  const report = (label: string) =>
+    Effect.gen(function* () {
+      const snapshot = yield* actor.getSnapshot
+      console.log(`${label}: ${snapshot.value}`, snapshot.context)
+    })
+
+  yield* report("start")
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* report("after COIN")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
+  yield* actor.send({ type: "COIN", amount: 20 })
+  yield* report("after COIN")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+Each transition now has `actions`: the things the machine does when it takes the transition.
+`assign` is the action that updates the context:
+
+- Each key of the object you pass to `assign` is a context property to change.
+- A function value computes the new value. It receives `context`, the data before the action, and
+  `event`, the event being processed. Under `on: { COIN: … }`, `event` is the `COIN` event, so
+  `event.amount` is a number.
+- A plain value, such as `credit: 0`, replaces the old value as it is.
+- A property you leave out keeps its value.
+
+Run the program again with `npx tsx turnstile.ts`.
+
+**What you should see:**
+
+```text
+start: locked { credit: 0, passes: 0 }
+after COIN: unlocked { credit: 50, passes: 0 }
+after PUSH: locked { credit: 0, passes: 1 }
+after COIN: unlocked { credit: 20, passes: 1 }
+after PUSH: locked { credit: 0, passes: 2 }
+```
+
+Each coin adds its value to `credit`, and each push counts a pass and clears the credit.
+
+## Step 3: Name the actions in `setup`
+
+The actions work, but they sit inside the states. Move them into `setup`, where they get names.
+Replace the content of `turnstile.ts` with this program:
+
+```ts
+import { assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+const turnstileMachine = setup({
+  types: {} as {
+    context: { credit: number; passes: number }
+    events: { type: "COIN"; amount: number } | { type: "PUSH" }
+  },
+  actions: {
+    addCredit: assign({
+      credit: ({ context, event }) =>
+        event.type === "COIN" ? context.credit + event.amount : context.credit
+    }),
+    recordPass: assign({
+      credit: 0,
+      passes: ({ context }) => context.passes + 1
+    })
+  }
+}).createMachine({
+  id: "turnstile",
+  initial: "locked",
+  context: { credit: 0, passes: 0 },
+  states: {
+    locked: {
+      on: {
+        COIN: { target: "unlocked", actions: "addCredit" }
+      }
+    },
+    unlocked: {
+      on: {
+        PUSH: { target: "locked", actions: "recordPass" }
+      }
+    }
+  }
+})
+
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(turnstileMachine)
+  yield* actor.start
+
+  const report = (label: string) =>
+    Effect.gen(function* () {
+      const snapshot = yield* actor.getSnapshot
+      console.log(`${label}: ${snapshot.value}`, snapshot.context)
+    })
+
+  yield* report("start")
+  yield* actor.send({ type: "COIN", amount: 50 })
+  yield* report("after COIN")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
+  yield* actor.send({ type: "COIN", amount: 20 })
+  yield* report("after COIN")
+  yield* actor.send({ type: "PUSH" })
+  yield* report("after PUSH")
+})
+
+void Effect.runPromise(Effect.scoped(program))
+```
+
+What changed:
+
+- `setup` now takes an `actions` record. Each key names an action, and each transition refers to
+  its action by that name: `actions: "addCredit"`.
+- An action in the record can be used for any event, so its `event` is any event of the machine.
+  `addCredit` checks `event.type === "COIN"` before it reads `event.amount`, and keeps the credit
+  for any other event.
+- TypeScript checks the names. A transition that names an action the record does not hold, such
+  as `"addCredits"`, fails `npx tsc`.
+
+Run the program again with `npx tsx turnstile.ts`.
+
+**What you should see:** the same output as in step 2.
+
+```text
+start: locked { credit: 0, passes: 0 }
+after COIN: unlocked { credit: 50, passes: 0 }
+after PUSH: locked { credit: 0, passes: 1 }
+after COIN: unlocked { credit: 20, passes: 1 }
+after PUSH: locked { credit: 0, passes: 2 }
+```
+
+The machine behaves as before; only the place of its actions changed.
+
+## What you learned
+
+- The context is the machine's own data. You declare its type in `types.context` and its starting
+  value in the `context` of `createMachine`, and `snapshot.context` shows it.
+- An event can carry data beside its `type`, and TypeScript makes every send include it.
+- `assign` updates the context. A function value computes a property from `context` and `event`;
+  a plain value replaces it; a property you leave out keeps its value.
+- Actions named in the `actions` record of `setup` can be used by name in any transition.
+
+## Next steps
+
+- [Guard your transitions](./03-guards-and-transitions.md): make the turnstile ask for a fare
+  before it unlocks, in the same project.
+- [assign and assignProperty](../reference/actions/assign.md) describes the forms `assign` takes.
+- [How to type a machine's context, events, input and output](../how-to/define-custom-types.md)
+  also covers the types of a machine's input and output.
+- [setup and setupWithSchema](../reference/setup.md) describes everything `setup` takes.
