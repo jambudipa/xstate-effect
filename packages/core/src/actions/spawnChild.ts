@@ -179,7 +179,9 @@ const resolveOption = <TContext, TEvent extends EventObject, A>(
  * // function has no contextual type (upstream `input?: unknown`), so annotate it
  * spawnChild(workerLogic, {
  *   id: (ctx) => `worker-${ctx.context.workerId}`,
- *   input: (ctx: { readonly context: { readonly currentTask: string } }) => ({ taskId: ctx.context.currentTask })
+ *   input: (ctx: { readonly context: { readonly workerId: string; readonly currentTask: string } }) => ({
+ *     taskId: ctx.context.currentTask
+ *   })
  * })
  * ```
  *

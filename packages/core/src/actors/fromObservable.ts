@@ -305,12 +305,18 @@ const persist = Persistence.persistObservableSnapshot
  *
  * @example
  * ```ts
- * import { interval } from 'rxjs'
- * import { take } from 'rxjs/operators'
+ * import { fromObservable, type Subscribable } from "@jambudipa/xstate-effect"
  *
- * const tickerActor = fromObservable(({ input }) =>
- *   interval(input.intervalMs).pipe(take(10))
- * )
+ * // Any value with `subscribe(observer)` works: an RxJS Observable, or one written by hand
+ * const countTo = (last: number): Subscribable<number> => ({
+ *   subscribe: (observer) => {
+ *     for (let value = 1; value <= last; value++) observer.next?.(value)
+ *     observer.complete?.()
+ *     return { unsubscribe: () => {} }
+ *   }
+ * })
+ *
+ * export const tickerActor = fromObservable<number, { last: number }>(({ input }) => countTo(input.last))
  * ```
  *
  * @since 0.1.0
@@ -349,9 +355,19 @@ export const fromObservable = <TContext, TInput = unknown, TEmitted extends Even
  *
  * @example
  * ```ts
- * import { fromEvent } from 'rxjs'
+ * import { fromEventObservable, type Subscribable } from "@jambudipa/xstate-effect"
  *
- * const clicks = fromEventObservable(() => fromEvent(document.body, 'click') as Subscribable<EventObject>)
+ * type Click = { type: "CLICK"; x: number }
+ *
+ * // Each value the source gives is an event that the actor sends to its parent
+ * const clicks: Subscribable<Click> = {
+ *   subscribe: (observer) => {
+ *     observer.next?.({ type: "CLICK", x: 10 })
+ *     return { unsubscribe: () => {} }
+ *   }
+ * }
+ *
+ * export const clickActor = fromEventObservable(() => clicks)
  * ```
  *
  * @since 0.1.0
@@ -417,10 +433,11 @@ const runStream = <TInput, TOutput, E, R>(
  *
  * @example
  * ```ts
- * const tickerActor = fromStream(({ input }) =>
- *   Stream.fromSchedule(Schedule.spaced(Duration.seconds(1))).pipe(
- *     Stream.take(input.count)
- *   )
+ * import { Duration, Schedule, Stream } from "effect"
+ * import { fromStream } from "@jambudipa/xstate-effect"
+ *
+ * export const tickerActor = fromStream(({ input }: { input: { count: number } }) =>
+ *   Stream.fromSchedule(Schedule.spaced(Duration.seconds(1))).pipe(Stream.take(input.count))
  * )
  * ```
  *

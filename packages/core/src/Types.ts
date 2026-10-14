@@ -1169,9 +1169,19 @@ export type AssignDefinitionParams<TParams> = [TParams] extends [undefined] ? vo
  *
  * @example
  * ```ts
- * // types: {} as { actions: { type: "inc"; params: { by: number } } }
- * const inc: NamedActionImplementation<{ count: number }, EventObject, { by: number }> =
- *   assign(({ context }, params) => ({ count: context.count + params.by }))
+ * import { assign, createMachine } from "@jambudipa/xstate-effect"
+ *
+ * export const counter = createMachine(
+ *   {
+ *     types: {} as { context: { count: number }; actions: { type: "inc"; params: { by: number } } },
+ *     context: { count: 0 },
+ *     entry: { type: "inc", params: { by: 2 } }
+ *   },
+ *   {
+ *     // This slot is NamedActionImplementation<{ count: number }, ..., { by: number }>
+ *     actions: { inc: assign(({ context }, params) => ({ count: context.count + params.by })) }
+ *   }
+ * )
  * ```
  *
  * @since 0.1.0

@@ -62,7 +62,11 @@ const getTransitions = (stateNode: AnyStateNode): Array<TransitionDefinition<unk
  *
  * @example
  * ```ts
- * getStateNodes(machine).map((node) => node.id) // ["light.green", "light.yellow", ...]
+ * import { createMachine } from "@jambudipa/xstate-effect"
+ * import { getStateNodes } from "@jambudipa/xstate-effect/graph"
+ *
+ * const light = createMachine({ id: "light", initial: "green", states: { green: {}, yellow: {} } })
+ * export const ids = getStateNodes(light).map((node) => node.id) // ["light.green", "light.yellow"]
  * ```
  *
  * @since 0.1.0

@@ -243,21 +243,25 @@ const runCallback = <TEvent extends EventObject, TInput, TEmitted extends EventO
  *
  * @example
  * ```ts
- * const webSocketActor = fromCallback(({ input, sendBack, receive }) => {
- *   const ws = new WebSocket(input.url)
+ * import { fromCallback } from "@jambudipa/xstate-effect"
  *
- *   ws.onmessage = (event) => {
- *     sendBack({ type: "MESSAGE", data: event.data })
- *   }
+ * export const webSocketActor = fromCallback<{ type: "SEND"; data: string }, { url: string }>(
+ *   ({ input, sendBack, receive }) => {
+ *     const ws = new WebSocket(input.url)
  *
- *   receive((event) => {
- *     if (event.type === "SEND") {
- *       ws.send(event.data)
+ *     ws.onmessage = (event: MessageEvent<string>) => {
+ *       sendBack({ type: "MESSAGE", data: event.data })
  *     }
- *   })
  *
- *   return () => ws.close()
- * })
+ *     receive((event) => {
+ *       if (event.type === "SEND") {
+ *         ws.send(event.data)
+ *       }
+ *     })
+ *
+ *     return () => ws.close()
+ *   }
+ * )
  * ```
  *
  * @since 0.1.0

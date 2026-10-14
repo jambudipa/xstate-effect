@@ -1156,25 +1156,33 @@ const buildSetup = <
  *
  * @example
  * ```ts
- * interface Context {
+ * import { Option } from "effect"
+ * import { fromPromise, log, setup } from "@jambudipa/xstate-effect"
+ *
+ * interface User {
+ *   readonly name: string
+ * }
+ *
+ * interface CounterContext {
  *   count: number
  *   user: Option.Option<User>
  * }
  *
- * type Event =
+ * type CounterEvent =
  *   | { type: "INCREMENT" }
  *   | { type: "DECREMENT" }
  *   | { type: "FETCH_USER"; userId: string }
  *
- * const machine = setup({
+ * export const machine = setup({
  *   types: {} as {
- *     context: Context
- *     events: Event
+ *     context: CounterContext
+ *     events: CounterEvent
  *   },
  *   actors: {
- *     fetchUser: fromPromise(async ({ input }) => {
+ *     fetchUser: fromPromise(async ({ input }: { input: { userId: string } }) => {
  *       const response = await fetch(`/api/users/${input.userId}`)
- *       return response.json()
+ *       const user: User = await response.json()
+ *       return user
  *     })
  *   },
  *   actions: {
@@ -1681,6 +1689,9 @@ const buildSchemaSetup = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
+ * import { log, setupWithSchema } from "@jambudipa/xstate-effect"
+ *
  * const Context = Schema.Struct({
  *   count: Schema.Number,
  *   name: Schema.String,
@@ -1697,7 +1708,7 @@ const buildSchemaSetup = <
  *
  * const Events = Schema.Union([IncrementEvent, ResetEvent])
  *
- * const machineSetup = setupWithSchema({
+ * export const machineSetup = setupWithSchema({
  *   context: Context,
  *   events: Events,
  *   actions: {

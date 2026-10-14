@@ -124,11 +124,13 @@ export const getChild = (value: StateValue, key: string): Option.Option<StateVal
  *
  * @example
  * ```ts
- * matches("idle", "idle") // true
- * matches("idle", "loading") // false
- * matches({ a: "b" }, { a: "b" }) // true
- * matches({ a: "b" }, { a: { b: "c" } }) // true (subset)
- * matches({ a: { b: "c" } }, { a: "b" }) // false
+ * import { StateValue } from "@jambudipa/xstate-effect"
+ *
+ * StateValue.matches("idle", "idle") // true
+ * StateValue.matches("idle", "loading") // false
+ * StateValue.matches({ a: "b" }, { a: "b" }) // true
+ * StateValue.matches({ a: "b" }, { a: { b: "c" } }) // true (subset)
+ * StateValue.matches({ a: { b: "c" } }, { a: "b" }) // false
  * ```
  *
  * @since 0.1.0

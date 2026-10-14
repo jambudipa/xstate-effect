@@ -345,8 +345,10 @@ export const fromTransition = <
  *
  * @example
  * ```ts
- * const counterActor = fromTransitionWithInput<{ initial: number }>()(
- *   (context, event) => {
+ * import { fromTransitionWithInput } from "@jambudipa/xstate-effect"
+ *
+ * export const counterActor = fromTransitionWithInput<{ initial: number }>()(
+ *   (context: { count: number }, event: { type: "INCREMENT" } | { type: "RESET" }) => {
  *     switch (event.type) {
  *       case "INCREMENT":
  *         return { count: context.count + 1 }
