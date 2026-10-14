@@ -1,265 +1,223 @@
-# How to Define Custom Types
+---
+title: How to type a machine's context, events, input and output
+doc-type: how-to
+sources: [packages/core/src/setup.ts, packages/core/src/Types.ts]
+---
 
-This guide shows how to set up type-safe context, events, input, and output types for your machines.
+# How to type a machine's context, events, input and output
 
-## Basic Type Setup
+> **TL;DR:** Declare the types once in `setup({ types: {} as { context; events; input; output } })`.
+> The setup reads none of these values; it only carries their types to each machine it creates.
+> The compiler then checks the context, narrows the event in each transition, makes
+> `createActor` ask for the input, and types `snapshot.output` as an `Option` of the output.
 
-Use the `types` property in `setup` to define your machine's context, events and input. The
-`types` of `setup` has no `output` member: to type the output, see [Output Types](#output-types).
+## When you need this
 
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
+Use this guide when you want the compiler to catch a wrong context update, an event the
+machine does not take, a missing input or a misread output. Without declared types, the
+event type is any event object and the input and output types are `unknown`.
 
-export const machine = setup({
-  types: {} as {
-    context: { count: number }                        // your context type
-    events: { type: "INCREMENT" } | { type: "FINISH" } // your event union
-    input: { start: number }                          // input for initialization
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: ({ input }) => ({ count: input.start }),
-  states: {
-    active: {
-      on: {
-        INCREMENT: { actions: assign({ count: ({ context }) => context.count + 1 }) },
-        FINISH: "done"
-      }
-    },
-    done: { type: "final" }
-  }
-})
-```
+## Before you start
 
-## Context Types
+- You can create, start and read an actor (see
+  [Build your first state machine](../tutorials/01-first-state-machine.md)).
+- You have `@jambudipa/xstate-effect` and `effect` installed.
 
-Context holds the data for your machine:
+## Steps
 
-```typescript
+### 1. Declare the types in `setup`
+
+Write the types as the `types` member of `setup`, in the `{} as { … }` form. Each member is
+optional; declare only the ones you need.
+
+```ts
 import { setup } from "@jambudipa/xstate-effect"
 
-interface UserContext {
-  user: {
-    id: string
-    name: string
-    email: string
-  } | null
-  isLoading: boolean
-  error: string | null
+interface CartContext {
+  readonly customerId: string
+  readonly items: ReadonlyArray<string>
 }
 
-export const userMachine = setup({
+type CartEvent =
+  | { readonly type: "ADD_ITEM"; readonly item: string }
+  | { readonly type: "CHECKOUT" }
+
+interface CartInput {
+  readonly customerId: string
+}
+
+interface CartOutput {
+  readonly customerId: string
+  readonly itemCount: number
+}
+
+export const cart = setup({
   types: {} as {
-    context: UserContext
-    events: { type: "FETCH" }
+    context: CartContext
+    events: CartEvent
+    input: CartInput
+    output: CartOutput
+  }
+})
+```
+
+| Member | What it types |
+|---|---|
+| `context` | The machine's context. Once declared, the machine config must give `context`, unless every member of the type is optional. |
+| `events` | The events the machine takes, as a union discriminated by `type`. |
+| `input` | What the context factory receives, and what `createActor`'s `input` option takes. |
+| `output` | What the machine's `output` config must give, and the value inside `snapshot.output`. |
+
+### 2. Write the machine against the types
+
+Call `createMachine` on the setup. Give the context as a value, or as a factory of
+`{ input }` when it depends on the input. In a transition under an event type, the event is
+narrowed to that member of the union, so its own fields are typed. Give `output` as a value or
+as a function of `{ context, event }` that returns the declared output type.
+
+```ts
+import { assign, createActor, setup } from "@jambudipa/xstate-effect"
+import { Effect, Option } from "effect"
+
+interface CartContext {
+  readonly customerId: string
+  readonly items: ReadonlyArray<string>
+}
+
+type CartEvent =
+  | { readonly type: "ADD_ITEM"; readonly item: string }
+  | { readonly type: "CHECKOUT" }
+
+interface CartOutput {
+  readonly customerId: string
+  readonly itemCount: number
+}
+
+const cartMachine = setup({
+  types: {} as {
+    context: CartContext
+    events: CartEvent
+    input: { readonly customerId: string }
+    output: CartOutput
   }
 }).createMachine({
-  id: "user",
-  initial: "idle",
-  context: {
-    user: null,
-    isLoading: false,
-    error: null
+  id: "cart",
+  // The factory receives the declared input
+  context: ({ input }) => ({ customerId: input.customerId, items: [] }),
+  initial: "shopping",
+  states: {
+    shopping: {
+      on: {
+        // `event` is { type: "ADD_ITEM"; item: string } here
+        ADD_ITEM: { actions: assign({ items: ({ context, event }) => [...context.items, event.item] }) },
+        CHECKOUT: { guard: ({ context }) => context.items.length > 0, target: "checkedOut" }
+      }
+    },
+    checkedOut: { type: "final" }
   },
-  states: {
-    idle: {
-      on: { FETCH: "loading" }
-    },
-    loading: {}
-  }
-})
-```
-
-## Event Types
-
-Define events as a discriminated union. A transition under an event type reads that event, so
-its actions see the event's own fields:
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-interface UserContext {
-  userId: string
-  name: string
-  email: string
-}
-
-type UserEvent =
-  | { type: "FETCH"; userId: string }
-  | { type: "UPDATE"; name: string; email: string }
-  | { type: "DELETE" }
-  | { type: "RESET" }
-
-export const machine = setup({
-  types: {} as {
-    context: UserContext
-    events: UserEvent
-  }
-}).createMachine({
-  id: "user",
-  initial: "active",
-  context: { userId: "", name: "", email: "" },
-  states: {
-    active: {
-      on: {
-        FETCH: { actions: assign({ userId: ({ event }) => event.userId }) },
-        UPDATE: { actions: assign({ name: ({ event }) => event.name, email: ({ event }) => event.email }) },
-        RESET: { actions: assign({ userId: "", name: "", email: "" }) },
-        DELETE: "deleted"
-      }
-    },
-    deleted: { type: "final" }
-  }
-})
-```
-
-### Events with Payloads
-
-```typescript
-type _FormEvent =
-  | { type: "SET_FIELD"; field: string; value: string }
-  | { type: "SET_FIELDS"; fields: Record<string, string> }
-  | { type: "VALIDATE" }
-  | { type: "SUBMIT" }
-  | { type: "RESET" }
-```
-
-### Generic Event Patterns
-
-```typescript
-// CRUD operations
-type _CrudEvent<T> =
-  | { type: "CREATE"; data: Omit<T, "id"> }
-  | { type: "READ"; id: string }
-  | { type: "UPDATE"; id: string; data: Partial<T> }
-  | { type: "DELETE"; id: string }
-```
-
-## Input Types
-
-Input is data passed when creating an actor:
-
-```typescript
-import { setup, assign, createActor } from "@jambudipa/xstate-effect"
-import { Effect } from "effect"
-
-interface MachineInput {
-  initialCount: number
-  maxCount: number
-}
-
-const counterMachine = setup({
-  types: {} as {
-    context: { count: number; max: number }
-    events: { type: "INCREMENT" }
-    input: MachineInput
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: ({ input }) => ({
-    count: input.initialCount,
-    max: input.maxCount
-  }),
-  states: {
-    active: {
-      on: {
-        INCREMENT: {
-          guard: ({ context }) => context.count < context.max,
-          actions: assign({ count: ({ context }) => context.count + 1 })
-        }
-      }
-    }
-  }
+  // Must return a CartOutput
+  output: ({ context }) => ({ customerId: context.customerId, itemCount: context.items.length })
 })
 
-// Usage
-export const program = Effect.gen(function* () {
-  const actor = yield* createActor(counterMachine, {
-    input: { initialCount: 0, maxCount: 10 }
-  })
+const program = Effect.gen(function* () {
+  // The input option is required: the input type does not accept undefined
+  const actor = yield* createActor(cartMachine, { input: { customerId: "c-42" } })
   yield* actor.start
+  yield* actor.send({ type: "ADD_ITEM", item: "book" })
+  yield* actor.send({ type: "CHECKOUT" })
+
+  // snapshot.output is an Option<CartOutput>: None until the machine reaches a top-level final state
   const snapshot = yield* actor.getSnapshot
-  console.log(snapshot.context.max) // 10
+  yield* Option.match(snapshot.output, {
+    onNone: () => Effect.log("Not checked out yet"),
+    onSome: (output) => Effect.log(`${output.customerId} bought ${output.itemCount} item(s)`)
+  })
 })
+
+void Effect.runPromise(Effect.scoped(program))
 ```
 
-## Output Types
+### 3. Let the compiler check the use
 
-Output is the value the machine's `output` gives when the machine reaches a top-level final
-state. The `types` of `setup` has no `output` member, so declare the output type in the `types`
-of `createMachine`. The machine's `output` must then give that type, and the actor's
-`snapshot.output` is an `Option` of it:
+With the types declared, each of these is a type error:
 
-```typescript
-import { createMachine, assign, type OutputFrom } from "@jambudipa/xstate-effect"
+- a context value or an `assign` result that does not match `context`;
+- `actor.send` with an event that is not a member of `events`;
+- `createActor(cartMachine)` without `input`, or with an input of the wrong shape;
+- an `output` config that does not give the `output` type.
 
-interface MachineOutput {
-  result: "success" | "cancelled"
-  data?: string
-}
+## Variations
 
-export const wizardMachine = createMachine({
+### Type a machine without `setup`
+
+`createMachine` takes the same `types` member inside its config. Use it for a machine that
+needs no named actions, guards, actors or delays.
+
+```ts
+import { createMachine } from "@jambudipa/xstate-effect"
+
+export const toggle = createMachine({
   types: {} as {
-    context: { step: number; data: string; cancelled: boolean }
-    events: { type: "NEXT"; data: string } | { type: "CANCEL" }
-    output: MachineOutput
+    context: { readonly flips: number }
+    events: { readonly type: "TOGGLE" }
+    output: { readonly flips: number }
   },
-  id: "wizard",
-  initial: "step1",
-  context: { step: 1, data: "", cancelled: false },
+  context: { flips: 0 },
+  initial: "off",
   states: {
-    step1: {
-      on: {
-        NEXT: { target: "step2", actions: assign({ step: 2, data: ({ event }) => event.data }) },
-        CANCEL: "cancelled"
-      }
-    },
-    step2: {
-      on: {
-        NEXT: "complete",
-        CANCEL: "cancelled"
-      }
-    },
-    complete: { type: "final" },
-    cancelled: {
-      type: "final",
-      entry: assign({ cancelled: true })
-    }
+    off: { on: { TOGGLE: "on" } },
+    on: { on: { TOGGLE: "done" } },
+    done: { type: "final" }
   },
-  output: ({ context }): MachineOutput =>
-    context.cancelled ? { result: "cancelled" } : { result: "success", data: context.data }
+  output: ({ context }) => ({ flips: context.flips })
 })
-
-export type WizardOutput = OutputFrom<typeof wizardMachine> // MachineOutput
 ```
 
-## Actor Types
+### Declare the tags and the emitted events
 
-Define types for child actors:
+`types` also takes `tags`, which narrows what `snapshot.hasTag` and each state's `tags` accept,
+and `emitted`, which narrows what `emit` takes and what `actor.on` listeners receive (see
+[How to emit events and listen to them](emit-and-listen-to-events.md)). It also takes
+`children`, `meta` and `transitionMeta`; [setup and setupWithSchema](../reference/setup.md)
+lists them.
 
-```typescript
-import { setup, assign, fromPromise, type ActorRefFrom } from "@jambudipa/xstate-effect"
+```ts
+import { setup } from "@jambudipa/xstate-effect"
 
-const fetchUser = fromPromise(async ({ input }: { input: { id: string } }) => {
-  const response = await fetch(`/api/users/${input.id}`)
-  const user: { name: string; email: string } = await response.json()
-  return user
-})
-
-export const machine = setup({
+export const loader = setup({
   types: {} as {
-    context: {
-      userRef: ActorRefFrom<typeof fetchUser> | null
-    }
-    events: { type: "FETCH"; userId: string }
-  },
-  actors: {
-    fetchUser
+    events: { readonly type: "LOAD" } | { readonly type: "LOADED" }
+    tags: "busy"
   }
 }).createMachine({
-  id: "users",
+  initial: "idle",
+  states: {
+    idle: { on: { LOAD: "loading" } },
+    // A tag outside "busy" is a type error here and in snapshot.hasTag
+    loading: { tags: ["busy"], on: { LOADED: "idle" } }
+  }
+})
+```
+
+### Keep a child actor's reference in the context
+
+Type the reference with `ActorRefFrom<typeof logic>`. The reference that `spawn` returns for
+that logic fits the type.
+
+```ts
+import { assign, fromPromise, setup, type ActorRefFrom } from "@jambudipa/xstate-effect"
+
+const fetchUser = fromPromise(({ input }: { input: { readonly id: string } }) =>
+  Promise.resolve({ id: input.id, name: "Example user" })
+)
+
+export const users = setup({
+  types: {} as {
+    context: { readonly userRef: ActorRefFrom<typeof fetchUser> | null }
+    events: { readonly type: "FETCH"; readonly userId: string }
+  },
+  actors: { fetchUser }
+}).createMachine({
   context: { userRef: null },
   on: {
     FETCH: {
@@ -271,132 +229,52 @@ export const machine = setup({
 })
 ```
 
-## Complete Example
+### Read the types back from a machine
 
-The machine declares its output type, so it uses the `types` of `createMachine` and gives the
-actor logic to `invoke` directly:
+Derive types from an existing machine instead of exporting each interface. `ContextFrom` and
+`EventFrom` also accept the value that `setup` returns.
 
-```typescript
-import { createMachine, createActor, assign, fromPromise } from "@jambudipa/xstate-effect"
-import { Effect, Option } from "effect"
+```ts
+import {
+  setup,
+  type ContextFrom,
+  type EventFrom,
+  type InputFrom,
+  type OutputFrom,
+  type SnapshotFrom
+} from "@jambudipa/xstate-effect"
 
-// Define all types
-interface User {
-  id: string
-  name: string
-  email: string
-}
-
-interface AuthContext {
-  user: User | null
-  token: string | null
-  error: string | null
-}
-
-type AuthEvent =
-  | { type: "LOGIN"; email: string; password: string }
-  | { type: "LOGOUT" }
-  | { type: "REFRESH_TOKEN" }
-
-interface AuthInput {
-  persistedToken?: string
-}
-
-interface AuthOutput {
-  wasLoggedIn: boolean
-}
-
-// Define the actor logic
-const authenticate = fromPromise(async ({ input }: { input: { email: string; password: string } }) => {
-  // Simulated auth
-  return { user: { id: "1", name: "User", email: input.email }, token: "abc123" }
-})
-
-// Define the machine
-const authMachine = createMachine({
+export const counter = setup({
   types: {} as {
-    context: AuthContext
-    events: AuthEvent
-    input: AuthInput
-    output: AuthOutput
-  },
-  id: "auth",
-  initial: "idle",
-  context: ({ input }) => ({
-    user: null,
-    token: input.persistedToken ?? null,
-    error: null
-  }),
-  states: {
-    idle: {
-      always: {
-        guard: ({ context }) => context.token !== null,
-        target: "authenticated"
-      },
-      on: {
-        LOGIN: "authenticating"
-      }
-    },
-    authenticating: {
-      invoke: {
-        src: authenticate,
-        input: ({ event }) => ({
-          email: event.type === "LOGIN" ? event.email : "",
-          password: event.type === "LOGIN" ? event.password : ""
-        }),
-        onDone: {
-          target: "authenticated",
-          // The output of a done event is an Option
-          actions: assign(({ event }) =>
-            Option.match(event.output, {
-              onNone: () => ({}),
-              onSome: ({ user, token }) => ({ user, token, error: null })
-            })
-          )
-        },
-        onError: {
-          target: "idle",
-          actions: assign({ error: "Authentication failed" })
-        }
-      }
-    },
-    authenticated: {
-      on: {
-        LOGOUT: {
-          target: "loggedOut",
-          actions: assign({ user: null, token: null })
-        }
-      }
-    },
-    loggedOut: {
-      type: "final"
-    }
-  },
-  // The machine reaches its final state only by a logout
-  output: { wasLoggedIn: true }
-})
-
-// Usage with full type safety
-const _program = Effect.gen(function* () {
-  const actor = yield* createActor(authMachine, {
-    input: { persistedToken: undefined }
-  })
-  yield* actor.start
-
-  // TypeScript knows the event shape
-  yield* actor.send({ type: "LOGIN", email: "user@example.com", password: "secret" })
-
-  const snapshot = yield* actor.getSnapshot
-  // TypeScript knows context.user is User | null
-  if (snapshot.context.user) {
-    console.log(snapshot.context.user.name)
+    context: { readonly count: number }
+    events: { readonly type: "INC" } | { readonly type: "STOP" }
+    input: { readonly start: number }
+    output: number
   }
+}).createMachine({
+  context: ({ input }) => ({ count: input.start }),
+  initial: "counting",
+  states: { counting: { on: { STOP: "stopped" } }, stopped: { type: "final" } },
+  output: ({ context }) => context.count
 })
+
+export type CounterContext = ContextFrom<typeof counter> // { readonly count: number }
+export type CounterEvent = EventFrom<typeof counter> // { readonly type: "INC" } | { readonly type: "STOP" }
+export type StopEvent = EventFrom<typeof counter, "STOP"> // { readonly type: "STOP" }
+export type CounterInput = InputFrom<typeof counter> // { readonly start: number }
+export type CounterOutput = OutputFrom<typeof counter> // number
+export type CounterSnapshot = SnapshotFrom<typeof counter>
 ```
 
-## Tips
+### Take the types from Effect Schemas
 
-1. **Use interfaces for complex types** - Makes them reusable and easier to extend
-2. **Keep events as discriminated unions** - Enables exhaustive type checking
-3. **Use `as const` for literal types** - Ensures string literals are preserved
-4. **Extract shared types** - Create type files for shared context/event types
+When the context and events are already described as Effect Schemas, see
+[How to type a machine from Effect Schemas](validate-events-with-schema.md).
+
+## Related
+
+- [setup and setupWithSchema](../reference/setup.md) — every member of `types` and of the setup.
+- [Type utilities](../reference/type-utilities.md) — `ContextFrom`, `EventFrom`, `InputFrom`,
+  `OutputFrom`, `SnapshotFrom`, `ActorRefFrom` and the others.
+- [Keep data in context](../tutorials/02-working-with-context.md) — a lesson on context and
+  `assign`.
