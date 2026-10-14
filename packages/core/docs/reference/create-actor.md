@@ -505,8 +505,8 @@ void Effect.runPromise(Effect.scoped(program))
 - An observer added before `start` receives the initial snapshot once, at `start`.
 - It never receives a snapshot with status `error` or `stopped`. At a stop, it receives the
   active snapshot that a transition logic gives for the stop event.
-- An observer that throws, fails or dies is reported through the logger and keeps its
-  subscription.
+- An observer that throws, fails or dies is reported with `Effect.logError`, through the Effect
+  logger, and keeps its subscription.
 - An observer has no error listener: an actor that errors while it is subscribed logs the error.
 - Each call starts while the actor publishes the snapshot. A call that never waits ends before
   the `send` of the event returns, as in XState. A call that waits goes on in a fiber of its
@@ -549,8 +549,8 @@ void Effect.runPromise(Effect.scoped(program))
   the next event.
 - Each registration is separate: a handler registered twice runs twice. The scope's close
   removes only its own registration.
-- A handler that throws, fails or dies is reported through the logger. The other handlers and
-  the actor go on.
+- A handler that throws, fails or dies is reported with `Effect.logError`, through the Effect
+  logger. The other handlers and the actor go on.
 - See [emit](./actions/emit.md) for the action that emits events.
 
 ```ts

@@ -212,7 +212,7 @@ export const main = Effect.runPromise(Effect.scoped(program))
 
 ## Things to check
 
-- **A failing listener does not stop the others.** A handler that fails, dies or throws is reported through the actor's logger; the other listeners and the actor carry on.
+- **A failing listener does not stop the others.** A handler that fails, dies or throws is reported once with `Effect.logError`, through the Effect logger; the other listeners and the actor carry on.
 - **Each registration counts.** Registering the same handler twice makes it run twice for each event.
 - **Do not call `emit(...)` inside an inline action function.** The action creator only builds an action; calling it there logs a warning and emits nothing. Put `emit(...)` in the action list, or use `enqueue.emit` inside `enqueueActions`.
 

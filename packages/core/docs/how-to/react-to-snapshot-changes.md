@@ -126,11 +126,11 @@ void Effect.runPromise(Effect.scoped(program))
   returns, as in XState.
 - A callback that waits goes on in a fiber of its own, and the actor does not wait for it. The
   calls of one callback run one at a time, in order: a call starts when the call before it ends.
-- A callback that fails, dies or throws is reported through the logger, and the subscription goes
-  on.
-- The callback never sees the actor's error. When the actor errors while a `subscribe` callback
-  is attached, the actor reports the error through its logger. Use `changes` to handle the error
-  yourself.
+- A callback that fails, dies or throws is reported with `Effect.logError`, through the Effect
+  logger, and the subscription goes on.
+- The callback never sees the actor's error. When the actor errors while a `subscribe` callback is
+  attached, the actor reports the error with `Effect.logError`, through the Effect logger. Use
+  `changes` to handle the error yourself.
 
 ### React to one derived value
 
@@ -173,7 +173,8 @@ void Effect.runPromise(Effect.scoped(program))
 
 The `changes` stream fails with the value the actor failed with (the raw error, not a wrapper),
 also when the stream runs after the error. Catch it on the Effect that runs the stream. A running
-`changes` stream counts as an error listener, so the actor then reports nothing through its logger.
+`changes` stream counts as an error listener, so the actor then reports nothing through the Effect
+logger.
 
 ```ts
 import { Effect, Fiber, Stream } from "effect"

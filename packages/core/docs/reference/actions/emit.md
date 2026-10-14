@@ -54,7 +54,8 @@ An `ActionDefinition` with `type: "xstate.emit"`.
 - The listeners receive the event after the macrostep commits, in action order. A listener that reads the snapshot reads the new one.
 - A macrostep that fails delivers nothing.
 - For each event, the actor publishes it to `actor.emissions` (a `Stream`), then calls the listeners that `actor.on(type, handler)` registered: first those of the event's type, then those of `"*"`, each in the order of registration. Each listener runs to its end before the next one starts.
-- A listener that throws, fails or dies is reported through the logger. The other listeners and the actor go on.
+- A listener that throws, fails or dies is reported with `Effect.logError`, through the Effect
+  logger. The other listeners and the actor go on.
 - A listener registered before `actor.start` receives the events that the initial state's entry actions emit.
 - **Inspection.** The `@xstate.action` inspection event has `type: "xstate.emit"` and `params: { event }`.
 - `emit` only builds an action. A custom action function that calls `emit` emits nothing, and the actor logs this warning: ``Custom actions should not call `emit()` directly, as it is not imperative. See https://stately.ai/docs/actions#built-in-actions for more details.``
