@@ -735,6 +735,18 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
     })
   )
 
+  it.effect("[COV-1] withContext takes a factory of { input, spawn, self }, which the machine calls for each actor as the config's context function", () =>
+    Effect.gen(function* () {
+      const startsAt = createMachine({
+        types: {} as { context: { ticks: number }; input: { readonly from: number } },
+        context: { ticks: 0 },
+      }).withContext(({ input, self }) => ({ ticks: input.from + (typeof self.id === "string" ? 1 : 0) }))
+      const actor = yield* createActor(startsAt, { input: { from: 41 } })
+
+      assert.strictEqual((yield* actor.getSnapshot).context.ticks, 42)
+    })
+  )
+
   it.effect("[COV-1] a microstep into a history state without a record takes its default: none without a parent, and the upstream error for a target that names no child", () =>
     Effect.gen(function* () {
       // The history target names no child: the machine keeps that definition error, and its

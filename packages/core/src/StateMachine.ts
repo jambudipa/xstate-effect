@@ -350,11 +350,13 @@ export interface StateMachine<
   >
 
   /**
-   * Creates a new machine with different context. Its {@link provide} takes the wide
-   * implementations of the new context (any name), not the names of this machine.
+   * Creates a new machine with different context: a value, or a factory that the machine
+   * calls once for each actor with `{ input, spawn, self }`, as it calls the config's `context`
+   * function (see `ContextFactory`). Its {@link provide} takes the wide implementations of the
+   * new context (any name), not the names of this machine.
    */
-  readonly withContext: <TNewContext>(
-    context: TNewContext | ((input: TInput) => TNewContext)
+  readonly withContext: <TNewContext extends MachineContext>(
+    context: TNewContext | ContextFactory<TNewContext, ProvidedActor, TInput, TEvent>
   ) => StateMachine<
     Id,
     TNewContext,
@@ -1920,7 +1922,7 @@ export const make = <
         return make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>(config, mergedImplementations, schemaChecks)
       },
 
-      withContext: <TNewContext>(newContext: TNewContext | ((input: TInput) => TNewContext)) =>
+      withContext: <TNewContext extends MachineContext>(newContext: TNewContext | ContextFactory<TNewContext, ProvidedActor, TInput, TEvent>) =>
         make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>(
           { ...config, context: newContext as unknown as TContext },
           implementations,
