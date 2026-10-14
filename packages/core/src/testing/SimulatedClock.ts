@@ -95,6 +95,11 @@ export interface SyncSimulatedClock extends Clock {
  * reason, a callback that calls `increment` or `set` fires the timeouts due then inside that
  * call, where upstream fires them after the callback returns (DEV-75).
  *
+ * Given to `createActor` as its `clock`, it fires an actor's delayed events, but its
+ * synchronous `increment` cannot wait for an Effect: it returns once each delivery is queued,
+ * before the actor processes it. To read the result right after a move, use the Effect-based
+ * {@link SimulatedClock}, whose `increment` waits until the actor system has settled (SD-28).
+ *
  * @example
  * ```ts
  * const clock = makeSimulatedClock()

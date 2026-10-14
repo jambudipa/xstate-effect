@@ -9,7 +9,9 @@ import type { Snapshot } from "../Snapshot.js"
 
 /**
  * Error thrown when actor errors instead of completing. `toEffect` and `toPromise` no longer
- * fail with it: they fail with the actor's own error (SD-19).
+ * fail with it: they fail with the actor's own error (SD-19). No function of the package
+ * fails with it now; it stays exported so that code that names it keeps compiling, so catch
+ * the actor's own error instead.
  *
  * @since 0.1.0
  * @category Errors
