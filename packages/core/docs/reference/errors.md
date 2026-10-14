@@ -234,6 +234,7 @@ snapshot then holds only `status`, `output` and `error`.
 | The state value names no state of the machine. | `State '<value>' does not exist on '<machineId>'` |
 | The machine config has a definition error. | The definition error's message, which is the `cause`. |
 | `scheduledEvents` does not decode. | The codec's text, for example `Expected ScheduledEventId` and its path. |
+| A `setupWithSchema` machine restores a context, or the output of a `done` snapshot, that its Schema rejects. | `The restored snapshot does not match the machine's schemas: <the SchemaError's message>`; the `SchemaError` is the `cause`. |
 
 ## InvalidPersistedSnapshotError
 

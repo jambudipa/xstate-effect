@@ -1231,6 +1231,18 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
       assert.strictEqual(initial.status, "error")
       assert.isTrue(Option.exists(initial.error, Schema.isSchemaError))
 
+      // A restored snapshot is checked too: a context its schema rejects fails the restore
+      const persisted = yield* ok.getPersistedSnapshot
+      const tampered = Predicate.isObject(persisted) ? { ...persisted, context: { count: -3 } } : persisted
+      const restoredActor = yield* createActor(machine, { snapshot: tampered, input: { start: 1 } })
+      const afterRestore = yield* restoredActor.getSnapshot
+      assert.strictEqual(afterRestore.status, "error")
+      assert.isTrue(
+        Option.exists(afterRestore.error, (error) => error instanceof Errors.RestoreError && Schema.isSchemaError(error.cause))
+      )
+      const intact = yield* createActor(machine, { snapshot: persisted, input: { start: 1 } })
+      assert.strictEqual((yield* intact.getSnapshot).context.count, 3)
+
       // The built-in events are not checked, and provide keeps the checks
       const provided = machine.provide({})
       const viaProvide = yield* createActor(provided, { input: { start: 4 } })

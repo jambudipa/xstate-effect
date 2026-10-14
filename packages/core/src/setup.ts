@@ -1679,7 +1679,9 @@ const buildSchemaSetup = <
  *
  * - each event it takes, other than the built-in `xstate.*` events, before the transition;
  * - the context of its initial snapshot and of each snapshot a transition gives;
- * - its input, before the context factory reads it, and the output of a done snapshot.
+ * - its input, before the context factory reads it, and the output of a done snapshot;
+ * - the context, and the output of a done snapshot, of a snapshot it restores (a mismatch fails
+ *   the restore with a `RestoreError` whose `cause` is the `SchemaError`).
  *
  * A value that does not match fails as user code that throws the `SchemaError` would: a
  * transition dies with it, so an actor errors with it and keeps the snapshot it had, and the

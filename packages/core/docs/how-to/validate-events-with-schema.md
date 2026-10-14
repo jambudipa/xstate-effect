@@ -253,8 +253,9 @@ void Effect.runPromise(Effect.scoped(program))
 `validateContext(value)` decodes an `unknown` value with the context Schema, in the same way:
 it succeeds with the typed context or fails with a `SchemaError`. The setup also keeps the
 Schemas as `contextSchema` and `eventSchema`, so you can reuse them, for example to encode a
-context for storage. A snapshot that `createActor` restores from its `snapshot` option is not
-checked when it is restored, so decode a stored context before you build on it.
+context for storage. A snapshot that `createActor` restores from its `snapshot` option is
+checked when it is restored: a stored context that the Schema rejects gives the actor the status
+`error`, with a `RestoreError` whose `cause` is the `SchemaError`.
 
 ```ts
 import { setupWithSchema } from "@jambudipa/xstate-effect"

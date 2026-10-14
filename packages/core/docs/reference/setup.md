@@ -223,14 +223,13 @@ checks its decoded side: the machine holds decoded values.
 | The context | In the initial snapshot, and in each snapshot that a transition gives. |
 | The input | When the initial snapshot is computed, before the context factory reads it. Only with an `input` schema. |
 | The output | In each snapshot with the status `done`. Only with an `output` schema. |
+| A restored snapshot | When the machine restores a snapshot (`createActor` with the `snapshot` option, or `machine.restoreSnapshot`): its context, and the output of a `done` one. A mismatch fails the restore with a `RestoreError` whose `cause` is the `SchemaError`, so the actor gets the status `error`. |
 
 These are not checked:
 
 - An event that an action raises without a delay: the macrostep processes it inside the
   transition. The context that it leads to is checked.
-- A snapshot that `createActor` restores from its `snapshot` option, and the snapshot that
-  `machine.resolveState` gives. The first transition from a restored snapshot checks the context
-  of the snapshot that it gives.
+- The snapshot that `machine.resolveState` gives.
 - The snapshots that `machine.microstep` gives: it checks the event only.
 
 `provide`, `withContext` and `withId` give machines with the same checks; `extend` gives a setup

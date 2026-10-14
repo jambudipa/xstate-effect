@@ -1492,8 +1492,9 @@ export interface SchemaChecks {
  * and its actor needs only a `Scope`.
  *
  * `schemaChecks` are the run-time checks of a machine that a schema setup creates
- * (`setupWithSchema`); `provide`, `withContext` and `withId` keep them. Without them the
- * machine checks nothing at run time.
+ * (`setupWithSchema`); `provide`, `withContext` and `withId` keep them. A restored snapshot is
+ * checked too: its context, and the output of a done one, or the restore fails with a
+ * `RestoreError`. Without them the machine checks nothing at run time.
  *
  * @since 0.1.0
  * @category Constructors
@@ -1877,7 +1878,7 @@ export const make = <
           })
           const children = yield* restoreChildren(actorScope, transitionMachine, restorable.children)
           const historyValue = yield* reviveHistoryValue(transitionMachine, restorable.historyValue)
-          return Snapshot.makeMachineSnapshot<TContext, StateValue, Record<string, AnyActorRef>, TOutput, TStateMeta>({
+          const restored = Snapshot.makeMachineSnapshot<TContext, StateValue, Record<string, AnyActorRef>, TOutput, TStateMeta>({
             value: StateUtils.getStateValue(root, configuration),
             // The context is the persisted one, of the machine's type (upstream restores it as is)
             context: Persistence.reviveContext(restorable.context, children) as TContext,
@@ -1891,6 +1892,25 @@ export const make = <
             // The machine object itself (XState `snapshot.machine`, SD-6)
             machine: self,
           })
+          // A machine from `setupWithSchema` checks the restored context, and the output of a
+          // done snapshot, as it checks the snapshot a transition gives: a value that does not
+          // match its schema fails the restore, so the actor gets status `error`
+          yield* Option.match(checks, {
+            onNone: () => Effect.void,
+            onSome: (given) =>
+              Effect.mapError(
+                Effect.andThen(
+                  given.context(restored.context),
+                  Option.match(restored.output, { onNone: () => Effect.void, onSome: given.output })
+                ),
+                (error) =>
+                  new Errors.RestoreError({
+                    message: `The restored snapshot does not match the machine's schemas: ${error.message}`,
+                    cause: error,
+                  })
+              ),
+          })
+          return restored
         }),
 
       // Upstream `start`: each active child starts, in the order of `snapshot.children`
