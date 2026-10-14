@@ -26,9 +26,11 @@
  * - Emitted events (`src/Actor.ts`): the `emissions` stream ends when the actor ends.
  * - Settle (`src/ActorSystem.ts`, SD-28): a `SimulatedClock` increment returns after the
  *   events that each fired delivery sent within the system are processed.
+ * - Schema setup (`src/setup.ts`, `src/StateMachine.ts`): a machine from `setupWithSchema`
+ *   checks each event, its context, its input and its output against the schemas' types.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Chunk, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Stream } from "effect"
+import { Cause, Chunk, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ActorClass, allocateChild, buildChild, createSpawnFunction, restoreChild } from "../../src/Actor.js"
 import { ActorScope, type ActorScopeService, createGuardContext } from "../../src/ActorLogic.js"
@@ -49,6 +51,7 @@ import {
   makeMachineSnapshot,
   type MachineSnapshot,
   sendTo,
+  setupWithSchema,
   type SnapshotType,
   spawnChild,
   stopChild,
@@ -1115,6 +1118,87 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
       assert.strictEqual(afterChildDone, "cooling")
       assert.strictEqual(afterCooling, "idle")
       assert.strictEqual((yield* again.getSnapshot).value, "idle")
+    })
+  )
+
+  it.effect("[COV-1] a setupWithSchema machine checks each event, its context, its input and its output against the schemas' types; a mismatch fails as a throw of the SchemaError", () =>
+    Effect.gen(function* () {
+      const Counter = Schema.Struct({ count: Schema.Number.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))) })
+      const Events = Schema.Union([
+        Schema.Struct({ type: Schema.Literal("ADD"), by: Schema.Number }),
+        Schema.Struct({ type: Schema.Literal("FINISH") }),
+      ])
+      const counter = setupWithSchema({
+        context: Counter,
+        events: Events,
+        input: Schema.Struct({ start: Schema.Number }),
+        output: Schema.Struct({ total: Schema.Number.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(10))) }),
+      })
+      const machine = counter.createMachine({
+        context: ({ input }) => ({ count: input.start }),
+        initial: "counting",
+        states: {
+          counting: {
+            after: { 1000: "counting" },
+            on: {
+              ADD: { actions: assign(({ context, event }) => ({ count: context.count + event.by })) },
+              FINISH: "finished",
+            },
+          },
+          finished: { type: "final" },
+        },
+        output: ({ context }) => ({ total: context.count }),
+      })
+
+      // A matching event and context go through
+      const ok = yield* createActor(machine, { input: { start: 1 } })
+      yield* ok.start
+      yield* ok.send({ type: "ADD", by: 2 })
+      assert.strictEqual((yield* ok.getSnapshot).context.count, 3)
+
+      // An event that does not match its schema: the actor errors with the SchemaError and keeps its context
+      const badEvent = yield* createActor(machine, { input: { start: 1 } })
+      yield* badEvent.start
+      const untyped: { type: "ADD"; by: number } = JSON.parse('{"type":"ADD","by":"2"}')
+      yield* badEvent.send(untyped)
+      const afterBadEvent = yield* badEvent.getSnapshot
+      assert.strictEqual(afterBadEvent.status, "error")
+      assert.isTrue(Option.exists(afterBadEvent.error, Schema.isSchemaError))
+      assert.strictEqual(afterBadEvent.context.count, 1)
+
+      // A transition that gives a context its schema rejects errors the actor
+      const badContext = yield* createActor(machine, { input: { start: 1 } })
+      yield* badContext.start
+      yield* badContext.send({ type: "ADD", by: -5 })
+      const afterBadContext = yield* badContext.getSnapshot
+      assert.strictEqual(afterBadContext.status, "error")
+      assert.isTrue(Option.exists(afterBadContext.error, Schema.isSchemaError))
+
+      // A done snapshot whose output its schema rejects errors the actor
+      const badOutput = yield* createActor(machine, { input: { start: 1 } })
+      yield* badOutput.start
+      yield* badOutput.send({ type: "FINISH" })
+      const afterBadOutput = yield* badOutput.getSnapshot
+      assert.strictEqual(afterBadOutput.status, "error")
+      assert.isTrue(Option.exists(afterBadOutput.error, Schema.isSchemaError))
+
+      // An input its schema rejects gives an initial snapshot with status error
+      const badInput: { start: number } = JSON.parse('{"start":"one"}')
+      const rejected = yield* createActor(machine, { input: badInput })
+      const initial = yield* rejected.getSnapshot
+      assert.strictEqual(initial.status, "error")
+      assert.isTrue(Option.exists(initial.error, Schema.isSchemaError))
+
+      // The built-in events are not checked, and provide keeps the checks
+      const provided = machine.provide({})
+      const viaProvide = yield* createActor(provided, { input: { start: 4 } })
+      yield* viaProvide.start
+      yield* viaProvide.send(untyped)
+      assert.strictEqual((yield* viaProvide.getSnapshot).status, "error")
+      const finished = yield* createActor(machine, { input: { start: 12 } })
+      yield* finished.start
+      yield* finished.send({ type: "FINISH" })
+      assert.deepStrictEqual((yield* finished.getSnapshot).output, Option.some({ total: 12 }))
     })
   )
 })

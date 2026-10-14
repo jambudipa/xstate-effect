@@ -13,6 +13,7 @@ import {
   Inspectable,
   Predicate,
   Result,
+  type Schema,
 } from "effect"
 import { cancel } from "./actions/cancel.js"
 import { raise } from "./actions/raise.js"
@@ -1433,6 +1434,25 @@ const restoreChildren = (
 // ============================================================
 
 /**
+ * The run-time checks of a machine that `setupWithSchema` creates: each one fails with the
+ * `SchemaError` of a value that does not match the type of its schema. A setup without an
+ * input or an output schema checks every input or output as valid.
+ *
+ * @since 0.2.1
+ * @category Models
+ */
+export interface SchemaChecks {
+  /** Checks an event the machine takes, other than a built-in `xstate.*` event. */
+  readonly event: (event: EventObject) => Effect.Effect<void, Schema.SchemaError>
+  /** Checks the context of the initial snapshot and of each snapshot a transition gives. */
+  readonly context: (context: unknown) => Effect.Effect<void, Schema.SchemaError>
+  /** Checks the input of the initial snapshot, before the context factory reads it. */
+  readonly input: (input: unknown) => Effect.Effect<void, Schema.SchemaError>
+  /** Checks the output of a done snapshot. */
+  readonly output: (output: unknown) => Effect.Effect<void, Schema.SchemaError>
+}
+
+/**
  * Creates a StateMachine from a config.
  *
  * It never throws (SD-3, amended 2026-10-08). Where upstream `createMachine` throws a
@@ -1449,6 +1469,10 @@ const restoreChildren = (
  * it, so `createActor(make({ ... }))` gives the same machine type as a machine built first,
  * and its actor needs only a `Scope`.
  *
+ * `schemaChecks` are the run-time checks of a machine that a schema setup creates
+ * (`setupWithSchema`); `provide`, `withContext` and `withId` keep them. Without them the
+ * machine checks nothing at run time.
+ *
  * @since 0.1.0
  * @category Constructors
  */
@@ -1463,7 +1487,8 @@ export const make = <
   TTransitionMeta = TStateMeta
 >(
   config: MachineConfig<TContext, TEvent, TInput, TOutput, TStateMeta, TTransitionMeta>,
-  implementations?: MachineImplementations<TContext, TEvent>
+  implementations?: MachineImplementations<TContext, TEvent>,
+  schemaChecks?: SchemaChecks
 ): StateMachine<string, TContext, TEvent, TInput, TOutput, TEmitted, NoInfer<R>, TStateMeta, TTransitionMeta> => {
   // Every node links to the machine, so the machine object exists before the tree; it gets
   // its fields once the tree is built.
@@ -1508,6 +1533,24 @@ export const make = <
 
   // Upstream `this.options`: the config's options over the defaults
   const options: MachineOptions = { maxIterations: Infinity, ...config.options }
+
+  // The schema checks of a machine from `setupWithSchema`. A value that does not match its
+  // schema's type fails as user code that throws its `SchemaError`: a transition dies with it,
+  // so the actor errors with it and keeps the snapshot it had (SD-4), and the initialization
+  // gives the snapshot with status `error` and the `SchemaError` as its error (upstream's catch)
+  const checks = Option.fromNullishOr(schemaChecks)
+  const runCheck = (pick: (given: SchemaChecks) => Effect.Effect<void, Schema.SchemaError>): Effect.Effect<void> =>
+    Option.match(checks, { onNone: () => Effect.void, onSome: (given) => Effect.orDie(pick(given)) })
+  // A built-in event (`xstate.init`, a child's done or error event, a delayed transition's
+  // event) is the engine's own, not one of the schema's events
+  const checkEvent = (event: EventObject): Effect.Effect<void> =>
+    event.type.startsWith("xstate.") ? Effect.void : runCheck((given) => given.event(event))
+  // The context of a snapshot, and the output of a done one
+  const checkSnapshot = (snapshot: MachineSnapshot<TContext, EventObject, Record<string, AnyActorRef>, StateValue, string, TOutput, TStateMeta>): Effect.Effect<void> =>
+    Effect.andThen(
+      runCheck((given) => given.context(snapshot.context)),
+      Option.match(snapshot.output, { onNone: () => Effect.void, onSome: (output) => runCheck((given) => given.output(output)) })
+    )
 
   // What the transition engine reads of this machine
   const transitionMachine: SN.StateNode.Machine<TContext, TEvent> = {
@@ -1611,8 +1654,11 @@ export const make = <
       > =>
         Effect.gen(function* () {
           yield* asTransitionFailure(snapshot, event)
+          yield* checkEvent(event)
           const actorScope = yield* AL.ActorScope
-          return yield* StateUtils.macrostep(transitionMachine, snapshot, event, actorScope)
+          const next = yield* StateUtils.macrostep(transitionMachine, snapshot, event, actorScope)
+          yield* checkSnapshot(next as MachineSnapshot<TContext, EventObject, Record<string, AnyActorRef>, StateValue, string, TOutput, TStateMeta>)
+          return next
         }) as Effect.Effect<
           MachineSnapshot<TContext, EventObject, Record<string, AnyActorRef>, StateValue, string, TOutput, TStateMeta>,
           TransitionError,
@@ -1645,6 +1691,7 @@ export const make = <
       > =>
         Effect.gen(function* () {
           yield* asTransitionFailure(snapshot, event)
+          yield* checkEvent(event)
           const actorScope = yield* AL.ActorScope
           return yield* StateUtils.macrostepMicrosteps(transitionMachine, snapshot, event, actorScope)
         }) as Effect.Effect<
@@ -1729,6 +1776,8 @@ export const make = <
           // by a name the machine lacks dies here. Upstream's catch then holds the snapshot
           // from before the factory: the empty context and no children.
           const preInitial = yield* Effect.gen(function* () {
+            // The input of a machine from `setupWithSchema` is checked before the factory reads it
+            yield* runCheck((given) => given.input(input))
             const context =
               typeof config.context === "function"
                 ? (Object.assign(
@@ -1771,7 +1820,12 @@ export const make = <
           )
 
           // The engine sets the root output when the machine completes; it is typed `TOutput` here
-          return initial as MachineSnapshot<TContext, EventObject, Record<string, AnyActorRef>, StateValue, string, TOutput, TStateMeta>
+          const typed = initial as MachineSnapshot<TContext, EventObject, Record<string, AnyActorRef>, StateValue, string, TOutput, TStateMeta>
+          // The initial context and output of a machine from `setupWithSchema`, as a failing
+          // initial action would give them: the snapshot with status `error`
+          return typed.status === "error"
+            ? typed
+            : yield* Effect.as(checkSnapshot(typed), typed).pipe(Effect.catchDefect((defect) => Effect.succeed(failed(typed, defect))))
         }),
 
       // The persisted-snapshot codec (SD-7): children, tags, history ids, context refs
@@ -1843,17 +1897,18 @@ export const make = <
           actors: { ...implementations?.actors, ...newImplementations.actors },
           delays: { ...implementations?.delays, ...newImplementations.delays },
         }
-        return make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>(config, mergedImplementations)
+        return make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>(config, mergedImplementations, schemaChecks)
       },
 
       withContext: <TNewContext>(newContext: TNewContext | ((input: TInput) => TNewContext)) =>
         make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>(
           { ...config, context: newContext as unknown as TContext },
-          implementations
+          implementations,
+          schemaChecks
         ),
 
       withId: <TNewId extends string>(newId: TNewId) =>
-        make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>({ ...config, id: newId }, implementations),
+        make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>({ ...config, id: newId }, implementations, schemaChecks),
 
       // Upstream `getStateNodeById`: an id, `#` optional, then a key path below that node
       getStateNodeById: (

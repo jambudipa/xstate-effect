@@ -1082,7 +1082,8 @@ const mergeImplementations = <TContext, TEvent extends EventObject, TActors>(
  * (upstream `createMachine({ ...config, schemas }, implementations)`), `extend` (a new setup
  * of the merged records), `createStateConfig`, `createAction` and the bound helpers. `setup`
  * gives its `schemas` (which replace a machine config's own, as upstream); a schema-based
- * setup gives none and leaves the machine config as written.
+ * setup gives none and leaves the machine config as written, and gives its run-time
+ * `schemaChecks` to every machine it creates.
  */
 const buildSetup = <
   TContext,
@@ -1100,7 +1101,8 @@ const buildSetup = <
   TOutput = unknown
 >(
   implementations: SetupImplementations<TActors, TActions, TGuards, TDelays>,
-  schemas: Option.Option<unknown>
+  schemas: Option.Option<unknown>,
+  schemaChecks: Option.Option<SM.SchemaChecks> = Option.none()
 ): SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays, TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag, TOutput> => {
   // The records are the machine's implementations; only their types are the setup's
   const machineImplementations = implementations as MachineImplementations<TContext, TEvent>
@@ -1126,7 +1128,8 @@ const buildSetup = <
       ) =>
         SM.make<TContext, TEvent, TMachineInput, TMachineOutput, TEmitted, never, TStateMeta, TTransitionMeta>(
           Option.match(schemas, { onNone: () => machineConfig, onSome: (given) => ({ ...machineConfig, schemas: given }) }),
-          machineImplementations
+          machineImplementations,
+          Option.getOrUndefined(schemaChecks)
         )
     ),
     // Only the type of `extend` knows the merged records (upstream casts the same way)
@@ -1145,7 +1148,7 @@ const buildSetup = <
         TChildrenMap,
         TTag,
         TOutput
-      >(mergeImplementations<TContext, TEvent, TActors>(implementations, extension), schemas) as never,
+      >(mergeImplementations<TContext, TEvent, TActors>(implementations, extension), schemas, schemaChecks) as never,
     createStateConfig: (config) => config,
     createAction: (action) => action,
   }
@@ -1456,12 +1459,20 @@ export type DelaysFrom<T> = T extends SetupReturn<infer _C, infer _E, infer _A, 
 // ============================================================
 
 /**
+ * The type that a schema of a schema-based setup gives, or `TDefault` when the setup has no
+ * such schema.
+ *
+ * @since 0.2.1
+ * @category Setup
+ */
+export type SchemaTypeOr<TSchema, TDefault> = TSchema extends Schema.Decoder<unknown> ? Schema.Schema.Type<TSchema> : TDefault
+
+/**
  * Configuration for schema-based setup.
  *
- * Uses Effect Schema for context and events, providing:
- * - Runtime validation
- * - Self-documenting types
- * - Automatic serialization/deserialization
+ * Effect Schemas describe the context, the events and, optionally, the input and the output:
+ * their decoded types type every machine the setup creates, and each machine checks its
+ * values against them at run time (see {@link setupWithSchema}).
  *
  * @since 0.1.0
  * @category Setup
@@ -1472,7 +1483,9 @@ export interface SetupSchemaConfig<
   TActors extends Record<string, AnyActorLogic>,
   TActions extends Record<string, SetupActionImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   TGuards extends Record<string, GuardImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
-  TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>
+  TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
+  TInputSchema extends Schema.Decoder<unknown> | undefined = undefined,
+  TOutputSchema extends Schema.Decoder<unknown> | undefined = undefined
 > {
   /**
    * Schema for the context type.
@@ -1484,6 +1497,17 @@ export interface SetupSchemaConfig<
    * Use Schema.Union for multiple event types.
    */
   readonly events: TEventSchema
+  /**
+   * Schema for the input: its decoded type is the machines' input type, and each machine
+   * checks the input it is given. Without it, the input type is `NonReducibleUnknown`, as
+   * for `setup`.
+   */
+  readonly input?: TInputSchema
+  /**
+   * Schema for the output: its decoded type is the machines' output type, and each machine
+   * checks the output of its done snapshot. Without it, the output type is `unknown`.
+   */
+  readonly output?: TOutputSchema
   /** The actor logic by src name, as in {@link SetupConfig}. */
   readonly actors?: TActors
   /** The action implementations by name, typed by the decoded context and events. */
@@ -1508,8 +1532,13 @@ export interface SetupSchemaReturn<
   TActors extends Record<string, AnyActorLogic>,
   TActions extends Record<string, SetupActionImplementation<TContext, TEvent>>,
   TGuards extends Record<string, GuardImplementation<TContext, TEvent>>,
-  TDelays extends Record<string, DelayConfig<TContext, TEvent>>
-> extends Omit<SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays>, "extend"> {
+  TDelays extends Record<string, DelayConfig<TContext, TEvent>>,
+  TInput = NonReducibleUnknown,
+  TOutput = unknown
+> extends Omit<
+    SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays, unknown, unknown, TInput, EventObject, Record<never, never>, string, TOutput>,
+    "extend"
+  > {
   // `extend` is its own below: it gives a schema-based setup back (the two generic signatures
   // of `extend` are not comparable once the names of the extension's actions are inferred)
   /**
@@ -1531,7 +1560,7 @@ export interface SetupSchemaReturn<
 
   /**
    * `extend` (see `SetupReturn.extend`) for a schema-based setup: the new setup keeps the
-   * schemas and the validators.
+   * schemas, the validators and the run-time checks.
    */
   readonly extend: <
     const TExtendActions extends Record<
@@ -1552,13 +1581,37 @@ export interface SetupSchemaReturn<
     TActors,
     MergedImplementations<TActions, TExtendActions>,
     MergedImplementations<TGuards, TExtendGuards>,
-    MergedImplementations<TDelays, TExtendDelays>
+    MergedImplementations<TDelays, TExtendDelays>,
+    TInput,
+    TOutput
   >
 }
 
 /**
+ * A check that a value matches the decoded type of `schema` (`Schema.toType`): the machines
+ * hold decoded values, so a transforming schema checks its decoded side.
+ */
+const typeCheck = (schema: Schema.Decoder<unknown>): ((value: unknown) => Effect.Effect<void, Schema.SchemaError>) => {
+  const decode = Schema.decodeUnknownEffect(Schema.toType(schema))
+  return (value) => Effect.asVoid(decode(value))
+}
+
+/** The schemas of a schema-based setup; the input and the output schema are optional. */
+interface SetupSchemas<TContextSchema, TEventSchema> {
+  /** The context schema. */
+  readonly context: TContextSchema
+  /** The event schema. */
+  readonly events: TEventSchema
+  /** The input schema, if the setup has one. */
+  readonly input: Option.Option<Schema.Decoder<unknown>>
+  /** The output schema, if the setup has one. */
+  readonly output: Option.Option<Schema.Decoder<unknown>>
+}
+
+/**
  * A schema-based setup from its implementation records and schemas: the setup members, the
- * schemas and the validators, and an `extend` that keeps them.
+ * schemas and the validators, the run-time checks of its machines, and an `extend` that keeps
+ * them.
  */
 const buildSchemaSetup = <
   TContextSchema extends Schema.Decoder<unknown>,
@@ -1566,11 +1619,12 @@ const buildSchemaSetup = <
   TActors extends Record<string, AnyActorLogic>,
   TActions extends Record<string, SetupActionImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   TGuards extends Record<string, GuardImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
-  TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>
+  TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
+  TInput,
+  TOutput
 >(
   implementations: SetupImplementations<TActors, TActions, TGuards, TDelays>,
-  contextSchema: TContextSchema,
-  eventSchema: TEventSchema
+  schemas: SetupSchemas<TContextSchema, TEventSchema>
 ): SetupSchemaReturn<
   Schema.Schema.Type<TContextSchema>,
   Schema.Schema.Type<TEventSchema> & EventObject,
@@ -1579,19 +1633,31 @@ const buildSchemaSetup = <
   TActors,
   TActions,
   TGuards,
-  TDelays
+  TDelays,
+  TInput,
+  TOutput
 > => {
   type TContext = Schema.Schema.Type<TContextSchema>
   type TEvent = Schema.Schema.Type<TEventSchema> & EventObject
+  // An absent input or output schema lets every value through
+  const optionalCheck = (schema: Option.Option<Schema.Decoder<unknown>>) =>
+    Option.match(schema, { onNone: () => () => Effect.void, onSome: typeCheck })
+  const schemaChecks: SM.SchemaChecks = {
+    event: typeCheck(schemas.events),
+    context: typeCheck(schemas.context),
+    input: optionalCheck(schemas.input),
+    output: optionalCheck(schemas.output),
+  }
   return {
-    ...buildSetup<TContext, TEvent, TActors, TActions, TGuards, TDelays, unknown, unknown, NonReducibleUnknown, EventObject, Record<never, never>, string>(
+    ...buildSetup<TContext, TEvent, TActors, TActions, TGuards, TDelays, unknown, unknown, TInput, EventObject, Record<never, never>, string, TOutput>(
       implementations,
-      Option.none()
+      Option.none(),
+      Option.some(schemaChecks)
     ),
-    contextSchema,
-    eventSchema,
-    validateContext: Schema.decodeUnknownEffect(contextSchema) as (value: unknown) => Effect.Effect<TContext, Schema.SchemaError>,
-    validateEvent: Schema.decodeUnknownEffect(eventSchema) as (value: unknown) => Effect.Effect<TEvent, Schema.SchemaError>,
+    contextSchema: schemas.context,
+    eventSchema: schemas.events,
+    validateContext: Schema.decodeUnknownEffect(schemas.context) as (value: unknown) => Effect.Effect<TContext, Schema.SchemaError>,
+    validateEvent: Schema.decodeUnknownEffect(schemas.events) as (value: unknown) => Effect.Effect<TEvent, Schema.SchemaError>,
     // Only the type of `extend` knows the merged records (as for `setup`)
     extend: (extension) =>
       buildSchemaSetup<
@@ -1600,20 +1666,29 @@ const buildSchemaSetup = <
         TActors,
         Record<string, SetupActionImplementation<TContext, TEvent>>,
         Record<string, GuardImplementation<TContext, TEvent>>,
-        Record<string, DelayConfig<TContext, TEvent>>
-      >(mergeImplementations<TContext, TEvent, TActors>(implementations, extension), contextSchema, eventSchema) as never,
+        Record<string, DelayConfig<TContext, TEvent>>,
+        TInput,
+        TOutput
+      >(mergeImplementations<TContext, TEvent, TActors>(implementations, extension), schemas) as never,
   }
 }
 
 /**
  * Creates a type-safe machine factory using Effect Schema.
  *
- * This is the Effect-idiomatic alternative to the phantom type approach.
- * It provides:
- * - Runtime validation of context and events
- * - Self-documenting schemas
- * - Automatic serialization/deserialization support
- * - Full type inference
+ * This is the Effect-idiomatic alternative to the phantom type approach. The decoded types of
+ * the schemas type the machines (context, events, and the input and output when their schemas
+ * are given), and each machine checks its values against those types at run time:
+ *
+ * - each event it takes, other than the built-in `xstate.*` events, before the transition;
+ * - the context of its initial snapshot and of each snapshot a transition gives;
+ * - its input, before the context factory reads it, and the output of a done snapshot.
+ *
+ * A value that does not match fails as user code that throws the `SchemaError` would: a
+ * transition dies with it, so an actor errors with it and keeps the snapshot it had, and the
+ * initialization gives a snapshot with status `error`. The machines hold decoded values, so a
+ * transforming schema checks its decoded side; decode outside data with `validateEvent` (or
+ * `validateContext`) before you send it.
  *
  * @example
  * ```ts
@@ -1658,9 +1733,11 @@ export const setupWithSchema = <
   const TActors extends Record<string, AnyActorLogic> = Record<string, never>,
   const TActions extends Record<string, SetupActionImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>> = Record<string, SetupActionImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   const TGuards extends Record<string, GuardImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>> = Record<string, GuardImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
-  const TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>> = Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>
+  const TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>> = Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
+  TInputSchema extends Schema.Decoder<unknown> | undefined = undefined,
+  TOutputSchema extends Schema.Decoder<unknown> | undefined = undefined
 >(
-  config: SetupSchemaConfig<TContextSchema, TEventSchema, TActors, TActions, TGuards, TDelays>
+  config: SetupSchemaConfig<TContextSchema, TEventSchema, TActors, TActions, TGuards, TDelays, TInputSchema, TOutputSchema>
 ): SetupSchemaReturn<
   Schema.Schema.Type<TContextSchema>,
   Schema.Schema.Type<TEventSchema> & EventObject,
@@ -1669,9 +1746,20 @@ export const setupWithSchema = <
   TActors,
   TActions,
   TGuards,
-  TDelays
+  TDelays,
+  SchemaTypeOr<TInputSchema, NonReducibleUnknown>,
+  SchemaTypeOr<TOutputSchema, unknown>
 > =>
-  buildSchemaSetup<TContextSchema, TEventSchema, TActors, TActions, TGuards, TDelays>(
+  buildSchemaSetup<
+    TContextSchema,
+    TEventSchema,
+    TActors,
+    TActions,
+    TGuards,
+    TDelays,
+    SchemaTypeOr<TInputSchema, NonReducibleUnknown>,
+    SchemaTypeOr<TOutputSchema, unknown>
+  >(
     {
       // An absent record is empty: the type of its default (no names) says the same
       actors: config.actors ?? ({} as TActors),
@@ -1679,6 +1767,10 @@ export const setupWithSchema = <
       guards: config.guards ?? ({} as TGuards),
       delays: config.delays ?? ({} as TDelays),
     },
-    config.context,
-    config.events
+    {
+      context: config.context,
+      events: config.events,
+      input: Option.fromNullishOr(config.input),
+      output: Option.fromNullishOr(config.output),
+    }
   )
