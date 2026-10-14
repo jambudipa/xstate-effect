@@ -244,31 +244,54 @@ export interface Assign {
 /**
  * Type-safe assign for a single property: `assign({ [key]: value })`, so a function value
  * receives the action context and the params of the use (typed by `TParams`), and a
- * snapshot without context fails as for `assign`.
+ * snapshot without context fails as for `assign`. As `assign`, it reads the context and event
+ * types from where it is written (a machine config, a setup's `actions` record), and called
+ * inside a custom action it gives upstream's warning that the action does nothing there.
  *
  * @example
  * ```ts
- * assignProperty("count", (ctx) => ctx.context.count + 1)
+ * import { assignProperty, createMachine } from "@jambudipa/xstate-effect"
+ *
+ * export const counter = createMachine({
+ *   types: {} as { context: { count: number }; events: { type: "INC" } },
+ *   context: { count: 0 },
+ *   on: { INC: { actions: assignProperty("count", ({ context }) => context.count + 1) } }
+ * })
  * ```
  *
  * @since 0.1.0
  * @category Actions
  */
-export const assignProperty = <
-  TContext,
-  TEvent extends EventObject,
-  K extends keyof TContext,
-  TParams = void
->(
+export const assignProperty: AssignProperty = (<TContext, TEvent extends EventObject, K extends keyof TContext, TParams>(
   key: K,
   value: TContext[K] | ((ctx: ActionContext<TContext, TEvent>, params: TParams) => TContext[K])
 ): ActionDefinition<TContext, TEvent, TParams> => {
+  warnIfInCustomAction("assign")
   // One key of the object form; the mapped type does not see a computed key as one of its own
   const assignment = { [key]: value } as PropertyAssigner<TContext, TEvent, TParams>
   return {
     type: "xstate.assign",
     exec: (ctx, params) => resolveAssign(assignment, ctx, params),
   }
+}) as AssignProperty
+
+/**
+ * The type of {@link assignProperty}, built as {@link Assign} is: its first signature is the
+ * one every call resolves to, and the second, never callable, gives an inline call the
+ * checker's deferral, so the first reads `TContext` and `TEvent` from where the action is
+ * written. `K` is the key, and `TParams` the params of the use.
+ *
+ * @since 0.2.1
+ * @category Actions
+ */
+export interface AssignProperty {
+  <TContext, TEvent extends EventObject, K extends keyof TContext = keyof TContext, TParams = undefined>(
+    key: K,
+    value:
+      | NoInfer<TContext[K]>
+      | ((ctx: ActionContext<NoInfer<TContext>, NoInfer<TEvent>>, params: TParams) => NoInfer<TContext[K]>)
+  ): ActionDefinition<TContext, TEvent, AssignDefinitionParams<NoInfer<TParams>>> & ImplementsParams<TParams>
+  <TDeferred extends never>(first: TDeferred, second: TDeferred, third: TDeferred): (deferred: TDeferred) => never
 }
 
 // ============================================================

@@ -9,12 +9,14 @@
  * takes back.
  *
  * The A-series specs cover `sendSelf` as an action and every other helper of the enqueuer;
- * this spec covers `enqueue.sendSelf`.
+ * this spec covers `enqueue.sendSelf`. It also covers `assignProperty` written inline (its
+ * types come from the machine) and called inside a custom action (upstream's assign warning).
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Logger } from "effect"
 import { TestClock } from "effect/testing"
-import { createActor, createMachine, enqueueActions } from "../../src/index.js"
+import { assignProperty, createActor, createMachine, enqueueActions } from "../../src/index.js"
+import { builtInCalledInCustomAction } from "./upstream-messages.js"
 
 interface Ctx {
   readonly count: number
@@ -99,4 +101,46 @@ describe("COV-6 enqueue.sendSelf sends an event to the machine actor itself", ()
       yield* advance(100)
       assert.deepStrictEqual(handled, ["delayed sendSelf"], "the cancelled send never arrives")
     }))
+})
+
+describe("COV-6 assignProperty reads its types from where it is written", () => {
+  it.effect("[COV-6] assignProperty written inline types its assigner by the machine's context and events, and called inside a custom action gives upstream's assign warning", () =>
+    Effect.gen(function* () {
+      const warnings: Array<unknown> = []
+      const counter = createMachine({
+        types: {} as { context: { count: number; label: string }; events: { type: "INC"; by: number } | { type: "MISUSE" } },
+        context: { count: 0, label: "start" },
+        on: {
+          INC: { actions: [assignProperty("count", ({ context, event }) => context.count + (event.type === "INC" ? event.by : 0)), assignProperty("label", "counted")] },
+          MISUSE: {
+            actions: () => {
+              // Called, not written as an action: nothing gives it the machine's types
+              assignProperty<{ count: number; label: string }, { type: "MISUSE" }, "count">("count", 99)
+            },
+          },
+        },
+      })
+      // The actor logs with the services of its creation, so the test logger wraps it
+      const context = yield* Effect.gen(function* () {
+        const actor = yield* createActor(counter)
+        yield* actor.start
+        yield* actor.send({ type: "INC", by: 2 })
+        yield* actor.send({ type: "MISUSE" })
+        return (yield* actor.getSnapshot).context
+      }).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make((options) => {
+              if (options.logLevel === "Warn") {
+                warnings.push(...(Array.isArray(options.message) ? options.message : [options.message]))
+              }
+            }),
+          ])
+        )
+      )
+
+      assert.deepStrictEqual(context, { count: 2, label: "counted" })
+      assert.deepStrictEqual(warnings, [builtInCalledInCustomAction("assign")])
+    })
+  )
 })
