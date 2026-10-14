@@ -11,8 +11,8 @@ sources: [packages/core/src/setup.ts, packages/core/src/Actor.ts, packages/core/
 > initial entry actions included. For a `setup` machine the compiler knows which services those
 > are: `createActor`'s type requires what the setup's actions and actors need, what the config's
 > inline actions and actor logic need, and what the implementations given to `provide` need. A
-> plain `createMachine` config, the actions that `enqueueActions` enqueues and the actions of an
-> `initial` object or a `route` add nothing to the type, and a guard cannot use a service at all.
+> plain `createMachine` config and the actions that `enqueueActions` enqueues add nothing to the
+> type, and a guard cannot use a service at all.
 
 ## The question
 
@@ -143,11 +143,6 @@ actions at run time, and `enqueue` takes any action, so the type never sees the 
 action that the callback enqueues inline. An action named in `setup({ actions })` and enqueued
 by its name is tracked through the record.
 
-**An inline action of an `initial` object or a `route`.** The setup reads the inline actions of
-`entry`, `exit` and the transitions of each state, but not the `actions` of
-`initial: { target, actions }` or of a state's `route`. An action named in the setup and used by
-its name there is tracked through the record.
-
 **A guard.** A guard may return an `Effect<boolean>`, but that Effect has no requirements, and
 a guard that reads a service is a type error. Guards answer whether a transition is enabled,
 and the package asks that question in places that have no service context: `snapshot.can`,
@@ -161,9 +156,9 @@ invoked actor reads the service and puts the result where the guard can see it.
   the services of the setup's records, of the config's inline actions and actor logic, and of
   the implementations given to `provide`.
 - Provide services around the Effect that calls `createActor`, not around `start` or `send`.
-- Treat the actions of a plain `createMachine`, the actions that `enqueueActions` enqueues
-  inline, and the inline actions of an `initial` object or a `route` as untracked: the program
-  must provide their services by convention, and a missing one shows up as an actor error.
+- Treat the actions of a plain `createMachine` and the actions that `enqueueActions` enqueues
+  inline as untracked: the program must provide their services by convention, and a missing one
+  shows up as an actor error.
 - Keep guards free of services; move service data into context first.
 - To swap a service in a test, create the actor in a program that provides the test version.
 

@@ -1271,6 +1271,15 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
       })
       typeHolds<[ServicesOf<typeof machine>] extends [Mailbox] ? ([Mailbox] extends [ServicesOf<typeof machine>] ? true : false) : false>(true)
       typeHolds<[ServicesOf<typeof audited>] extends [Mailbox | Audit] ? ([Mailbox | Audit] extends [ServicesOf<typeof audited>] ? true : false) : false>(true)
+      // The actions of an initial object and of a route count too
+      const routed = setup({ types: {} as { events: { type: "GO" } } }).createMachine({
+        initial: { target: "idle", actions: () => Effect.gen(function* () { (yield* Mailbox).sent.push("initial") }) },
+        states: {
+          idle: {},
+          review: { id: "review", route: { actions: () => Effect.gen(function* () { (yield* Audit).lines.push("route") }) } },
+        },
+      })
+      typeHolds<[Mailbox | Audit] extends [ServicesOf<typeof routed>] ? true : false>(true)
 
       const sent: Array<string> = []
       const lines: Array<string> = []
@@ -1280,8 +1289,18 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
         yield* actor.send({ type: "SEND" })
       }).pipe(Effect.provideService(Mailbox, { sent }), Effect.provideService(Audit, { lines }))
 
+      const routedSent: Array<string> = []
+      const routedLines: Array<string> = []
+      yield* Effect.gen(function* () {
+        const actor = yield* createActor(routed)
+        yield* actor.start
+        yield* actor.send({ type: "xstate.route", to: "#review" })
+      }).pipe(Effect.provideService(Mailbox, { sent: routedSent }), Effect.provideService(Audit, { lines: routedLines }))
+
       assert.deepStrictEqual(sent, ["hello"])
       assert.deepStrictEqual(lines, ["record"])
+      assert.deepStrictEqual(routedSent, ["initial"])
+      assert.deepStrictEqual(routedLines, ["route"])
     })
   )
 

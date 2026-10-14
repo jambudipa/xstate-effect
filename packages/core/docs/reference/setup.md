@@ -354,14 +354,13 @@ The machine's `R` is the union of these services:
   definition, the Effect of its `exec`), and the requirements of each actor logic of
   `setup({ actors })` (`SetupRequirements<TActions, TActors>`).
 - What the Effects of the config's inline actions require: `entry`, `exit`, and the `actions` of
-  the `on`, `always`, `after` and `onDone` transitions and of an `invoke`'s `onDone`, `onError`
-  and `onSnapshot`, in every state (`Types.ConfigRequirementsOf<TConfig>`).
+  the `on`, `always`, `after` and `onDone` transitions, of an `initial` object
+  (`initial: { target, actions }`), of a `route`, and of an `invoke`'s `onDone`, `onError` and
+  `onSnapshot`, in every state (`Types.ConfigRequirementsOf<TConfig>`).
 - The requirements of inline actor logic in an `invoke`, such as `src: fromEffect(...)`.
 
 An action that the config names, by a string or as `{ type, params }`, counts through the
-setup's record. These inline actions add nothing: the actions that `enqueueActions` enqueues at
-run time, and the `actions` of an `initial` object (`initial: { target, actions }`) and of a
-`route`. A guard
+setup's record. The actions that `enqueueActions` enqueues at run time add nothing. A guard
 cannot need a service: its Effect has the type `Effect<boolean>`, so one that needs a service is
 a type error. [`machine.provide`](./create-machine.md#machineprovide) adds the services of the
 implementations that it is given.

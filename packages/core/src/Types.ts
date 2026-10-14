@@ -2118,8 +2118,9 @@ type InvokeRequirementsOf<TInvoke> = TInvoke extends ReadonlyArray<infer TEach>
 
 /**
  * The services a machine config as written needs (SD-8): the Effects of its inline actions
- * (`entry`, `exit`, and the actions of `on`, `always`, `after`, `onDone` and `invoke`
- * transitions) and its inline actor logic (an `invoke` src that is logic), in every state.
+ * (`entry`, `exit`, the actions of `on`, `always`, `after`, `onDone` and `invoke` transitions,
+ * of an `initial` object and of a `route`) and its inline actor logic (an `invoke` src that is
+ * logic), in every state.
  * Named actions and actors count through the implementations instead. A config typed as a
  * whole, with any state key, needs nothing here.
  *
@@ -2133,6 +2134,8 @@ export type ConfigRequirementsOf<TConfig> =
   | (TConfig extends { readonly always: infer TAlways } ? TransitionRequirementsOf<TAlways> : never)
   | (TConfig extends { readonly after: infer TAfter } ? { readonly [K in keyof TAfter]: TransitionRequirementsOf<TAfter[K]> }[keyof TAfter] : never)
   | (TConfig extends { readonly onDone: infer TDone } ? TransitionRequirementsOf<TDone> : never)
+  | (TConfig extends { readonly initial: infer TInitial } ? TransitionRequirementsOf<TInitial> : never)
+  | (TConfig extends { readonly route: infer TRoute } ? TransitionRequirementsOf<TRoute> : never)
   | (TConfig extends { readonly invoke: infer TInvoke } ? InvokeRequirementsOf<TInvoke> : never)
   | (TConfig extends { readonly states: infer TStates }
       ? string extends keyof TStates ? never : { readonly [K in keyof TStates]: ConfigRequirementsOf<TStates[K]> }[keyof TStates]

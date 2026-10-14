@@ -295,9 +295,6 @@ actor the status `error`:
 - **Actions that `enqueueActions` enqueues.** The callback chooses them at run time, so their
   Effects add nothing to the requirements. Name such an action in `setup({ actions })` and
   enqueue it by name: the setup's record then carries its services.
-- **Inline actions of an `initial` object or a `route`.** The `actions` of
-  `initial: { target, actions }` and of a state's `route` add nothing. Name such an action in
-  `setup({ actions })` and use its name there.
 
 A guard cannot read a service: it may return an `Effect<boolean>`, but that Effect has no
 requirements, and a guard whose Effect needs a service is a type error. A failure of an action's

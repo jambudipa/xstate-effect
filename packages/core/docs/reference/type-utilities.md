@@ -427,11 +427,11 @@ The first four are members of the `Types` namespace only; `SetupRequirements` is
 
 `Types.ConfigRequirementsOf<TConfig>` gives the services that a machine config needs, as it is
 written: the union of `ActionRequirementsOf` for its `entry` and `exit`, for the `actions` of
-each transition in `on`, `always`, `after` and `onDone`, and for the `actions` of an `invoke`'s
+each transition in `on`, `always`, `after` and `onDone`, of an `initial` object
+(`initial: { target, actions }`) and of a `route`, and for the `actions` of an `invoke`'s
 `onDone`, `onError` and `onSnapshot`; the requirements of each `invoke` `src` that is actor
 logic, not a name; and the result for each state in `states`, at any depth. A `states` record
-whose keys are typed as `string` adds nothing, and so do the `actions` of an `initial` object
-and of a `route`.
+whose keys are typed as `string` adds nothing.
 
 ### ImplementationsRequirementsOf
 
