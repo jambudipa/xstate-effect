@@ -15,7 +15,9 @@
  * - Runtime (`src/Actor.ts`, `src/ActorSystem.ts`, `src/ActorRef.ts`): the default clock runs
  *   on the Effect clock; a logic that fails on the stop event errors the actor (SD-4); a child
  *   stopped twice in one macrostep stops once; `createSpawnFunction` starts a child of the
- *   parent in the parent's system; the module statics and the inspect forms.
+ *   parent in the parent's system; the module statics and the inspect forms; an observer
+ *   attached after start runs before the send returns (upstream calls observers
+ *   synchronously), and an observer call that waits leaves the actor running.
  * - Engine (`src/stateUtils.ts`, `src/StateNode.ts`, `src/StateMachine.ts`, `src/StateValue.ts`):
  *   selection over a value key that names no child fails with upstream's message;
  *   a transition to the root without `reenter` re-enters the root's initial child (an `initial`
@@ -23,7 +25,7 @@
  *   helpers on node lists, paths and history defaults; the node transformations and predicates.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Chunk, Effect, Equal, Exit, HashMap, Inspectable, Option, Predicate, Result, Stream } from "effect"
+import { Cause, Chunk, Deferred, Effect, Equal, Exit, HashMap, Inspectable, Option, Predicate, Result, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ActorClass, allocateChild, buildChild, createSpawnFunction, restoreChild } from "../../src/Actor.js"
 import { ActorScope, type ActorScopeService, createGuardContext } from "../../src/ActorLogic.js"
@@ -984,4 +986,65 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
       assert.strictEqual(guardContext.snapshot, snapshot)
     })
   )
+
+  it.effect("[COV-1] a subscriber attached after start runs before each send returns, as upstream calls observers synchronously; a select subscriber gives only changed values", () =>
+    Effect.gen(function* () {
+      const machine = createMachine({
+        types: {} as { context: { count: number; parity: string }; events: { type: "INC" } | { type: "TOUCH" } },
+        context: { count: 0, parity: "even" },
+        on: {
+          INC: { actions: assign(({ context }) => ({ count: context.count + 1, parity: context.count % 2 === 0 ? "odd" : "even" })) },
+          TOUCH: { actions: assign(({ context }) => ({ ...context })) },
+        },
+      })
+      const seen: Array<string> = []
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      yield* actor.subscribe((snapshot) => Effect.sync(() => seen.push(`next:${snapshot.context.count}`)))
+      yield* actor.select(({ context }) => context.parity).subscribe((parity) => Effect.sync(() => seen.push(`parity:${parity}`)))
+
+      yield* actor.send({ type: "INC" })
+      seen.push("sent INC")
+      yield* actor.send({ type: "TOUCH" })
+      seen.push("sent TOUCH")
+
+      assert.deepStrictEqual(seen, ["next:1", "parity:odd", "sent INC", "next:1", "sent TOUCH"])
+    })
+  )
+
+  it.effect("[COV-1] an observer call that waits goes on in its own fiber: the actor processes the next event, and the observer's next call waits for the call before it", () =>
+    Effect.gen(function* () {
+      const machine = createMachine({
+        types: {} as { context: { count: number }; events: { type: "INC" } },
+        context: { count: 0 },
+        on: { INC: { actions: assign(({ context }) => ({ count: context.count + 1 })) } },
+      })
+      const release = yield* Deferred.make<void>()
+      const calls: Array<string> = []
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      yield* actor.subscribe((snapshot) =>
+        Effect.gen(function* () {
+          calls.push(`start:${snapshot.context.count}`)
+          if (snapshot.context.count === 1) {
+            yield* Deferred.await(release)
+          }
+          calls.push(`end:${snapshot.context.count}`)
+        })
+      )
+
+      yield* actor.send({ type: "INC" })
+      yield* actor.send({ type: "INC" })
+      const whileWaiting = [...calls]
+      const countWhileWaiting = (yield* actor.getSnapshot).context.count
+      yield* Deferred.succeed(release, undefined)
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+
+      assert.deepStrictEqual(whileWaiting, ["start:1"])
+      assert.strictEqual(countWhileWaiting, 2)
+      assert.deepStrictEqual(calls, ["start:1", "end:1", "start:2", "end:2"])
+    })
+  )
+
 })

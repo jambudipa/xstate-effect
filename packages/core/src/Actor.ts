@@ -295,6 +295,10 @@ export interface Actor<
    * This is the Effect-idiomatic way to observe snapshot changes,
    * allowing use of all Stream combinators.
    *
+   * The stream reads the actor when it runs, not when it is built: a stream forked with
+   * `Effect.forkScoped` starts later, after the sends that follow the fork. Fork it with
+   * `{ startImmediately: true }` to receive the snapshots of those sends.
+   *
    * @since 0.1.0
    */
   readonly changes: Stream.Stream<TSnapshot, unknown>
@@ -303,6 +307,10 @@ export interface Actor<
    * Subscribes to snapshots as XState does (SD-24): `observer` receives each snapshot the
    * actor publishes after this call, one per processed event, and nothing at subscription
    * time. A subscriber added before `start` receives the initial snapshot once, at `start`.
+   * Each call starts in the processing that publishes the snapshot: a call that never waits
+   * ends before the `send` of the event returns, as upstream's synchronous call does; a call
+   * that waits goes on in its own fiber, and the actor does not wait for it. The calls of one
+   * subscriber run one at a time, in order.
    * It never receives a snapshot with status `error` or `stopped` (upstream calls no `next`
    * for them); at a stop it receives the active snapshot that a transition logic gives for the
    * stop event (upstream). An observer that throws, fails or dies is reported through the
@@ -668,6 +676,32 @@ interface StreamItem<TSnapshot> {
   readonly snapshot: TSnapshot
   /** True only on the item the actor's end publishes: a stream ends there, without repeating a snapshot it just gave. */
   readonly last: boolean
+}
+
+/**
+ * An attached upstream observer (an entry of upstream `this.observers`): a `subscribe`
+ * callback, a `select` subscription, or the relay of a child that syncs its snapshot. Each
+ * attachment is its own object, so an observer attached twice receives each snapshot twice.
+ */
+interface SnapshotObserver<TSnapshot> {
+  /** Receives each active or done snapshot the actor publishes (upstream `observer.next`). */
+  readonly next: (snapshot: TSnapshot) => Effect.Effect<void>
+  /** The scope of the attachment: the observer's calls run in it, so a detach interrupts them. */
+  readonly scope: Scope.Scope
+  /** The fiber of the observer's last call, which its next call waits for. */
+  readonly lastCall: Ref.Ref<Option.Option<Fiber.Fiber<void>>>
+}
+
+/**
+ * The attached observers and the snapshot the actor holds, kept together so that an observer
+ * that reads the held snapshot as it attaches (a `select` subscription) attaches in the same
+ * step: no snapshot is published between the read and the attachment.
+ */
+interface Observing<TSnapshot> {
+  /** The snapshot the actor holds (upstream `this._snapshot`). */
+  readonly held: TSnapshot
+  /** The attached observers, in the order they attached. */
+  readonly observers: ReadonlyArray<SnapshotObserver<TSnapshot>>
 }
 
 // ============================================================
@@ -1060,11 +1094,6 @@ const build = <
     // Processing status
     const processingStatus = yield* Ref.make<ProcessingStatus>(Types.ProcessingStatus.NotStarted)
 
-    // The upstream observers' `next` channel: the `subscribe` callbacks receive each snapshot
-    // published here (one per processed event, and the one the actor starts from), never an
-    // error or stopped snapshot. The `changes` stream reads the stream items instead.
-    const observerPubSub = yield* PubSub.unbounded<TSnapshot>()
-
     // The observers attached now, by whether they have an error listener (upstream
     // `observer.error`): a running `changes` stream has one, a `subscribe` callback has none.
     // Which of them there are decides whether an error is reported (`_reportError`, SD-21).
@@ -1248,10 +1277,14 @@ const build = <
 
     /**
      * Sets the snapshot the actor holds (upstream `this._snapshot = ...`). The `changes`
-     * streams receive it later, in `update`, after the deferred effects, as upstream's
-     * observers do.
+     * streams and the observers receive it later, in `update`, after the deferred effects, as
+     * upstream's observers do.
      */
-    const hold = (snapshot: TSnapshot): Effect.Effect<void> => SubscriptionRef.set(snapshotRef, snapshot)
+    const hold = (snapshot: TSnapshot): Effect.Effect<void> =>
+      Effect.andThen(
+        SubscriptionRef.set(snapshotRef, snapshot),
+        Ref.update(observing, (state) => ({ ...state, held: snapshot }))
+      )
 
     /** Hands `snapshot` to the `changes` streams (upstream `observer.next`). */
     const publishChange = (snapshot: TSnapshot): Effect.Effect<void> =>
@@ -1334,37 +1367,78 @@ const build = <
       )
 
     /**
-     * Attaches an upstream observer until the caller's scope closes: the observer that
-     * `makeObserver` builds receives each snapshot published on the observers' channel after
-     * this call, inside the actor's callbacks (its sends never wait, SD-23). What it throws,
-     * fails or dies with is reported through the logger, and it keeps receiving snapshots
-     * (SD-21). `makeObserver` runs once the subscription exists and before any snapshot reaches
-     * the observer, so a value it reads from the live snapshot is never older than the first
-     * snapshot the observer receives (a `select` subscription).
+     * Attaches an upstream observer until the caller's scope closes (upstream
+     * `observers.add`, and `observers.delete` at `unsubscribe`): the observer that
+     * `makeObserver` builds from the snapshot the actor holds receives each snapshot the actor
+     * publishes after this call (`notifyObservers`). The read of the held snapshot and the
+     * attachment are one step, as upstream's `select` reads `getSnapshot()` and subscribes in
+     * one synchronous call. Gives the held snapshot that `makeObserver` received.
      */
     const observeWith = (
-      makeObserver: Effect.Effect<(snapshot: TSnapshot) => Effect.Effect<void>>,
+      makeObserver: (held: TSnapshot) => (snapshot: TSnapshot) => Effect.Effect<void>,
       kind: ObserverKind
-    ): Effect.Effect<void, never, Scope.Scope> =>
+    ): Effect.Effect<TSnapshot, never, Scope.Scope> =>
       Effect.gen(function* () {
         yield* countObserver(kind)
-        // Subscribe now, not when the forked fiber first runs, so no snapshot published after
-        // this call is missed
-        const subscription = yield* PubSub.subscribe(observerPubSub)
-        const observer = yield* makeObserver
-        yield* Stream.fromSubscription(subscription).pipe(
-          Stream.runForEach((snapshot) =>
-            Effect.provideService(isolateCallback(() => observer(snapshot)), ProcessingActors, [actor])
-          ),
-          Effect.forkScoped
+        const scope = yield* Effect.scope
+        const lastCall = yield* Ref.make(Option.none<Fiber.Fiber<void>>())
+        const [, held] = yield* Effect.acquireRelease(
+          Ref.modify(observing, (state) => {
+            const observer: SnapshotObserver<TSnapshot> = { next: makeObserver(state.held), scope, lastCall }
+            return [[observer, state.held] as const, { ...state, observers: [...state.observers, observer] }]
+          }),
+          ([observer]) =>
+            Ref.update(observing, (state) => ({
+              ...state,
+              observers: state.observers.filter((other) => other !== observer),
+            }))
         )
+        return held
       })
 
     /** {@link observeWith} for an observer that exists already. */
     const observe = (
       observer: (snapshot: TSnapshot) => Effect.Effect<void>,
       kind: ObserverKind
-    ): Effect.Effect<void, never, Scope.Scope> => observeWith(Effect.succeed(observer), kind)
+    ): Effect.Effect<void, never, Scope.Scope> => Effect.asVoid(observeWith(() => observer, kind))
+
+    /**
+     * Calls `observer` with `snapshot` (upstream `observer.next`) inside the actor's callbacks
+     * (its sends never wait, SD-23). The call starts at once, in the processing that publishes
+     * the snapshot, and runs until it ends or first waits: a call that never waits ends before
+     * the send of the event returns, as upstream's synchronous call does, and a call that waits
+     * goes on in its own fiber, in the observer's scope, so the actor never waits for it. An
+     * observer's calls run one at a time, in order: a call waits for the observer's call before
+     * it. What a call throws, fails or dies with is reported through the logger, and the
+     * observer stays attached (SD-21).
+     */
+    const callObserver = (observer: SnapshotObserver<TSnapshot>, snapshot: TSnapshot): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const previous = yield* Ref.get(observer.lastCall)
+        const call = Effect.andThen(
+          Option.match(previous, { onNone: () => Effect.void, onSome: Fiber.await }),
+          isolateCallback(() => observer.next(snapshot))
+        ).pipe(Effect.provideService(ProcessingActors, [actor]))
+        const fiber = yield* Effect.forkIn(call, observer.scope, { startImmediately: true })
+        yield* Ref.set(observer.lastCall, Option.some(fiber))
+      })
+
+    /**
+     * Hands `snapshot` to the attached observers (upstream the `observer.next` loop of
+     * `update`), in the order they attached (`callObserver`). As upstream's loop over its
+     * `Set`, an observer that attaches meanwhile receives the snapshot too, and one that
+     * detaches before its turn does not.
+     */
+    const notifyObservers = (snapshot: TSnapshot): Effect.Effect<void> => {
+      const notifyFrom = (notified: ReadonlyArray<SnapshotObserver<TSnapshot>>): Effect.Effect<void> =>
+        Effect.flatMap(Ref.get(observing), ({ observers }) =>
+          Option.match(Option.fromNullishOr(observers.find((observer) => !notified.includes(observer))), {
+            onNone: () => Effect.void,
+            onSome: (observer) => Effect.andThen(callObserver(observer, snapshot), notifyFrom([...notified, observer])),
+          })
+        )
+      return notifyFrom([])
+    }
 
     /**
      * Hands the actor's error to its observers (upstream `_reportError`): every `changes`
@@ -1455,7 +1529,7 @@ const build = <
             yield* publishChange(snapshot)
           }
           if (snapshot.status === "active" || snapshot.status === "done") {
-            yield* PubSub.publish(observerPubSub, snapshot)
+            yield* notifyObservers(snapshot)
           }
           if (snapshot.status === "done") {
             yield* enterDone(snapshot)
@@ -1708,20 +1782,29 @@ const build = <
       ): Readable<TSelected> => ({
         get: Effect.map(getSnapshot, selector),
         subscribe: (observer) =>
-          observeWith(
-            Effect.map(
-              Effect.flatMap(getSnapshot, (current) => Ref.make(selector(current))),
-              (lastGiven) => (snapshot) =>
+          Effect.gen(function* () {
+            // The last value given; until one is given, the value selected from the snapshot
+            // held at the attachment (upstream `previousSelected`)
+            const lastGiven = yield* Ref.make(Option.none<TSelected>())
+            const held = yield* observeWith(
+              (attachedTo) => (snapshot) =>
                 Effect.suspend(() => {
                   const value = selector(snapshot)
                   return Effect.flatMap(
-                    Ref.modify(lastGiven, (last) => (equalityFn(last, value) ? [false, last] : [true, value])),
+                    Ref.modify(lastGiven, (last) => {
+                      const previous = Option.getOrElse(last, () => selector(attachedTo))
+                      return equalityFn(previous, value) ? [false, Option.some(previous)] : [true, Option.some(value)]
+                    }),
                     (changed) => (changed ? observer(value) : Effect.void)
                   )
-                })
-            ),
-            "withoutErrorListener"
-          ),
+                }),
+              "withoutErrorListener"
+            )
+            // Upstream selects from the held snapshot as it subscribes; a snapshot that reached
+            // the observer since then has set the value already
+            const selected = yield* Effect.sync(() => selector(held))
+            yield* Ref.update(lastGiven, (last) => Option.orElse(last, () => Option.some(selected)))
+          }),
         // Suspended: the actor's `changes` exists only once the actor is built
         changes: Stream.suspend(() =>
           changes.pipe(
@@ -1938,6 +2021,8 @@ const build = <
       )
     )
     const snapshotRef = yield* SubscriptionRef.make<TSnapshot>(initialSnapshot)
+    // The observers attached now, with the snapshot the actor holds (`hold` sets both)
+    const observing = yield* Ref.make<Observing<TSnapshot>>({ held: initialSnapshot, observers: [] })
     yield* Ref.set(initialised, true)
     // What the `changes` streams read: the same snapshots in the same order, each after the
     // deferred effects of its step (`update` or `commit` sets it), then the last item (`finish`)
