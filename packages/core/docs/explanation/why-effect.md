@@ -1,503 +1,162 @@
-# Why Effect?
+---
+title: Why Effect
+doc-type: explanation
+sources: [packages/core/src/Actor.ts, packages/core/src/setup.ts]
+---
 
-@jambudipa/xstate-effect is built on [Effect-TS](https://effect.website), a powerful TypeScript library for building type-safe, composable applications. This document explains why Effect is the foundation of this library and what benefits it provides.
+# Why Effect
 
-## What is Effect?
+> **TL;DR:** The package keeps XState's behaviour and gives it an Effect-native surface:
+> creating, starting and talking to an actor are Effects, every actor lives in a `Scope`, the
+> services that actions and actors need appear in types, and absent values are `Option`s. The
+> gain is that lifetimes, dependencies and failures are visible to both the compiler and the
+> runtime. The cost is more ceremony than XState and code that does not paste across from it
+> unchanged.
 
-Effect is a comprehensive library that provides:
+## The question
 
-- **Typed errors** - Errors are part of the type signature
-- **Dependency injection** - Services are provided through the type system
-- **Resource management** - Automatic cleanup of resources
-- **Concurrency primitives** - Fibers, queues, and more
-- **Structured programming** - Composable, declarative code
+XState already works, and Effect programs can call it. Why port its runtime instead of wrapping
+it? And why offer only the Effect form, with no Promise or callback API beside it? This page
+gives the reasons, and the price you pay for them.
 
-## Benefits for State Machines
+## Parity of behaviour, not of signatures
 
-### 1. Type-Safe Error Handling
+The aim of the package is that a machine behaves exactly as it does in XState 5.33.2: the same
+transitions, the same action order, the same events. It is not that the calls look the same. An
+Effect program wants things that XState's synchronous, callback-based surface cannot give it:
+work described before it runs, interruption that reaches everything started on its behalf,
+resources released when their owner ends, and dependencies that the type checker tracks.
 
-In traditional state machines, errors are often untyped or handled inconsistently. With Effect, errors are explicitly typed:
+**Why not wrap XState.** A thin layer of Effects around XState's actors would look right from
+the outside, but the work would still run outside Effect's fibers. An invoked Promise would not
+be interrupted when its state exits; a resource opened by an action would not be tied to any
+scope; an action that needs a service would have to capture it from a closure, out of sight of
+the compiler. The package runs the statechart algorithm itself, on Effect, so that each of
+these is handled by Effect's own machinery.
 
-```typescript
-import { Effect, Data } from "effect"
-import { fromEffect } from "@jambudipa/xstate-effect"
+**Why no Promise facade.** A second, Promise-based API over the Effect core was considered and
+rejected. Every behaviour would have two surfaces to keep consistent, and the Promise surface
+would drop the scope and the requirements that justify the port. Instead, `createActor`,
+`start`, `stop`, `send` and `getSnapshot` are Effects, and the parts of XState that only make
+sense with callbacks (`interpret`, `toObserver`, the observer-object form of `subscribe`,
+`Subscription` objects) are replaced by scoped Effects and Streams. One small exception
+remains: `toPromise` exists for parity with XState's helper of that name, and resolves the same
+value as `toEffect`.
 
-// Define typed errors
-class NetworkError extends Data.TaggedError("NetworkError")<{
-  message: string
-  statusCode: number
-}> {}
+## Lifetimes are scopes
 
-class ValidationError extends Data.TaggedError("ValidationError")<{
-  field: string
-  reason: string
-}> {}
+Every actor, and every invocation inside it, runs in its own fiber with its own scope.
+`createActor` needs a `Scope` from its caller, and the actor's scope is nested in it. Stopping
+an actor interrupts its fiber and closes its scope, which runs its finalizers and stops its
+children. Leaving a state ends the invocations of that state the same way. Closing the caller's
+scope stops a root actor, so `Effect.scoped(program)` is enough to guarantee that nothing it
+started is still running afterwards.
 
-interface User {
-  id: string
-  email?: string
-}
-
-// Actor knows exactly what errors it can produce
-export const fetchUserActor = fromEffect(({ input }: { input: { id: string } }) =>
-  Effect.gen(function* () {
-    const response = yield* Effect.tryPromise({
-      try: () => fetch(`/api/users/${input.id}`),
-      catch: (error) => new NetworkError({
-        message: String(error),
-        statusCode: 0
-      })
-    })
-
-    if (!response.ok) {
-      return yield* Effect.fail(new NetworkError({
-        message: "Request failed",
-        statusCode: response.status
-      }))
-    }
-
-    const data: User = yield* Effect.tryPromise({
-      try: () => response.json(),
-      catch: (error) => new NetworkError({
-        message: String(error),
-        statusCode: response.status
-      })
-    })
-    if (!data.email) {
-      return yield* Effect.fail(new ValidationError({
-        field: "email",
-        reason: "Missing required field"
-      }))
-    }
-
-    return data
-  })
-)
-```
-
-### 2. Composable Actions
-
-An action in @jambudipa/xstate-effect can return an Effect. The actor runs that Effect as part of
-the transition, so actions compose like any other Effect:
-
-```typescript
-import { Effect, Console, Context, pipe } from "effect"
-import { setup } from "@jambudipa/xstate-effect"
-
-class Database extends Context.Service<Database, {
-  readonly save: (data: string) => Effect.Effect<void>
-}>()("Database") {}
-
-export const documentSetup = setup({
-  types: {} as { context: { count: number; url: string; data: string } },
-  actions: {
-    // Simple action
-    log: ({ context }) => Console.log(`Count: ${context.count}`),
-
-    // Composed action with retry
-    fetchWithRetry: ({ context }) =>
-      pipe(
-        Effect.tryPromise(() => fetch(context.url)),
-        Effect.retry({ times: 3 }),
-        Effect.timeout("10 seconds"),
-        Effect.catch((e) => Console.error(`Failed: ${e}`))
-      ),
-
-    // Action using services
-    saveToDatabase: ({ context }) =>
-      Effect.gen(function* () {
-        const db = yield* Database
-        yield* db.save(context.data)
-        yield* Console.log("Saved successfully")
-      })
-  }
-})
-```
-
-An action's Effect must handle its own failures: a failure that escapes it stops the actor with
-status `error`, as an exception in an XState action does.
-
-### 3. Dependency Injection
-
-Effect's service pattern allows clean dependency injection:
-
-```typescript
-import { Console, Effect, Context, Layer } from "effect"
-import { createActor, setup } from "@jambudipa/xstate-effect"
-
-// Define a service
-class Logger extends Context.Service<Logger, {
-  readonly log: (message: string) => Effect.Effect<void>
-}>()("Logger") {}
-
-// Use in actions
-const machine = setup({
-  types: {} as { context: { id: string } },
-  actions: {
-    myAction: ({ context }) =>
-      Effect.gen(function* () {
-        const logger = yield* Logger
-        yield* logger.log(`Processing: ${context.id}`)
-      })
-  }
-}).createMachine({
-  context: { id: "order-42" },
-  initial: "processing",
-  states: {
-    processing: { entry: "myAction" }
-  }
-})
-
-// Provide implementation at runtime
-export const program = Effect.gen(function* () {
-  const actor = yield* createActor(machine)
-  yield* actor.start
-  // ...
-}).pipe(
-  Effect.scoped,
-  Effect.provide(Layer.succeed(Logger, {
-    log: (msg) => Console.log(`[LOG] ${msg}`)
-  }))
-)
-```
-
-The actor runs its actions, and the actors it invokes, with the services of the program that
-created it. For a machine made with `setup`, the type of `createActor` lists the services that
-its actions and actors need, so the compiler reminds you to provide them, as it does for a
-`fromEffect` actor that you create directly.
-
-### 4. Resource Management
-
-Effect automatically handles resource cleanup. When the actor stops, the Effect is interrupted
-and the release still runs:
-
-```typescript
+```ts
 import { Console, Effect } from "effect"
-import { fromEffect } from "@jambudipa/xstate-effect"
+import { createActor, fromEffect, setup } from "@jambudipa/xstate-effect"
 
-// Your own database client
-interface Connection {
-  query: (sql: string) => Promise<number>
-  close: () => Promise<void>
-}
-declare const database: { connect: () => Promise<Connection> }
-
-export const orderCountActor = fromEffect(() =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const conn = yield* Effect.acquireRelease(
-        // Acquire
-        Effect.gen(function* () {
-          const conn = yield* Effect.tryPromise(() => database.connect())
-          yield* Console.log("Connected")
-          return conn
-        }),
-        // Release (always runs)
-        (conn) =>
-          Effect.promise(() => conn.close()).pipe(
-            Effect.andThen(Console.log("Disconnected"))
-          )
-      )
-      return yield* Effect.tryPromise(() => conn.query("SELECT count(*) FROM orders"))
-    })
-  )
-)
-```
-
-### 5. Structured Concurrency
-
-Effect provides powerful concurrency primitives:
-
-```typescript
-import { Effect, pipe } from "effect"
-import { fromEffect } from "@jambudipa/xstate-effect"
-
-const fetchJson = (url: string) =>
-  Effect.tryPromise(() => fetch(url).then((r): Promise<unknown> => r.json()))
-
-// Parallel execution
-export const parallelFetch = fromEffect(({ input }: { input: { urls: string[] } }) =>
-  Effect.all(
-    input.urls.map(url => fetchJson(url)),
-    { concurrency: 5 }  // Max 5 concurrent requests
+const watchFeed = fromEffect(() =>
+  Effect.acquireRelease(Console.log("connection opened"), () => Console.log("connection closed")).pipe(
+    Effect.andThen(Effect.never)
   )
 )
 
-// Racing
-export const raceToComplete = fromEffect(() =>
-  Effect.race(
-    fetchJson("https://primary.example.com/data"),
-    fetchJson("https://backup.example.com/data")
-  )
-)
-
-// Timeout
-export const withTimeout = fromEffect(() =>
-  pipe(
-    fetchJson("/api/slow-report"),
-    Effect.timeout("5 seconds")
-  )
-)
-```
-
-### 6. Testing Benefits
-
-Effect makes testing deterministic and controllable:
-
-```typescript
-import { assert, it } from "@effect/vitest"
-import { Effect } from "effect"
-import { TestClock } from "effect/testing"
-import { createActor, createMachine, waitFor } from "@jambudipa/xstate-effect"
-
-const timerMachine = createMachine({
-  initial: "running",
+const feedMachine = setup({ actors: { watchFeed } }).createMachine({
+  initial: "watching",
   states: {
-    running: { after: { 5000: "completed" } },
-    completed: { type: "final" }
+    watching: { invoke: { src: "watchFeed" }, on: { PAUSE: "paused" } },
+    paused: {}
   }
 })
 
-// Control time in tests: `it.effect` runs the test on the TestClock
-it.effect("completes after five seconds", () =>
-  Effect.gen(function* () {
-    const actor = yield* createActor(timerMachine)
-    yield* actor.start
-
-    // Fast-forward time
-    yield* TestClock.adjust("5 seconds")
-
-    const snapshot = yield* waitFor(actor, (snapshot) => snapshot.status === "done")
-    assert.strictEqual(snapshot.value, "completed")
-  })
-)
-```
-
-## Effect vs Promises
-
-### Promises
-
-```typescript
-// Eager execution - runs immediately
-const promise = fetch("/api/data")
-
-// Error handling is optional
-void promise.then(data => console.log(data))
-// If you forget .catch(), errors are swallowed
-
-// No cancellation
-// Can't stop a running promise
-```
-
-### Effect
-
-```typescript
-import { Effect, Fiber } from "effect"
-
-// Lazy - just a description, doesn't run yet
-const effect = Effect.tryPromise(() => fetch("/api/data"))
-
-// Type system tracks errors
-// Effect.Effect<Response, Cause.UnknownError, never>
-//                         ^^ Error is part of the type
-
-// Cancellable via fibers
-export const program = Effect.gen(function* () {
-  const fiber = yield* Effect.forkChild(effect)
-  yield* Fiber.interrupt(fiber)
-})
-```
-
-## Effect vs Callbacks
-
-### Callbacks
-
-```typescript
-interface Data { items: string[] }
-interface Result { saved: number }
-type Callback<T> = (err: Error | null, value?: T) => void
-
-// Your own callback-style functions
-declare function processData(data: Data, callback: Callback<Result>): void
-declare function saveResult(result: Result, callback: Callback<void>): void
-declare function handleError(err: Error | null): void
-declare function done(): void
-
-function fetchData(callback: Callback<Data>) {
-  fetch("/api/data")
-    .then(r => r.json())
-    .then(data => callback(null, data))
-    .catch(err => callback(err))
-}
-
-// Callback hell
-fetchData((err, data) => {
-  if (err || !data) return handleError(err)
-  processData(data, (err, result) => {
-    if (err || !result) return handleError(err)
-    saveResult(result, (err) => {
-      if (err) return handleError(err)
-      done()
-    })
-  })
-})
-```
-
-### Effect
-
-```typescript
-import { Effect } from "effect"
-
-interface Data { items: string[] }
-interface Result { saved: number }
-
-// The same steps as Effects
-declare const fetchData: () => Effect.Effect<Data, Error>
-declare const processData: (data: Data) => Effect.Effect<Result, Error>
-declare const saveResult: (result: Result) => Effect.Effect<void, Error>
-
-export const program = Effect.gen(function* () {
-  const data = yield* fetchData()
-  const result = yield* processData(data)
-  yield* saveResult(result)
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(feedMachine)
+  yield* actor.start
+  // Leaving "watching" interrupts the invocation: its release runs, "connection closed"
+  yield* actor.send({ type: "PAUSE" })
 })
 
-// Flat, readable, type-safe
+void Effect.runPromise(Effect.scoped(program))
 ```
 
-## Integration with State Machines
+The alternative is to run each logic in the caller's fiber and give every logic type its own
+cleanup hook. That attaches finalizers to the caller's scope instead of the actor's, leaves
+`stop` little more than a flag, needs a separate cleanup path for every kind of logic, and still
+does not carry interruption into the work an actor started. A fiber and a scope per actor
+replaces all of that with one mechanism.
+[Actor lifetimes and scopes](actor-lifetimes-and-scopes.md) follows the scopes in detail.
 
-Effect enhances state machines in several ways:
+## Descriptions before execution
 
-### Actions as Effects
+Because `createActor` returns an Effect, nothing happens until that Effect runs, and each run
+creates a new actor. A program can hold `createActor(machine)` as a value, retry it, race it
+or run it once per request, and the usual Effect combinators apply. The same holds for
+`getNextSnapshot`, `snapshot.can` and the graph traversals: they describe a computation that
+may run guards written as Effects.
 
-```typescript
-import { Console, Effect, pipe } from "effect"
-import { assign, setup } from "@jambudipa/xstate-effect"
+## Dependencies in types
 
-// Your own Promise-based API
-declare function riskyOperation(): Promise<void>
+An action can return an Effect, and an actor can be an Effect or a Stream. Those Effects often
+need services: a repository, a mailer, a clock. With `setup`, the services they need become
+part of the type of `createActor`, so a program that forgets one does not compile. The actor
+captures the services when it is created and gives them to every action and child it runs.
+[How services reach actions and actors](services-and-requirements.md) explains the rules, and
+where the type tracking stops.
 
-export const progressSetup = setup({
-  types: {} as { context: { count: number } },
-  actions: {
-    // Simple sync action
-    increment: assign({ count: ({ context }) => context.count + 1 }),
+## Failures and absence as values
 
-    // Async action with Effect
-    saveProgress: ({ context }) =>
-      Effect.gen(function* () {
-        yield* Effect.tryPromise(() =>
-          fetch("/api/save", {
-            method: "POST",
-            body: JSON.stringify(context)
-          })
-        )
-      }),
+The package never throws synchronously. A failure inside user code (an action, a guard, an
+invoked Effect) does not escape from `send`; it sets the actor's status to `error`, keeps the
+original error on the snapshot, ends the actor's `changes` stream with that error and reaches
+the parent as an `xstate.error.actor.<id>` event, as XState reports it. The Effect APIs that can
+fail have typed errors in their signatures, such as `GuardError` for a guard that throws while
+`getNextSnapshot` evaluates it. [How failures surface](failure-model.md) covers the whole path.
 
-    // Action with error handling
-    riskyAction: () =>
-      pipe(
-        Effect.tryPromise(() => riskyOperation()),
-        Effect.catch((error) =>
-          Console.error(`Failed: ${error}`)
-        )
-      )
-  }
-})
-```
+Values that may be absent are `Option`s: `snapshot.output`, `snapshot.error` and the `output`
+of a done event. In XState these are `undefined` until they are set, and nothing in the type
+reminds the reader. `Option` puts the absence in the type, so code that reads an output has to
+say what happens when there is none. An output or error whose value is `undefined` is `None`
+as well, so there is one representation of "nothing", and the codec for persisted snapshots
+turns it into plain JSON and back without loss.
 
-### Guards as Effects
+## Time and testing
 
-```typescript
-import { Clock, Effect } from "effect"
-import { setup } from "@jambudipa/xstate-effect"
+Delayed transitions and delayed events run on Effect's clock unless an actor is given another
+one. A test that runs on `TestClock` can therefore move time forward and see `after`
+transitions fire, without real waiting. `SimulatedClock` keeps XState's method names for tests
+that already use it, with Effect-returning `increment` and `set`.
 
-export const checkoutSetup = setup({
-  types: {} as { context: { isValid: boolean; deadline: number } },
-  guards: {
-    // Sync guard
-    canProceed: ({ context }) => context.isValid,
+## The costs
 
-    // Effect guard (returns Effect<boolean>)
-    beforeDeadline: ({ context }) =>
-      Effect.map(Clock.currentTimeMillis, (now) => now < context.deadline)
-  }
-})
-```
+- **Ceremony.** Every interaction is a `yield*`, a program needs `Effect.scoped` around it, and
+  something at the edge has to run the Effect.
+- **XState code does not paste across.** The behaviour is the same, but the calls differ:
+  `send` is an Effect, `subscribe` takes a function that returns an Effect, outputs are
+  `Option`s, and the pure functions return Effects. [How to port XState code to this
+  package](../how-to/migrate-from-xstate.md) lists the changes.
+- **Effects where XState is synchronous.** `snapshot.can` and `getNextSnapshot` need `yield*`
+  even for a machine whose guards are plain functions.
+- **Effect itself.** Readers who do not know Effect must learn it first; the package assumes
+  fibers, scopes, layers and services.
 
-A guard's Effect has the type `Effect<boolean>`: it cannot fail and needs no service. Here it
-reads the Effect clock, so a test can move the time with `TestClock`.
+The judgement behind the package is that these costs are paid once, in syntax, while the
+benefits (no leaked fibers, no forgotten dependencies, no hidden exceptions) are paid back on
+every actor you run.
 
-### Actors as Effects
+## What this means for you
 
-```typescript
-import { Context, Effect, Option, type Duration } from "effect"
-import { fromEffect, fromPromise, setup } from "@jambudipa/xstate-effect"
+- Run actors inside a scope you control; closing it is how you stop everything.
+- Put long-running and resource-holding work in invoked actors, and let state exits end it.
+- Build machines whose actions need services with `setup`, so the compiler asks for them.
+- Read outcomes from the snapshot status, `Option` outputs and typed Effect errors rather than
+  from exceptions.
 
-type Rows = ReadonlyArray<unknown>
+## Related
 
-class Database extends Context.Service<Database, {
-  readonly query: (sql: string) => Effect.Effect<Rows>
-}>()("Database") {}
-
-class Cache extends Context.Service<Cache, {
-  readonly get: (key: string) => Effect.Effect<Option.Option<Rows>>
-  readonly set: (key: string, rows: Rows, options: { ttl: Duration.Input }) => Effect.Effect<void>
-}>()("Cache") {}
-
-export const dataSetup = setup({
-  actors: {
-    // Promise-based
-    fetchUser: fromPromise(async ({ input }: { input: { id: string } }): Promise<unknown> => {
-      const response = await fetch(`/api/users/${input.id}`)
-      return response.json()
-    }),
-
-    // Effect-based with full power
-    processData: fromEffect(({ input }: { input: { key: string; query: string } }) =>
-      Effect.gen(function* () {
-        const db = yield* Database
-        const cache = yield* Cache
-
-        // Check cache first
-        const cached = yield* cache.get(input.key)
-        if (Option.isSome(cached)) return cached.value
-
-        // Fetch from database
-        const data = yield* db.query(input.query)
-
-        // Cache result
-        yield* cache.set(input.key, data, { ttl: "5 minutes" })
-
-        return data
-      })
-    )
-  }
-})
-```
-
-A machine that invokes `processData` needs `Database` and `Cache`: provide them around the
-program that creates the machine's actor, as in the dependency injection example above.
-
-## Summary
-
-Effect provides @jambudipa/xstate-effect with:
-
-| Feature | Benefit |
-|---------|---------|
-| Typed errors | Know exactly what can fail |
-| Composition | Build complex from simple |
-| Services | Clean dependency injection |
-| Resources | Automatic cleanup |
-| Concurrency | Structured parallel execution |
-| Testing | Deterministic, controllable tests |
-| Laziness | Describe before executing |
-| Cancellation | Stop running operations |
-
-The combination of state machines (explicit state modeling) and Effect (explicit effect modeling) creates a powerful, type-safe foundation for building reliable applications.
-
-## Further Reading
-
-- [Effect Documentation](https://effect.website/docs)
-- [The Actor Model](./actor-model.md)
+- [Run side effects](../tutorials/04-side-effects.md) — actions and Effects in a first machine.
+- [How to run an Effect or a Stream as an actor](../how-to/run-an-effect-as-an-actor.md)
+- [How to give a machine's actions and actors Effect services](../how-to/provide-services-to-a-machine.md)
+- [createActor and the actor](../reference/create-actor.md)
+- [How this package differs from XState](differences-from-xstate.md)
+- [About the actor model](actor-model.md)
