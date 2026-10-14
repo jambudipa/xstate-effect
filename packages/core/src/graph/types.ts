@@ -86,6 +86,9 @@ export type DirectedGraphNode = JSONSerializable<
   {
     id: string
     children: Array<DirectedGraphNode>
+    // `toJSON` writes the edges too, each through its own `toJSON` (upstream's type leaves
+    // them out, but its `toJSON` writes them)
+    edges: Array<DirectedGraphEdge>
   }
 >
 

@@ -18,7 +18,9 @@
  * - A path test that fails with a value that is not an `Error` fails with that value as it
  *   is: upstream appends the trace to `err.message`, which only an `Error` has.
  * - `serializeSnapshot` writes the value and the context of a snapshot, each only when the
- *   snapshot has it; `toDirectedGraph` gives a targetless transition an edge to its own node. * - `getPathsFromEvents` gives every event of the sequence an adjacency entry, so an event the
+ *   snapshot has it; `toDirectedGraph` gives a targetless transition an edge to its own node,
+ *   and a node's JSON form holds its edges, as its type now says.
+ * - `getPathsFromEvents` gives every event of the sequence an adjacency entry, so an event the
  *   state does not take keeps the path in that state; an event `filterEvents` leaves out fails
  *   the Effect (ledger DEV-49).
  */
@@ -262,6 +264,16 @@ describe("COV-5 the graph entry point describes, keys and traces the paths of an
       assert.strictEqual(serializeSnapshot(withContext), '{"context":{"n":1}}')
       assert.strictEqual(serializeSnapshot(yield* getInitialSnapshot(counterLogic)), "{}")
     }))
+
+  it("[COV-5] a directed graph node's JSON form holds its id, its children and its edges, as its toJSON type says", () => {
+    const machine = createMachine({ id: "door", initial: "shut", states: { shut: { on: { OPEN: "open" } }, open: {} } })
+    const graph = toDirectedGraph(machine)
+    const json: ReturnType<typeof graph.toJSON> = graph.toJSON()
+    const parsed = JSON.parse(JSON.stringify(graph))
+
+    assert.deepStrictEqual(json.edges, graph.edges)
+    assert.deepStrictEqual(parsed.children[0].edges, [{ source: "door.shut", target: "door.open", label: { text: "OPEN" } }])
+  })
 
   it("[COV-5] toDirectedGraph gives a targetless transition an edge from its node to itself", () => {
     const machine = createMachine({
