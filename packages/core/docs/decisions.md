@@ -576,7 +576,11 @@ amendment changes its decision from that date on.
   method names, but `increment(ms)` and `set(ms)` return Effects: they fire due timers one at
   a time in deadline order (ties in the upstream order) and wait for each delivered event's
   macrostep before firing the next, so a timer scheduled during the increment and due
-  within it fires in the same increment (P11c). `set` to an earlier time fails its Effect
+  within it fires in the same increment (P11c). After each delivered event's macrostep, the increment
+  also waits for the actor system to settle: it drains every registered actor until a round
+  processes nothing, so the events that the macrostep sent to other actors (a child's done
+  event to its parent) are processed before the next timer fires and before the increment
+  returns, as upstream's synchronous clock does (amended 2026-10-14). `set` to an earlier time fails its Effect
   with the recorded message. Rewrites use `yield* clock.increment(n)` (ledger row for the
   sync-to-Effect change). The port's existing synchronous `makeSimulatedClock` factory stays
   as a port extra (COMPAT-4). `waitFor` timeouts run on the Effect clock, not the

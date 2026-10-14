@@ -24,6 +24,8 @@
  *   key that names no child keeps the upstream message: INV-1 asserts it, 433c4de2); the
  *   helpers on node lists, paths and history defaults; the node transformations and predicates.
  * - Emitted events (`src/Actor.ts`): the `emissions` stream ends when the actor ends.
+ * - Settle (`src/ActorSystem.ts`, SD-28): a `SimulatedClock` increment returns after the
+ *   events that each fired delivery sent within the system are processed.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Chunk, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Stream } from "effect"
@@ -41,6 +43,7 @@ import {
   type EventObject,
   fromTransition,
   getInitialSnapshot,
+  SimulatedClock,
   isActorRef,
   makeActorLogic,
   makeMachineSnapshot,
@@ -1078,6 +1081,40 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
       assert.deepStrictEqual(Chunk.toReadonlyArray(Chunk.fromIterable(fromStopped)).map((event) => event.n), [1])
       assert.deepStrictEqual(Chunk.toReadonlyArray(Chunk.fromIterable(fromFinished)).map((event) => event.n), [1, 2])
       assert.strictEqual(Chunk.size(Chunk.fromIterable(afterEnd)), 0)
+    })
+  )
+
+  it.effect("[COV-1] a SimulatedClock increment returns after the system settles: the parent takes its child's done event, and a timer that reaction starts within the increment fires in it", () =>
+    Effect.gen(function* () {
+      const child = createMachine({ initial: "waiting", states: { waiting: { after: { 3000: "done" } }, done: { type: "final" } } })
+      const parent = createMachine({
+        initial: "running",
+        states: {
+          running: { invoke: { src: child, onDone: "cooling" } },
+          cooling: { after: { 500: "idle" } },
+          idle: {},
+        },
+      })
+      const clock = new SimulatedClock()
+      const actor = yield* createActor(parent, { clock })
+      yield* actor.start
+
+      yield* clock.increment(3000)
+      const afterChildDone = (yield* actor.getSnapshot).value
+      yield* clock.increment(500)
+      const afterCooling = (yield* actor.getSnapshot).value
+
+      const again = yield* createActor(parent, { clock: new SimulatedClock() })
+      yield* again.start
+      const againClock = again.clock
+      if (!(againClock instanceof SimulatedClock)) {
+        return assert.fail("no SimulatedClock")
+      }
+      yield* againClock.increment(3500)
+
+      assert.strictEqual(afterChildDone, "cooling")
+      assert.strictEqual(afterCooling, "idle")
+      assert.strictEqual((yield* again.getSnapshot).value, "idle")
     })
   )
 })

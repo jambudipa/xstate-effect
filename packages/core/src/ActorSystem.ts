@@ -28,7 +28,7 @@ import type { EventObject } from "./Event.js"
 import type { InspectionEvent, InspectionEventInput } from "./inspection.js"
 import type { ActorSystemService, ScheduledEvent, SchedulerService } from "./ActorLogic.js"
 import { ActorError } from "./Errors.js"
-import { hasWaitingDelivery, WaitingDeliveryKey } from "./internal/delivery.js"
+import { DrainKey, hasDrain, hasSettle, hasWaitingDelivery, type Settle, SettleKey, WaitingDeliveryKey } from "./internal/delivery.js"
 import * as Outbox from "./internal/outbox.js"
 import { isolateCallback } from "./internal/reportError.js"
 import { SimulatedClock } from "./testing/SimulatedClock.js"
@@ -453,15 +453,23 @@ const makeInspection: Effect.Effect<Inspection> = Effect.gen(function* () {
 /**
  * Relays an event from one actor to another (upstream `_relay`): the inspection functions see
  * it with its source (`@xstate.event`, once per event), then the target receives it.
- * `waiting` makes the delivery wait for the target's macrostep; every other relay only queues
- * it (SD-23).
+ * `waiting` (a `SimulatedClock` delivery) makes the delivery wait for the target's macrostep,
+ * then for the target's system to settle, so the events that the macrostep sent to other
+ * actors (a done event to the parent, a `sendTo`) are processed too, as upstream's
+ * synchronous delivery processes them before the clock's `increment` returns (SD-28). Every
+ * other relay only queues the event (SD-23).
  */
 const relayThrough =
   (inspection: Inspection): Deliver =>
   (source, target, event, waiting) =>
     Effect.andThen(
       inspection.send({ type: "@xstate.event", sourceRef: Option.some(source), actorRef: target, event }),
-      waiting && hasWaitingDelivery(target) ? target[WaitingDeliveryKey](event) : target.sendUntyped(event)
+      waiting && hasWaitingDelivery(target)
+        ? Effect.andThen(
+            target[WaitingDeliveryKey](event),
+            hasSettle(target._system) ? target._system[SettleKey] : Effect.void
+          )
+        : target.sendUntyped(event)
     )
 
 /** Builds one system around `scheduler` (upstream `createSystem`). */
@@ -481,7 +489,26 @@ const makeSystem = (
 
     const relay = relayThrough(inspection)
 
-    return {
+    // One round of the settle: drains each registered actor in turn and gives each one's
+    // session id with the count of entries it has processed, or the session id alone for an
+    // actor without a drain
+    const drainRound: Effect.Effect<string> = Effect.flatMap(Ref.get(registry), (current) =>
+      Effect.map(
+        Effect.forEach(HashMap.toEntries(current.sessions), ([sessionId, actor]) =>
+          hasDrain(actor) ? Effect.map(actor[DrainKey], (count) => `${sessionId}=${count}`) : Effect.succeed(sessionId)
+        ),
+        (entries) => entries.join(",")
+      )
+    )
+
+    /** Drains round after round until a round gives what the round before gave. */
+    const settleFrom = (previous: string): Effect.Effect<void> =>
+      Effect.flatMap(drainRound, (next) => (next === previous ? Effect.void : settleFrom(next)))
+
+    // The system's settle (SD-28), kept off the service's members
+    const settle: Settle = Effect.flatMap(drainRound, settleFrom)
+
+    const system: ActorSystemService = {
       // Session ids per system in the XState format `x:<n>`, from `x:0` (SD-9)
       generateId: pipe(
         Ref.getAndUpdate(idCounter, (n) => n + 1),
@@ -525,6 +552,8 @@ const makeSystem = (
 
       _sendInspectionEvent: inspection.send,
     }
+    Object.defineProperty(system, SettleKey, { value: settle })
+    return system
   })
 
 /**

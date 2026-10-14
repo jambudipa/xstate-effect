@@ -6,11 +6,16 @@
  * the same outbox runs at once, inside it (upstream's plain call, depth first); one that waits
  * goes on in its own fiber, which the close of the outbox's scope interrupts; after the close
  * every post is dropped. `isolateCallback` reports what a callback fails or dies with once
- * through the logger and swallows it (SD-21), and keeps an interruption an interruption.
+ * through the logger and swallows it (SD-21), and keeps an interruption an interruption. The
+ * delivery guards find the drain of an actor and the settle of a system (SD-28) only where the
+ * `Actor` and `ActorSystem` modules put them.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Deferred, Effect, Exit, Logger, Scope } from "effect"
+import { makeActorSystem } from "../../src/ActorSystem.js"
+import { DrainKey, hasDrain, hasSettle, SettleKey } from "../../src/internal/delivery.js"
 import * as Outbox from "../../src/internal/outbox.js"
+import { createActor, createMachine } from "../../src/index.js"
 import { isolateCallback, reportUnhandledError } from "../../src/internal/reportError.js"
 
 /** Lets every other ready fiber take twenty turns. */
@@ -185,6 +190,31 @@ describe("COV-4 shared private helpers (src/internal)", () => {
         entries.map((entry) => [entry.logLevel, entry.message]),
         [["Error", [original]]]
       )
+    })
+  )
+
+  it.effect("[COV-4] delivery guards: an actor keeps a drain that gives its processed count, a system keeps a settle; other objects keep neither", () =>
+    Effect.gen(function* () {
+      const actor = yield* createActor(
+        createMachine({ types: {} as { events: { type: "PING" } }, on: { PING: {} } })
+      )
+      yield* actor.start
+      yield* actor.send({ type: "PING" })
+      yield* actor.send({ type: "PING" })
+      const system = yield* makeActorSystem()
+
+      assert.isTrue(hasDrain(actor))
+      assert.strictEqual(hasDrain(actor) ? yield* actor[DrainKey] : -1, 2)
+      assert.isTrue(hasSettle(actor._system))
+      assert.isTrue(hasSettle(system))
+      assert.isFalse(Object.keys(system).includes(String(SettleKey)))
+      assert.isFalse(hasSettle({}))
+      assert.isFalse(hasSettle({ [SettleKey]: "not an effect" }))
+      const notADrain = { ...actor, [DrainKey]: 0 }
+      assert.isFalse(hasDrain(notADrain))
+      if (hasSettle(system)) {
+        yield* system[SettleKey]
+      }
     })
   )
 })

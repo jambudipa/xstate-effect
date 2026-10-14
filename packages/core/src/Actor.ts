@@ -40,7 +40,7 @@ import type { SerializationError } from "./Errors.js"
 import * as Errors from "./Errors.js"
 import { isolateCallback, reportUnhandledError } from "./internal/reportError.js"
 import { eventString } from "./internal/eventString.js"
-import { type WaitingDelivery, WaitingDeliveryKey } from "./internal/delivery.js"
+import { type Drain, DrainKey, type WaitingDelivery, WaitingDeliveryKey } from "./internal/delivery.js"
 import type { InspectionEventInput } from "./inspection.js"
 import {
   ACTOR_REF_TYPE,
@@ -1074,6 +1074,10 @@ const build = <
     // The processing fiber, once `start` forked it
     const processingFiber = yield* Ref.make<Option.Option<Fiber.Fiber<void>>>(Option.none())
 
+    // How many events and stops the processing has taken from the mailbox: a drain gives it
+    // (SD-28), so a system's settle can tell whether a round of drains processed any
+    const processedEntries = yield* Ref.make(0)
+
     // Whether the stop procedure ran: it runs once
     const finished = yield* Ref.make(false)
 
@@ -1882,6 +1886,16 @@ const build = <
     // The delivery behind `send`, without its inspection event, for a relay that waits (SD-28)
     const waitingDelivery: WaitingDelivery = (event) => deliver(event as TEvent)
     Object.defineProperty(actor, WaitingDeliveryKey, { value: waitingDelivery })
+    // The drain of a system's settle (SD-28): from outside every actor's processing, a running
+    // actor processes the entries queued now (a barrier, as at `start`); then the count
+    const drain: Drain = Effect.gen(function* () {
+      const running = (yield* Ref.get(processingStatus)) === Types.ProcessingStatus.Running
+      if (running && (yield* ProcessingActors).length === 0) {
+        yield* queueAndWait((processed) => ({ kind: "barrier", processed }))
+      }
+      return yield* Ref.get(processedEntries)
+    })
+    Object.defineProperty(actor, DrainKey, { value: drain })
 
     // Create actor scope
     const actorScope: ActorScopeService = {
@@ -2173,6 +2187,9 @@ const build = <
         // A shut-down mailbox interrupts the take
         const envelope = yield* Queue.take(mailbox)
         const goesOn = yield* Effect.uninterruptible(processEnvelope(envelope))
+        if (envelope.kind !== "barrier") {
+          yield* Ref.update(processedEntries, (count) => count + 1)
+        }
         if (!goesOn) {
           return
         }
