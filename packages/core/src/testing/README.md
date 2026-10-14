@@ -19,8 +19,9 @@ logic's own `transition` and `getInitialSnapshot` with an inert actor scope.
   test-only change.
 - `SimulatedClock.ts` holds the `SimulatedClock` class, which `ActorSystem.ts` imports: the
   scheduler calls its internal `_setEffectTimeout`, so that an `increment` waits for each
-  delivery (SD-28). `makeSimulatedClock` is a separate, synchronous clock kept for
-  compatibility (COMPAT-4).
+  delivery and then for the actor system to settle (SD-28; the settle lives in
+  `ActorSystem.ts`). `makeSimulatedClock` is a separate, synchronous clock kept for
+  compatibility (COMPAT-4); its `increment` cannot wait.
 
 ## Constraints
 
