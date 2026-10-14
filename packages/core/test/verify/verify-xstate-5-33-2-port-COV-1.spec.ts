@@ -35,6 +35,8 @@
  *   names only the setup's guards, each with params of its type.
  * - Custom logic (`src/ActorLogic.ts`): `makeActorLogic`'s `start` runs in the actor's scope,
  *   so a fiber it forks with `Effect.forkScoped` adds no requirement and ends with the actor.
+ * - Type helpers (`src/ActorLogic.ts`, `src/ActorRef.ts`): the root's `ActorLogic.SnapshotOf<T>`
+ *   and `ActorRef.SnapshotOf<T>` resolve, as the namespaces' `ActorLogic.ActorLogic.SnapshotOf<T>` do.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Chunk, Context, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
@@ -66,6 +68,7 @@ import {
   stopChild,
 } from "../../src/index.js"
 import { and, not, or } from "../../src/guards/index.js"
+import type { ActorLogic as RootActorLogic, ActorRef as RootActorRef } from "../../src/index.js"
 import * as Persistence from "../../src/persistence.js"
 import { resolveReferencedActor } from "../../src/spawn.js"
 import * as StateNode from "../../src/StateNode.js"
@@ -79,6 +82,9 @@ import { guardEvaluationFailed } from "./upstream-messages.js"
 
 /** Compiles only for `true`. */
 const typeHolds = <T extends true>(holds: T): T => holds
+
+/** True when `A` and `B` are the same type. */
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 
 /** The services a machine's transitions require, without the actor scope every machine needs. */
 type ServicesOf<TMachine> = TMachine extends { readonly transition: (...args: never) => Effect.Effect<infer _A, infer _E, infer R> }
@@ -1351,6 +1357,27 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
 
       assert.deepStrictEqual(beforeStop, [])
       assert.deepStrictEqual(events, ["interrupted"])
+    })
+  )
+
+  it.effect("[COV-1] the root's ActorLogic and ActorRef modules give the type helpers at their top level, the same as their namespaces", () =>
+    Effect.gen(function* () {
+      const counting = fromTransition((count: number, _event: { readonly type: "ADD" }) => count + 1, 0)
+      type Logic = typeof counting
+      typeHolds<Equals<RootActorLogic.SnapshotOf<Logic>, RootActorLogic.ActorLogic.SnapshotOf<Logic>>>(true)
+      typeHolds<Equals<RootActorLogic.EventOf<Logic>, { readonly type: "ADD" }>>(true)
+      typeHolds<Equals<RootActorLogic.InputOf<Logic>, RootActorLogic.ActorLogic.InputOf<Logic>>>(true)
+      typeHolds<Equals<RootActorLogic.EmittedOf<Logic>, RootActorLogic.ActorLogic.EmittedOf<Logic>>>(true)
+      typeHolds<Equals<RootActorLogic.RequirementsOf<Logic>, never>>(true)
+
+      const actor = yield* createActor(counting)
+      type Ref = typeof actor
+      typeHolds<Equals<RootActorRef.SnapshotOf<Ref>, RootActorRef.ActorRef.SnapshotOf<Ref>>>(true)
+      typeHolds<Equals<RootActorRef.EventOf<Ref>, RootActorRef.ActorRef.EventOf<Ref>>>(true)
+      typeHolds<Equals<RootActorRef.EmittedOf<Ref>, RootActorRef.ActorRef.EmittedOf<Ref>>>(true)
+      yield* actor.start
+      yield* actor.send({ type: "ADD" })
+      assert.strictEqual((yield* actor.getSnapshot).context, 1)
     })
   )
 })
