@@ -74,7 +74,7 @@ them also have their own root names (see the table).
 | `_set` | `(systemId: string, actor: ActorRefBase) => Effect.Effect<void, ActorError>` | Registers an actor under a `systemId`. The same actor again changes nothing. Another actor under a key in use fails with an `ActorError`: `Actor with system ID '<systemId>' already exists.` |
 | `_lookup` | `(systemId: string) => Option.Option<ActorRefBase>` | The synchronous form of `get`, for the engine. |
 | `_clock` | `ActorSystem.Clock` | The root actor's `clock` option, else a clock on the Effect clock. |
-| `_logger` | `Option.Option<(...args: ReadonlyArray<unknown>) => void>` | The root actor's `logger` option, or `None` for Effect logging. |
+| `_logger` | `Option.Option<(...args: ReadonlyArray<unknown>) => void>` | The root actor's `logger` option, which the `log` actions of the system call, or `None` for Effect logging. |
 | `_sendInspectionEvent` | `(event) => Effect.Effect<void>` | Hands an inspection event to every inspection function, with `rootId` added. The actors call it. |
 
 `generateId`, `register`, `unregister`, `_set`, `_lookup` and `_sendInspectionEvent` serve the
@@ -183,8 +183,9 @@ void Effect.runPromise(Effect.scoped(program))
 - Each call is a separate registration, also for a function that is registered already.
 - The functions run one after another for each event, in registration order. The `inspect`
   option of the root actor is registered first.
-- A function that throws, fails or dies is reported through the logger. It changes nothing for
-  the actors or for the other functions.
+- A function that throws, fails or dies is reported once with `Effect.logError`, through the
+  Effect `Logger` of the fiber that runs it; the `logger` option does not receive the report.
+  It changes nothing for the actors or for the other functions.
 
 ```ts
 import { Effect } from "effect"
@@ -364,7 +365,7 @@ interrupts the timers.
 | Field | Type | Description |
 |---|---|---|
 | `clock` | `ActorSystem.Clock` | The clock every delayed event of the system starts on. Default: the Effect clock. |
-| `logger` | `(...args: ReadonlyArray<unknown>) => void` | The function every `log` action of the system calls, unless its actor has its own. Default: Effect logging. |
+| `logger` | `(...args: ReadonlyArray<unknown>) => void` | The function every `log` action of the system calls, unless its actor has its own. Errors that nothing handles do not reach it. Default: Effect logging. |
 
 Each root actor creates its own system in this way, with its `clock` and `logger` options. A
 system that `makeActorSystem` creates has no actors, and `createActor` does not use it.

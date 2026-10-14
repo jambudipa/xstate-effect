@@ -26,7 +26,7 @@ namespace. `ActorRef<TSnapshot, TEvent, TEmitted>` is the type; `ActorRef.isActo
 | [`AnyActorRef`](#anyactorref) | interface | `AnyActorRef` | A reference that every actor reference fits. |
 | [`UnknownActorRef`](#unknownactorref) | type | `UnknownActorRef` | `ActorRef<Snapshot, EventObject>`. |
 | [`EmittedOfType<TEmitted, TType>`](#emittedoftype) | type | `ActorRef.EmittedOfType` | The event type that an `on` handler of `type` receives. |
-| [`ActorRef.ActorRef.SnapshotOf`, `EventOf`, `EmittedOf`, `Any`](#type-extractors) | types | `ActorRef.ActorRef.*` | The parts of a reference type. |
+| [`SnapshotOf`, `EventOf`, `EmittedOf`, `Any`](#type-extractors) | types | `ActorRef.SnapshotOf`, `ActorRef.EventOf`, `ActorRef.EmittedOf`, `ActorRefType.Any` | The parts of a reference type. |
 | [`SnapshotStream<TSnapshot, E>`](#snapshotstream) | interface | `SnapshotStream` | Covariant read access to snapshots. |
 | [`toSnapshotStream`](#tosnapshotstream) | function | `toSnapshotStream` | A `SnapshotStream` over a `SubscriptionRef`. |
 | [`ActorRefTypeId`](#isactorref) | unique symbol | `ActorRefTypeId` | The marker that every reference carries. |
@@ -178,15 +178,19 @@ export type Click = ActorRef.EmittedOfType<Emitted, "click">
 
 ## Type extractors
 
-The extractors are in the `ActorRef` namespace of the module, so from the root they are
-`ActorRef.ActorRef.<name>`.
+The module gives `SnapshotOf`, `EventOf` and `EmittedOf` at its top level, so from the root
+they are `ActorRef.SnapshotOf<T>`, and so on. The same types are also in the `ActorRef`
+namespace of the interface, as `ActorRefType.SnapshotOf<T>` or `ActorRef.ActorRef.SnapshotOf<T>`.
+`Any` is only in that namespace: `ActorRef.Any` does not resolve from the root.
 
 | Type | Result |
 |---|---|
-| `ActorRef.ActorRef.SnapshotOf<T>` | The snapshot type of the reference type `T`. |
-| `ActorRef.ActorRef.EventOf<T>` | The event type of `T`. |
-| `ActorRef.ActorRef.EmittedOf<T>` | The emitted event type of `T`. |
-| `ActorRef.ActorRef.Any` | `ActorRef<Snapshot, EventObject>`. Deprecated: use `ActorRef.ActorRefBase` to accept any reference. |
+| `ActorRef.SnapshotOf<T>` | The snapshot type of the reference type `T`. |
+| `ActorRef.EventOf<T>` | The event type of `T`. |
+| `ActorRef.EmittedOf<T>` | The emitted event type of `T`. |
+| `ActorRefType.Any` | `ActorRef<Snapshot, EventObject>`. Deprecated: use `ActorRef.ActorRefBase` to accept any reference. |
+
+Each extractor gives `never` for a type that is not an `ActorRef`.
 
 For the reference type of a logic or a machine, see `ActorRefFrom` and `ActorRefFromLogic` in
 [Type utilities](./type-utilities.md).
@@ -196,7 +200,7 @@ import type { ActorRef, Snapshot } from "@jambudipa/xstate-effect"
 
 type Ref = ActorRef<Snapshot<number>, { type: "GO" }>
 
-export type Events = ActorRef.ActorRef.EventOf<Ref> // { type: "GO" }
+export type Events = ActorRef.EventOf<Ref> // { type: "GO" }
 ```
 
 ## SnapshotStream

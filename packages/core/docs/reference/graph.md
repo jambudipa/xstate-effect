@@ -314,15 +314,19 @@ export declare function getPathsFromEvents<TSnapshot extends Snapshot, TEvent ex
 An Effect that succeeds with one path: the steps that the events take from `fromState`. It
 succeeds with no path when `toState` does not hold for the state where the events end.
 
-**Fails with:** `InvalidEventSequenceError` when the adjacency map holds no transition for an
-event from the state that it meets, for example an event that `filterEvents` rejects. It also
-fails with what [`getAdjacencyMap`](#getadjacencymap) fails with.
+**Fails with:** `InvalidEventSequenceError` when an event has no entry in the adjacency map
+from the state that it meets: an event that `filterEvents` leaves out, an event that
+`options.events` does not list, or any event from a state where `stopWhen` (by default
+`toState`) holds. Otherwise the sequence is the traversal's `events`, so each of its events has
+an entry from each state that the traversal goes on from. It also fails with what
+[`getAdjacencyMap`](#getadjacencymap) fails with.
 
 **Requires:** the services `R` of the logic, without `ActorScope` and `Scope`.
 
 ### Behaviour
 
-- An event that the state does not take is still a transition: the path stays in that state.
+- An event that the state does not take is still a transition: the path stays in that state,
+  as in XState.
 - For a machine, the default start state is the initial snapshot computed without input: the
   `input` option does not reach it. Give `fromState` to start from a snapshot with input.
 
@@ -734,7 +738,7 @@ as `[Error: <message>]`. Match on `_tag`.
 | --- | --- | --- |
 | `TraversalLimitError` | `"TraversalLimitError"` | `Traversal limit exceeded` |
 | `JoinPathsError` | `"JoinPathsError"` | `Paths cannot be joined` |
-| `InvalidEventSequenceError` | `"InvalidEventSequenceError"` | `Invalid transition from <state key> with <event key>`, for example `Invalid transition from {"value":"yellow"} with {"type":"POWER_OUT"}` |
+| `InvalidEventSequenceError` | `"InvalidEventSequenceError"` | `Invalid transition from <state key> with <event key>`, for example `Invalid transition from {"value":"yellow"} with {"type":"POWER_OUT"}` when `filterEvents` leaves `POWER_OUT` out in `yellow` |
 | `UnsupportedTestMachineError` | `"UnsupportedTestMachineError"` | One of the three messages that [`createTestModel`](#createtestmodel) lists. |
 
 ## TraversalOptions

@@ -10,7 +10,8 @@ sources: [packages/core/src/actors/fromTransition.ts]
 > function `(state, event, actorScope) => nextState`. The state is the snapshot's `context`.
 > The initial state is a value, or a factory that builds it from the actor's input;
 > `fromTransitionWithInput` is a curried form whose factory takes the input directly. A
-> transition actor never reaches status `done`, and a stop leaves its status `active`.
+> transition actor never reaches status `done`, and a stop leaves its status `active`, as in
+> XState.
 
 ## Summary
 
@@ -113,7 +114,8 @@ A transition actor never has status `done`, and its `output` is always `Option.n
 ### Stop behaviour
 
 - `stop` passes the event `{ type: "xstate.stop" }` to the reducer and keeps what it returns.
-  The status stays `active`. Later sends are dropped with a warning.
+  The actor ends, but the status stays `active`, as in XState. Later sends are dropped with a
+  warning.
 - The exit of the state that invoked the actor, or the stop of its parent, does the same.
 - When the scope that owns the actor closes without a stop, the reducer receives no event and
   the snapshot gets status `stopped`.
@@ -126,7 +128,7 @@ A transition actor never has status `done`, and its `output` is always `Option.n
 | The factory throws | The initial snapshot has status `error` with the raw thrown value. The parent receives `xstate.error.actor.<id>` when the actor starts. |
 | `stopChild` with an actor that is not a child of this actor | Status `error` with an `ActorError` whose message is `Cannot stop child actor <child id> of <id> because it is not a child`. |
 | A `logger`, `defer`, `stopChild` or `actionExecutor` work that fails or dies while the reducer runs | Status `error` when the reducer returns, with the snapshot from before the event. |
-| Any of these errors in a root actor that nothing observes | The error is also logged through Effect logging at level Error. |
+| Any of these errors when nothing handles it: the actor has no parent and no observer, or a `subscribe` callback watches it | The error is also reported once with `Effect.logError`, through the Effect `Logger` of the fiber that meets it. The `logger` option does not receive it. |
 
 ### Persisted form
 

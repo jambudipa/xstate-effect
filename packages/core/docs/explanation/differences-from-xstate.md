@@ -47,10 +47,12 @@ API that can run one of your guards or actions returns an Effect: `snapshot.can`
 `machine.transition`, the pure functions such as `transition` and `getNextSnapshot`, and the graph
 traversals.
 
-The reason is that a guard or an action may itself return an Effect here, with the services it
-needs (see [How services reach actions and actors](services-and-requirements.md)). A function
-that may run an Effect cannot return a plain value without running that Effect behind your back,
-outside your runtime and your services. So the whole chain stays an Effect.
+The reason is that a guard or an action may itself return an Effect here, and an action's Effect
+may need services (see [How services reach actions and actors](services-and-requirements.md)).
+The type of a `setup` machine collects the services of its actions and actors, the inline ones
+in the config included, so `createActor` asks your program for them. A function that may run an
+Effect cannot return a plain value without running that Effect behind your back, outside your
+runtime and your services. So the whole chain stays an Effect.
 
 ```ts
 import { Effect } from "effect"
@@ -103,7 +105,9 @@ does.
 
 The same rule — library code stays inside Effect — explains why the package writes nothing to the
 console. `log` actions use Effect logging at their level by default, and the package's warnings
-go through the Effect logger, where XState prints with `console`.
+and the errors that nothing handles go through the Effect logger, where XState prints with
+`console`. The actor's `logger` option keeps its XState role: it is the function that `log`
+actions call, and no error reaches it.
 
 ## `Option` in place of `undefined`
 
@@ -137,6 +141,10 @@ from inside an actor only queue, so two actors can never wait for each other.
 [How an actor processes events](event-processing.md) explains where this differs in practice: a
 cascade to other actors can still be in flight when `send` returns.
 
+A `subscribe` callback starts in the processing that publishes the snapshot. A callback that
+never waits therefore ends before `send` returns, as XState's synchronous call does. A callback
+that waits goes on in its own fiber, and the actor does not wait for it.
+
 ## Where the package goes further
 
 Some differences add what XState does not have, each because an Effect program needs it or because
@@ -151,10 +159,16 @@ XState's behaviour loses information:
 - **Wider send targets.** A string target of `sendTo` and `stopChild` also resolves by `systemId`,
   and `sendSelf` targets the actor itself.
 - **A clock you drive with Effects.** `SimulatedClock` keeps XState's method names, but `increment`
-  and `set` are Effects that fire due timers one at a time and wait for each macrostep they cause,
-  so a timer that a fired event starts can fire in the same `increment`.
+  and `set` are Effects that fire due timers one at a time. After each delivery they wait until
+  the actor system settles: every actor has processed the events that the delivery caused, a
+  child's done event to its parent included, as with XState's synchronous clock. So a timer that
+  a fired event starts can fire in the same `increment`.
 - **Streams.** `changes`, `emissions` and `select(...).changes` give snapshots, emitted events and
-  selected values as Effect `Stream`s.
+  selected values as Effect `Stream`s. `emissions` ends when the actor stops, is done or errors;
+  `changes` ends when the actor stops or is done, and fails with the actor's error.
+- **Schemas that check values.** A machine of `setupWithSchema` takes its types from Effect
+  Schemas and checks its events, its context, its input and its output against them at run time.
+  A value that does not match gives the actor status `error` with the `SchemaError`.
 
 ## What is left out
 

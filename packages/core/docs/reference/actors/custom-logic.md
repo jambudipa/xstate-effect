@@ -24,7 +24,7 @@ namespace `ActorLogic`, so `ActorLogic.make` is `makeActorLogic`.
 | --- | --- | --- |
 | [`ActorLogic`](#actorlogic) | interface | The contract of an actor's logic. |
 | [`makeActorLogic`](#makeactorlogic) | function | Builds an `ActorLogic` from its functions. |
-| [`ActorLogicType` helpers](#actorlogictype-helpers) | types | `SnapshotOf`, `EventOf`, `InputOf`, `EmittedOf`, `RequirementsOf` and `Any`. |
+| [Type helpers](#type-helpers) | types | `SnapshotOf`, `EventOf`, `InputOf`, `EmittedOf`, `RequirementsOf` and `Any`. |
 | [`AnyActorLogic`](#anyactorlogic) | interface | Any logic, whatever its types. |
 | [`isActorLogic`](#isactorlogic) | function | Whether a value is actor logic. |
 | [`ActorLogicTypeId`](#actorlogictypeid) | symbol | The marker that every logic carries. |
@@ -79,7 +79,7 @@ requirements of the logic.
 | `getInitialSnapshot(input)` | yes | The snapshot that the actor starts from, for its input. |
 | `transition(snapshot, event)` | yes | The next snapshot for an event. |
 | `getPersistedSnapshot(snapshot)` | yes | The persisted form of a snapshot. It needs no service. |
-| `restoreSnapshot(persisted)` | no | The snapshot for a persisted value. |
+| `restoreSnapshot(persisted)` | no | The snapshot for a persisted value. Without it, the persisted value is the snapshot. |
 | `start(snapshot)` | no | Work to run when the actor starts. |
 
 ### Behaviour
@@ -87,8 +87,9 @@ requirements of the logic.
 How an actor uses the members:
 
 - **Creation.** `createActor` calls `getInitialSnapshot` with the `input` option. With the
-  `snapshot` option, it calls `restoreSnapshot` with that value instead; a logic without
-  `restoreSnapshot` uses the value as the snapshot as it is. A failure or a defect gives a
+  `snapshot` option, it calls `restoreSnapshot` with that value instead. An actor of a logic
+  without `restoreSnapshot` takes the persisted value as its snapshot, unchanged, as in XState,
+  so the persisted form must already be a valid snapshot. A failure or a defect gives a
   snapshot with status `error` and the raw value as `error`; the creation does not fail.
 - **Start.** `actor.start` calls `start` with the current snapshot, in the actor's own scope: a
   fiber that `start` forks with `Effect.forkScoped`, or a finalizer that it adds, lives until the
@@ -101,8 +102,8 @@ How an actor uses the members:
   error. Later events change nothing.
 - **Stop.** `stop`, or a parent that stops the child, hands the logic the event
   `{ type: "xstate.stop" }` through `transition`. A logic that does not answer it keeps its
-  status: the actor ends, but the snapshot stays `active`. The close of the scope that owns the
-  actor gives status `stopped` without the event.
+  status: the actor ends, but the snapshot stays `active`, as in XState. The close of the scope
+  that owns the actor gives status `stopped` without the event.
 - **Persistence.** `actor.getPersistedSnapshot` calls `getPersistedSnapshot`.
 - **Requirements.** `R` joins the requirements of `createActor`. The actor reads the services from
   the caller of `createActor`.
@@ -130,7 +131,7 @@ export const startAndRead = <TSnapshot extends Snapshot, TEvent extends EventObj
 
 ```ts
 import type { ActorLogic, ActorScope, Errors, EventObject, Snapshot } from "@jambudipa/xstate-effect"
-import type { Effect } from "effect"
+import type { Effect, Scope } from "effect"
 
 export declare function makeActorLogic<
   TSnapshot extends Snapshot,
@@ -143,7 +144,7 @@ export declare function makeActorLogic<
   readonly getInitialSnapshot: (input: TInput) => Effect.Effect<TSnapshot, Errors.InitializationError, ActorScope | R>
   readonly getPersistedSnapshot: (snapshot: TSnapshot) => Effect.Effect<unknown, Errors.SerializationError>
   readonly restoreSnapshot?: (persisted: unknown) => Effect.Effect<TSnapshot, Errors.RestoreError, ActorScope | R>
-  readonly start?: (snapshot: TSnapshot) => Effect.Effect<void, Errors.StartError, ActorScope | R>
+  readonly start?: (snapshot: TSnapshot) => Effect.Effect<void, Errors.StartError, ActorScope | Scope.Scope | R>
   readonly config?: unknown
 }): ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>
 ```
@@ -156,7 +157,7 @@ export declare function makeActorLogic<
 | `config.getInitialSnapshot` | `(input) => Effect<TSnapshot, InitializationError, ActorScope \| R>` | Required. |
 | `config.getPersistedSnapshot` | `(snapshot) => Effect<unknown, SerializationError>` | Required. |
 | `config.restoreSnapshot` | `(persisted) => Effect<TSnapshot, RestoreError, ActorScope \| R>` | Optional. |
-| `config.start` | `(snapshot) => Effect<void, StartError, ActorScope \| R>` | Optional. |
+| `config.start` | `(snapshot) => Effect<void, StartError, ActorScope \| Scope \| R>` | Optional. It runs in the actor's own scope. |
 | `config.config` | `unknown` | Optional. |
 
 ### Return value
@@ -168,8 +169,9 @@ An `ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>`: the functions as given,
 ### Behaviour
 
 - `makeActorLogic` checks nothing and runs nothing.
-- The type of `config.start` names `ActorScope | R` only. A `start` that uses `Scope.Scope`, for
-  example through `Effect.forkScoped`, needs `Scope.Scope` in `R`; see the example under
+- `config.start` has the type of the interface's `start`: the actor provides `Scope.Scope`
+  as well as `ActorScope`. A `start` that forks a fiber with `Effect.forkScoped` adds no
+  requirement to `R`, and the fiber lives until the actor ends; see the example under
   [`ActorScope`](#actorscope).
 - A snapshot must carry the snapshot marker. The `Snapshot` constructors `Snapshot.active()`,
   `Snapshot.done(output)`, `Snapshot.error(error)` and `Snapshot.stopped()` give one to spread.
@@ -211,32 +213,34 @@ export const counter = makeActorLogic<CounterSnapshot, CounterEvent, { readonly 
 })
 ```
 
-## ActorLogicType helpers
+## Type helpers
 
-`ActorLogicType` is the root name of the `ActorLogic` interface with its type namespace. The
-same types are reachable as `ActorLogic.ActorLogic.SnapshotOf<T>`, and so on.
+The root name `ActorLogic` is also the namespace of the module, so the helpers resolve from the
+root as `ActorLogic.SnapshotOf<T>`, and so on. `ActorLogicType` is the root name of the
+`ActorLogic` interface with its type namespace: `ActorLogicType.SnapshotOf<T>` and
+`ActorLogic.ActorLogic.SnapshotOf<T>` are the same types.
 
 | Type | Gives |
 | --- | --- |
-| `ActorLogicType.SnapshotOf<T>` | The snapshot type of the logic `T`. |
-| `ActorLogicType.EventOf<T>` | The event type of `T`. |
-| `ActorLogicType.InputOf<T>` | The input type of `T`. |
-| `ActorLogicType.EmittedOf<T>` | The type of the events that `T` emits. |
-| `ActorLogicType.RequirementsOf<T>` | The Effect requirements of `T`. |
-| `ActorLogicType.Any` | `ActorLogic<Snapshot, EventObject, unknown>`. The snapshot and event parameters are invariant, so a concrete logic is not an `ActorLogicType.Any`; use `AnyActorLogic` for any logic. |
+| `ActorLogic.SnapshotOf<T>` | The snapshot type of the logic `T`. |
+| `ActorLogic.EventOf<T>` | The event type of `T`. |
+| `ActorLogic.InputOf<T>` | The input type of `T`. |
+| `ActorLogic.EmittedOf<T>` | The type of the events that `T` emits. |
+| `ActorLogic.RequirementsOf<T>` | The Effect requirements of `T`. |
+| `ActorLogicType.Any` | `ActorLogic<Snapshot, EventObject, unknown>`. Only the interface's namespace holds it: `ActorLogic.Any` does not resolve from the root. The snapshot and event parameters are invariant, so a concrete logic is not an `ActorLogicType.Any`; use `AnyActorLogic` for any logic. |
 
 Each helper gives `never` for a type that is not an `ActorLogic`.
 
 ### Example
 
 ```ts
-import { fromEffect, type ActorLogicType } from "@jambudipa/xstate-effect"
+import { fromEffect, type ActorLogic } from "@jambudipa/xstate-effect"
 import { Effect } from "effect"
 
 export const greet = fromEffect(({ input }: { input: { name: string } }) => Effect.succeed(`Hello, ${input.name}`))
 
-export type GreetInput = ActorLogicType.InputOf<typeof greet> // { name: string }
-export type GreetSnapshot = ActorLogicType.SnapshotOf<typeof greet> // EffectSnapshot<string, { name: string }>
+export type GreetInput = ActorLogic.InputOf<typeof greet> // { name: string }
+export type GreetSnapshot = ActorLogic.SnapshotOf<typeof greet> // EffectSnapshot<string, { name: string }>
 ```
 
 ## AnyActorLogic
@@ -317,15 +321,15 @@ export const hasLogicMarker = (value: object): boolean => ActorLogicTypeId in va
 ### Example
 
 ```ts
-import { ActorScope, Snapshot, makeActorLogic, type EventObject } from "@jambudipa/xstate-effect"
-import { Effect, Schedule, type Scope } from "effect"
+import { ActorScope, Snapshot, makeActorLogic } from "@jambudipa/xstate-effect"
+import { Effect, Schedule } from "effect"
 
 interface TickerSnapshot extends Snapshot<never> {
   readonly ticks: number
 }
 
-// R is Scope.Scope: start forks a fiber into the actor's own scope
-export const ticker = makeActorLogic<TickerSnapshot, { readonly type: "TICK" }, void, EventObject, Scope.Scope>({
+// start forks a fiber into the actor's own scope, so R stays never
+export const ticker = makeActorLogic<TickerSnapshot, { readonly type: "TICK" }, void>({
   getInitialSnapshot: () => Effect.succeed({ ...Snapshot.active(), ticks: 0 }),
   transition: (snapshot, event) =>
     Effect.succeed(event.type === "TICK" ? { ...snapshot, ticks: snapshot.ticks + 1 } : snapshot),
@@ -365,7 +369,8 @@ close of that scope stops the actor.
 - Its snapshot has status `active` and `context` `undefined`.
 - It accepts any event. An event leaves the context `undefined` and the status `active`.
 - It emits nothing.
-- `stop` ends the actor, but its snapshot keeps status `active`, as for any transition logic.
+- `stop` ends the actor, but its snapshot keeps status `active`, as for any transition logic
+  and as in XState.
 
 ### Example
 

@@ -9,7 +9,8 @@ sources: [packages/core/src/Errors.ts, packages/core/src/graph/errors.ts, packag
 > **TL;DR:** Every error class of the package is a `Data.TaggedError`: an `Error` with a `_tag`
 > that `Effect.catchTag` reads. The `Errors` namespace holds the core classes; the root exports
 > twelve of them, and the union `XStateError`, as types only. The graph entry point, the
-> testing helpers and the dev entry point have their own classes. Several classes have the
+> testing helpers and the dev entry point have their own classes, and a machine of
+> `setupWithSchema` errors with the `SchemaError` of Effect Schema. Several classes have the
 > `name` `Error`, so match on `_tag`, never on `name`.
 
 ## Summary
@@ -53,6 +54,7 @@ also exports with `export type`.
 | [`ActorOutputError`](#actoroutputerror) | root | `ActorOutputError` | nothing |
 | [`TimeTravelError`](#timetravelerror) | root | `TimeTravelError` | `SimulatedClock.set` |
 | [`DevToolsError`](#devtoolserror) | `/dev` | `DevToolsError` | `registerService`, `devToolsAdapter` |
+| [`SchemaError`](#schemaerror) | `effect` (`Schema.SchemaError`) | `SchemaError` | a machine of `setupWithSchema`, for a value that does not match its schema |
 
 | Type | Entry point | Definition |
 | --- | --- | --- |
@@ -97,6 +99,15 @@ An action, a guard or actor logic that throws, fails or dies gives the actor sta
 the original value in `snapshot.error`. Only the errors on this page have a fixed class; a value
 that your own code throws reaches `snapshot.error` as it is. See
 [How to handle actor errors](../how-to/handle-actor-errors.md).
+
+An actor's error is also reported once with `Effect.logError` when nothing handles it: the
+actor has no parent and no observer, or a `subscribe` callback watches it (a callback has no
+error listener). A `subscribe` callback, an `on` listener or an inspection function that
+throws, fails or dies is reported in the same way, and the actor's status does not change. The
+report goes through the Effect `Logger` of the fiber that meets the error: provide another
+Effect `Logger` to send it elsewhere. The actor's `logger` option does not receive it: that
+option is the function that `log` actions call. See
+[How failures surface](../explanation/failure-model.md).
 
 ## TransitionError
 
@@ -351,8 +362,11 @@ where the head path ends; also `TestModel.getShortestPathsFrom` and
 | --- | --- | --- |
 | `message` | `string` | `Invalid transition from <serialized state> with <serialized event>` |
 
-**Raised by:** `getPathsFromEvents` of `/graph` and `TestModel.getPathsFromEvents`, when the
-adjacency map holds no next state for an event of the sequence from the state reached.
+**Raised by:** `getPathsFromEvents` of `/graph` and `TestModel.getPathsFromEvents`, when an
+event of the sequence has no entry in the adjacency map from the state that it meets, for
+example an event that `filterEvents` leaves out. The sequence is also the traversal's `events`,
+so an event that the state does not take has an entry: it leaves the path in that state, as in
+XState, and raises no error.
 
 ## UnsupportedTestMachineError
 
@@ -455,6 +469,31 @@ gives, when `ms` is earlier than the clock's time. The clock keeps its time. See
 **Raised by:** `registerService` and `devToolsAdapter` of `@jambudipa/xstate-effect/dev`, when
 the global `__xstate__` hook's `register` throws, or the hook has no `register` function. An
 actor's `start` with the `devTools` option dies with it. See [Dev tools entry point](./dev.md).
+
+## SchemaError
+
+`SchemaError` is the error class of Effect Schema (`Schema.SchemaError` of `effect`), not of
+this package. Its `_tag` and its `name` are `SchemaError`.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `issue` | `SchemaIssue.Issue` | The tree of what did not match, with the path to each value. |
+| `message` | `string` (getter) | The issue as text, for example `Expected number` and the line `at ["count"]`. |
+
+**Raised by:** a machine that `setupWithSchema` creates, when a value does not match the
+decoded type of its schema. The machine checks each event that it takes (not the built-in
+`xstate.*` events), the context of its initial snapshot and of each snapshot that a transition
+gives, its input, and the output of a done snapshot. A value that does not match fails as user
+code that throws the `SchemaError`:
+
+| Where | Result |
+| --- | --- |
+| In an actor, for an event | The actor gets status `error` with the `SchemaError` in `snapshot.error`, and keeps the state and context from before the event. Its parent receives `xstate.error.actor.<id>`. |
+| At the initial snapshot, for the input or the initial context | The initial snapshot has status `error` with the `SchemaError`. `getInitialSnapshot` does not fail. |
+| `machine.transition` and the pure functions `transition`, `getNextSnapshot` and `getMicrosteps` | A defect of the Effect you run. |
+
+`validateContext` and `validateEvent` of the setup fail with it as a typed failure. See
+[setup and setupWithSchema](./setup.md).
 
 ## Related pages
 

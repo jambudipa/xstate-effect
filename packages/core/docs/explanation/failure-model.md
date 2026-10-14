@@ -51,6 +51,10 @@ selected for an event fails with a `GuardError` whose message is XState's — `U
 guard '<type>' in transition for event '<event>' in state node '<id>':` followed by the original
 message — and whose `cause` is the original value.
 
+A machine of `setupWithSchema` treats a value that does not match its schemas as code that
+throws: an event, a context, an input or an output of the wrong type gives the actor status
+`error` with the `SchemaError` of Effect Schema, as an action that throws it would.
+
 ```ts
 import { Data, Effect, Option } from "effect"
 import { createActor, setup } from "@jambudipa/xstate-effect"
@@ -146,11 +150,12 @@ handle it as an expected outcome.
 XState rethrows an actor error that nobody handles asynchronously, from a timer, so that it
 cannot go unnoticed. A library on Effect cannot do that: an exception from a timer escapes the
 program's fibers, its error handling and its supervision, and can bring down the process. The
-package reports such an error once, with `Effect.logError`, through the Effect logger of the
-program. A root actor reports its error when no `changes` stream reads it, or when a `subscribe`
-callback watches it, since a callback never receives the error. A child hands its error to its
-parent instead, unless a `subscribe` callback watches the child. To route these reports to your monitoring, provide an Effect `Logger`; the
-actor's `logger` option receives only the output of `log` actions.
+package reports such an error once, with `Effect.logError`, through the Effect `Logger` of the
+fiber that meets it. A root actor reports its error when no `changes` stream reads it, or when a
+`subscribe` callback watches it, since a callback never receives the error. A child hands its
+error to its parent instead, unless a `subscribe` callback watches the child. To route these
+reports to your monitoring, provide an Effect `Logger`. The actor's `logger` option is not the
+place: as in XState, it is the function that `log` actions call, and no error reaches it.
 
 Failures in your observers follow the same path. A `subscribe` callback, an `actor.on` listener,
 an inspection function or a callback actor's clean-up that throws, fails or dies is logged once,

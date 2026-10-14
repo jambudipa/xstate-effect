@@ -62,6 +62,9 @@ An `ActionDefinition<TContext, TEvent>` with `type: "xstate.log"`.
 - An actor without its own `logger` uses its system's logger, which is the root actor's `logger`
   option. Every child that the root invokes or spawns, at any depth, logs through it unless the
   child was created with its own.
+- The errors that nothing handles do not reach the `logger` option: the package reports them
+  with `Effect.logError`, through the Effect `Logger`. See
+  [How failures surface](../../explanation/failure-model.md).
 - Without any logger, the entry goes to Effect logging at the action's level, with the
   annotations `actorId` and `sessionId`. The levels map as follows: `debug` to `Debug`, `info`
   to `Info`, `warning` to `Warn`, `error` to `Error`. Effect's minimum log level applies: with

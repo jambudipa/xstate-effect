@@ -37,8 +37,9 @@ All the types on this page are exported from the root of `@jambudipa/xstate-effe
 - The functions of a system receive the events of every actor of that system: the root actor
   and each actor it invokes or spawns, at any depth.
 - For each event, the functions run one after another, in registration order, each to its end.
-- A function that throws, fails or dies is reported through the logger. It changes nothing for
-  the actor or for the functions after it.
+- A function that throws, fails or dies is reported once with `Effect.logError`, through the
+  Effect `Logger` of the fiber that runs it; the actor's `logger` option does not receive the
+  report. It changes nothing for the actor or for the functions after it.
 
 ```ts
 import { Effect } from "effect"

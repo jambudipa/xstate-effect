@@ -190,9 +190,11 @@ where your `makeParams()` creates a fresh system and returns its executors and s
 - By default the model drops a path whose events begin a longer path. Pass
   `allowDuplicatePaths: true` to keep them.
 - `model.getPathsFromEvents(events)` gives the one path that a fixed event sequence takes, for
-  a scenario you want tested by name. An event that the state ignores leaves the path in that
-  state. The Effect fails with `InvalidEventSequenceError` when the traversal has no step for
-  an event from the state it meets, for example an event that `filterEvents` leaves out.
+  a scenario you want tested by name. The sequence is also the traversal's `events`, so an
+  event that the state ignores leaves the path in that state, as in XState. The Effect fails
+  with `InvalidEventSequenceError` only when the traversal has no step for an event from the
+  state it meets, for example an event that the `filterEvents` of the call's options leaves
+  out. This call reads its own options only, not the model's.
 - `model.getShortestPathsFrom(paths)` and `model.getSimplePathsFrom(paths)` continue each given
   path with the paths from its end state.
 
