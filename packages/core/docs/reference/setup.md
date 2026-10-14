@@ -1,377 +1,682 @@
-# setup
+---
+title: setup and setupWithSchema
+doc-type: reference
+sources: [packages/core/src/setup.ts]
+---
 
-Creates a type-safe machine factory with shared configuration.
+# setup and setupWithSchema
 
-## Signature
+> **TL;DR:** `setup(config)` declares a machine's types and its named actors, actions, guards and
+> delays once, and returns a factory whose `createMachine` builds machines checked against them.
+> `setupWithSchema(config)` does the same with Effect Schemas for the context and the events, and
+> adds validators. A setup machine's Effect requirements are the services that its actions'
+> Effects and its actors need, so `createActor` of that machine requires them. `action`, `guard`
+> and `when` build action and guard definitions.
 
-```typescript
+All the items below are exported from `@jambudipa/xstate-effect`. For the machine that
+`createMachine` returns, see [createMachine and the machine](./create-machine.md).
+
+## Summary
+
+| Item | Kind | Description |
+|---|---|---|
+| [`setup`](#setup) | function | Declares the types and implementations of a family of machines. |
+| [`setupWithSchema`](#setupwithschema) | function | `setup` with Effect Schemas for the context and the events. |
+| [`createMachine`](#setupcreatemachine) | `SetupReturn` member | Builds a machine of the setup. |
+| [`extend`](#setupextend) | `SetupReturn` member | A new setup with more actions, guards and delays. |
+| [`createStateConfig`](#setupcreatestateconfig) | `SetupReturn` member | Types a state config by the setup. |
+| [`createAction`](#setupcreateaction) | `SetupReturn` member | Types an action by the setup. |
+| [Bound action creators](#bound-action-creators) | `SetupReturn` members | `assign`, `raise`, `sendTo`, `log`, `cancel`, `stopChild`, `enqueueActions`, `emit`, `spawnChild`, typed by the setup. |
+| [Implementation records](#implementation-records) | `SetupReturn` members | `actors`, `actions`, `guards`, `delays`. |
+| [Schema setup members](#schema-setup-members) | `SetupSchemaReturn` members | `contextSchema`, `eventSchema`, `validateContext`, `validateEvent`. |
+| [`action`](#action) | function | Builds an action definition from an Effect. |
+| [`guard`](#guard) | function | Builds a guard definition from an Effect predicate. |
+| [`when`](#when) | function | Builds a guard definition from a synchronous predicate. |
+
+## setup
+
+Declares the types of a family of machines and their named implementations. The returned
+`SetupReturn` builds machines of those types.
+
+### Signature
+
+```ts
+import type {
+  AnyActorLogic,
+  AnyEventObject,
+  DelayConfig,
+  EventObject,
+  GuardImplementation,
+  NonReducibleUnknown,
+  SetupActionImplementation,
+  SetupChildrenActors,
+  SetupConfig,
+  SetupReturn
+} from "@jambudipa/xstate-effect"
+
+// Simplified: the action constraint also carries the names that a built-in action written in
+// the `actions` record may use, and one more type parameter holds that record's own names
+export declare function setup<
+  TContext,
+  TEvent extends EventObject = AnyEventObject,
+  const TActors extends Record<string, AnyActorLogic> = Record<string, never>,
+  const TActions extends Record<string, SetupActionImplementation<TContext, TEvent>> =
+    Record<string, SetupActionImplementation<TContext, TEvent>>,
+  const TGuards extends Record<string, GuardImplementation<TContext, TEvent>> =
+    Record<string, GuardImplementation<TContext, TEvent>>,
+  const TDelays extends Record<string, DelayConfig<TContext, TEvent>> = Record<string, DelayConfig<TContext, TEvent>>,
+  TStateMeta = unknown,
+  TTransitionMeta = TStateMeta,
+  TInput = NonReducibleUnknown,
+  TEmitted extends EventObject = EventObject,
+  TChildrenMap extends Record<string, string> = Record<never, never>,
+  TTag extends string = string,
+  TOutput = unknown
+>(
+  config: SetupConfig<
+    TContext, TEvent, TActors, TActions, TGuards, TDelays,
+    TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag, TOutput
+  > & SetupChildrenActors<TChildrenMap>
+): SetupReturn<
+  TContext, TEvent, TActors, TActions, TGuards, TDelays,
+  TStateMeta, TTransitionMeta, TInput, TEmitted, TChildrenMap, TTag, TOutput
+>
+```
+
+### Parameters
+
+Every member of `config` is optional.
+
+| Member | Type | Description |
+|---|---|---|
+| `types` | object, written `{} as { ... }` | The phantom types of the setup's machines; see the next table. `setup` reads none of its values. |
+| `actors` | `Record<string, AnyActorLogic>` | The actor logic by name, which a config may invoke or spawn by its `src` name. |
+| `actions` | `Record<string, SetupActionImplementation>` | The actions by name: plain functions `({ context, event, self, system }, params) => unknown`, or action definitions. A built-in action written here may name a sibling action and the setup's guards, delays and actors. |
+| `guards` | `Record<string, GuardImplementation>` | The guards by name. A built-in `not`, `and` or `or` written here names only guards of this record. |
+| `delays` | `Record<string, DelayConfig>` | The delays by name: milliseconds, a `Duration`, or a function of the action arguments and the params of the use. |
+| `schemas` | `unknown` | Carried as given by each machine of the setup, as `machine.schemas`. |
+
+### The `types` member
+
+| Member | Declares | Without it |
+|---|---|---|
+| `context` | The context type of each machine. | `unknown` |
+| `events` | The union of the events that each machine takes. | `AnyEventObject` |
+| `input` | What the context factory and the `input` option of `createActor` take. | `NonReducibleUnknown` |
+| `output` | The type of the snapshots' `output` and of the done event's `output`. The machine's `output` must give a value of this type. | `unknown` |
+| `emitted` | The events that `emit` and `enqueue.emit` take, and that `actor.on` listeners receive. | any event object |
+| `children` | Each child id with the name of the actor that it runs. The snapshots type the child under that id, and `actors` must give every named actor. | no declared ids |
+| `meta` | The type of each state node's `meta`, and of each transition's `meta` when `transitionMeta` is absent. | `unknown` |
+| `transitionMeta` | The type of each transition's `meta`. | `meta` |
+| `tags` | The tags that the state configs may set and that `snapshot.hasTag` takes. | `string` |
+
+### Returns
+
+A `SetupReturn`: the [`createMachine`](#setupcreatemachine), [`extend`](#setupextend),
+[`createStateConfig`](#setupcreatestateconfig) and [`createAction`](#setupcreateaction)
+members, the [bound action creators](#bound-action-creators) and the
+[implementation records](#implementation-records).
+
+### Errors
+
+`setup` does not fail at run time. The type checker rejects a `types.children` entry whose actor
+is not in `actors`, and a built-in guard in `guards` that names a guard outside the record.
+
+### Example
+
+```ts
+import { assign, setup } from "@jambudipa/xstate-effect"
+
+export const counterSetup = setup({
+  types: {} as {
+    context: { count: number; max: number }
+    events: { type: "INC" } | { type: "RESET" }
+    output: number
+  },
+  actions: {
+    increment: assign({ count: ({ context }) => context.count + 1 }),
+    log: ({ context }) => console.log(`count: ${context.count}`)
+  },
+  guards: {
+    belowMax: ({ context }) => context.count < context.max
+  },
+  delays: {
+    idle: 5000
+  }
+})
+```
+
+## setupWithSchema
+
+Declares the context and the events of a family of machines with Effect Schemas: the decoded
+type of each schema is the context or the event type. The returned setup also holds the schemas
+and validators for them.
+
+### Signature
+
+```ts
+import type { Schema } from "effect"
 import type {
   AnyActorLogic,
   DelayConfig,
   EventObject,
   GuardImplementation,
   SetupActionImplementation,
-  SetupConfig,
-  SetupReturn
+  SetupSchemaConfig,
+  SetupSchemaReturn
 } from "@jambudipa/xstate-effect"
 
-// Simplified: the full signature also takes the state meta, transition meta, input,
-// emitted, children and tag types
-export declare function setup<
-  TContext,
-  TEvent extends EventObject,
-  TActors extends Record<string, AnyActorLogic>,
-  TActions extends Record<string, SetupActionImplementation<TContext, TEvent>>,
-  TGuards extends Record<string, GuardImplementation<TContext, TEvent>>,
-  TDelays extends Record<string, DelayConfig<TContext, TEvent>>
+type ContextOf<S extends Schema.Decoder<unknown>> = Schema.Schema.Type<S>
+type EventOf<S extends Schema.Decoder<unknown>> = Schema.Schema.Type<S> & EventObject
+
+export declare function setupWithSchema<
+  TContextSchema extends Schema.Decoder<unknown>,
+  TEventSchema extends Schema.Decoder<unknown>,
+  const TActors extends Record<string, AnyActorLogic> = Record<string, never>,
+  const TActions extends Record<string, SetupActionImplementation<ContextOf<TContextSchema>, EventOf<TEventSchema>>> =
+    Record<string, SetupActionImplementation<ContextOf<TContextSchema>, EventOf<TEventSchema>>>,
+  const TGuards extends Record<string, GuardImplementation<ContextOf<TContextSchema>, EventOf<TEventSchema>>> =
+    Record<string, GuardImplementation<ContextOf<TContextSchema>, EventOf<TEventSchema>>>,
+  const TDelays extends Record<string, DelayConfig<ContextOf<TContextSchema>, EventOf<TEventSchema>>> =
+    Record<string, DelayConfig<ContextOf<TContextSchema>, EventOf<TEventSchema>>>
 >(
-  config: SetupConfig<TContext, TEvent, TActors, TActions, TGuards, TDelays>
-): SetupReturn<TContext, TEvent, TActors, TActions, TGuards, TDelays>
+  config: SetupSchemaConfig<TContextSchema, TEventSchema, TActors, TActions, TGuards, TDelays>
+): SetupSchemaReturn<
+  ContextOf<TContextSchema>, EventOf<TEventSchema>, TContextSchema, TEventSchema,
+  TActors, TActions, TGuards, TDelays
+>
 ```
 
-## Parameters
+### Parameters
 
-### config
+| Member of `config` | Type | Required | Description |
+|---|---|---|---|
+| `context` | `Schema.Decoder<unknown>` | yes | The context schema. Its decoded type is the context type. |
+| `events` | `Schema.Decoder<unknown>` | yes | The event schema, usually a `Schema.Union` of `Schema.Struct`s with a literal `type`. Its decoded type is the event type. |
+| `actors` | `Record<string, AnyActorLogic>` | no | As for [`setup`](#setup). |
+| `actions` | `Record<string, SetupActionImplementation>` | no | As for `setup`, typed by the decoded context and events. |
+| `guards` | `Record<string, GuardImplementation>` | no | As for `setup`, typed by the decoded context and events. |
+| `delays` | `Record<string, DelayConfig>` | no | As for `setup`. |
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `types` | `{ context?, events?, input?, emitted?, children?, meta?, transitionMeta?, tags? }` | Type definitions for the machine (type only) |
-| `actors` | `Record<string, ActorLogic>` | Named actor logic |
-| `actions` | `Record<string, Action>` | Named actions |
-| `guards` | `Record<string, Guard>` | Named guards |
-| `delays` | `Record<string, Delay>` | Named delays |
+`setupWithSchema` takes no `types` and no `schemas` member. Its machines have the input type
+`NonReducibleUnknown`, the output type `unknown`, any emitted event, any tag, and the meta types
+`unknown`.
 
-## Types Definition
+### Returns
 
-Each member of `types` is optional, and `setup` reads none of its values at run time:
+A `SetupSchemaReturn`: the members of `SetupReturn`, whose `extend` gives a `SetupSchemaReturn`
+that keeps the schemas, and the [schema setup members](#schema-setup-members).
 
-```typescript
+### Errors
+
+`setupWithSchema` does not fail. The machines do not decode their context or their events at
+run time: `validateContext` and `validateEvent` do that on request.
+
+### Example
+
+```ts
+import { Schema } from "effect"
+import { assign, setupWithSchema } from "@jambudipa/xstate-effect"
+
+const Context = Schema.Struct({ count: Schema.Number })
+
+const Events = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("INCREMENT"), value: Schema.Number }),
+  Schema.Struct({ type: Schema.Literal("RESET") })
+])
+
+export const counterSetup = setupWithSchema({
+  context: Context,
+  events: Events,
+  guards: {
+    isPositive: ({ context }) => context.count > 0
+  }
+})
+
+export const counter = counterSetup.createMachine({
+  context: { count: 0 },
+  on: {
+    INCREMENT: { actions: assign({ count: ({ context, event }) => context.count + event.value }) },
+    RESET: { guard: "isPositive", actions: assign({ count: 0 }) }
+  }
+})
+```
+
+## setup.createMachine
+
+Builds a machine of the setup: the setup's records become the machine's implementations.
+
+### Signature
+
+`createMachine<TConfig>(config: SetupMachineConfig<…> & TConfig): SetupMachine<…>`
+
+`SetupMachine` is a [`StateMachine.StateMachine`](./create-machine.md#the-machine) with these
+type parameters:
+
+| Machine type parameter | Value |
+|---|---|
+| `TContext` | `types.context` |
+| `TEvent` | `types.events`, and the `xstate.route` event when the config has routable states |
+| `TInput` | `types.input` |
+| `TOutput` | `types.output` |
+| `TEmitted` | `types.emitted` |
+| `R` | `SetupRequirements<TActions, TActors>`: the services that the Effects returned by the setup's actions need, and the requirements of the setup's actor logic |
+| `TStateMeta`, `TTransitionMeta` | `types.meta`, `types.transitionMeta` |
+| `TStateSchema` | The state keys and ids of the config as written |
+| `TProvided` | `SetupProvideImplementations`: only the setup's names, each with the type of the setup's implementation |
+| `TStateValue` | The state value of the config as written |
+| `TChildren` | `SetupChildren`: the setup's actors under the ids of `types.children`, or of the config's root `invoke` entries |
+| `TTag` | `types.tags` |
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `config` | the [machine config](./create-machine.md#machine-config) without `types` | The machine config. It names only the setup's implementations. |
+
+The type checker applies these rules to the config:
+
+- An action or guard name is one of the setup's. A name stands alone only when its params may be
+  `undefined`; otherwise the config writes `{ type, params }` with params of its type.
+- An `after` key is one of the setup's delay names, or a number.
+- An `invoke` `src` is one of the setup's actor names, or actor logic.
+- With `types.emitted`, `emit` and `enqueue.emit` take only those events.
+- A setup without a record takes no name of that kind.
+
+### Returns
+
+The machine. Its `schemas` is the setup's `schemas`, which replaces the config's own:
+`undefined` when the setup gives none. A machine of `setupWithSchema` keeps the config's own
+`schemas`.
+
+### Errors
+
+The definition errors of [`createMachine`](./create-machine.md#createmachine). `createActor` of
+the machine returns `Effect<Actor, never, Scope | R>`: the caller provides each service in `R`.
+
+### Example
+
+```ts
+import { Context, Effect } from "effect"
+import { createActor, setup } from "@jambudipa/xstate-effect"
+
+class Greeter extends Context.Service<Greeter, { readonly greet: (name: string) => string }>()("app/Greeter") {}
+
+export const greeter = setup({
+  actions: {
+    hello: () =>
+      Effect.gen(function* () {
+        const service = yield* Greeter
+        yield* Effect.log(service.greet("Ada"))
+      })
+  }
+}).createMachine({ entry: "hello" })
+
+// createActor(greeter) needs Scope | Greeter
+const program = Effect.gen(function* () {
+  const actor = yield* createActor(greeter)
+  yield* actor.start
+})
+
+void Effect.runPromise(
+  program.pipe(
+    Effect.provideService(Greeter, { greet: (name) => `Hello, ${name}` }),
+    Effect.scoped
+  )
+)
+```
+
+## setup.extend
+
+A new setup with the same types, schemas and actors. Its actions, guards and delays are this
+setup's with the extension's added: `{ ...base, ...extension }` for each record, so an
+extension wins over a base implementation of the same name. The original setup does not change.
+
+### Signature
+
+`extend(extension: SetupExtension<TExtendActions, TExtendGuards, TExtendDelays>): SetupReturn<…, MergedImplementations<TActions, TExtendActions>, MergedImplementations<TGuards, TExtendGuards>, MergedImplementations<TDelays, TExtendDelays>, …>`
+
+### Parameters
+
+| Member of `extension` | Type | Description |
+|---|---|---|
+| `actions` | `Record<string, SetupActionImplementation>` | The actions to add. A built-in action written here may name the base's actions, the record's own actions, and the guards and delays of both. |
+| `guards` | `Record<string, GuardImplementation>` | The guards to add. A built-in guard here names only guards of the base and of this record. |
+| `delays` | `Record<string, DelayConfig>` | The delays to add. |
+
+### Returns
+
+A `SetupReturn` with the merged records; for a schema setup, a `SetupSchemaReturn` that keeps
+the schemas and the validators.
+
+### Example
+
+```ts
 import { setup } from "@jambudipa/xstate-effect"
 
-interface Order {
-  id: string
-  total: number
-}
+const base = setup({ actions: { track: () => console.log("track") } })
 
-export const orderSetup = setup({
-  types: {} as {
-    context: { orders: Order[] }                 // Machine context type
-    events: { type: "ADD"; order: Order }        // Event union type
-    input: { customerId: string }                // Input for actor creation
-    output: { total: number }                    // Output of each machine
-    emitted: { type: "ORDER_ADDED"; id: string } // Emitted event types
-    tags: "busy" | "idle"                        // Tags that `hasTag` takes
-  }
+export const extended = base.extend({
+  guards: { isReady: () => true },
+  delays: { soon: 100 }
 })
+
+export const machine = extended.createMachine({ entry: "track", on: { GO: { guard: "isReady" } } })
 ```
 
-`types.output` is the output type of each machine of the setup, as in XState: the machine's `output`
-config must give it, and its snapshots' `output` and its done event's `output` carry it.
+## setup.createStateConfig
 
-## Return Value
+Gives a state config back, typed by the setup, so a state can be written apart from the machine
+that uses it.
 
-Returns a `SetupReturn` object with:
+### Signature
 
-| Method | Description |
-|--------|-------------|
-| `createMachine(config)` | Creates a machine with the configured types |
+`createStateConfig<const TStateConfig extends StateNodeConfig<TContext, TEvent, TStateMeta, TTransitionMeta, SetupNames<…>>>(config: TStateConfig): TStateConfig`
 
-## Usage
+### Parameters
 
-### Basic Setup
+| Parameter | Type | Description |
+|---|---|---|
+| `config` | `StateNodeConfig` with the setup's names | A [state node config](./create-machine.md#state-node-members). |
 
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
+### Returns
 
-export const machine = setup({
-  types: {} as {
-    context: { count: number }
-    events: { type: "INCREMENT" } | { type: "DECREMENT" }
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: { actions: assign({ count: ({ context }) => context.count + 1 }) },
-        DECREMENT: { actions: assign({ count: ({ context }) => context.count - 1 }) }
-      }
-    }
-  }
-})
-```
+The same config object, with its literal type.
 
-### With Actions
+### Example
 
-A named action can be a built-in action such as `assign`, or a plain function. A plain
-function may return an Effect, which the actor runs:
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-import { Console } from "effect"
-
-export const machine = setup({
-  types: {} as {
-    context: { count: number }
-    events: { type: "INCREMENT" }
-  },
-  actions: {
-    increment: assign({
-      count: ({ context }) => context.count + 1
-    }),
-    logCount: ({ context }) => Console.log(`Count: ${context.count}`)
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: { actions: ["increment", "logCount"] }
-      }
-    }
-  }
-})
-```
-
-### With Guards
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const machine = setup({
-  types: {} as {
-    context: { count: number; max: number }
-    events: { type: "INCREMENT" }
-  },
-  guards: {
-    canIncrement: ({ context }) => context.count < context.max
-  }
-}).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0, max: 10 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: {
-          guard: "canIncrement",
-          actions: assign({ count: ({ context }) => context.count + 1 })
-        }
-      }
-    }
-  }
-})
-```
-
-### With Actors
-
-The `output` of a done event is an `Option`, so the assigner unwraps it:
-
-```typescript
-import { setup, assign, fromPromise } from "@jambudipa/xstate-effect"
-import { Option } from "effect"
-
-export const machine = setup({
-  types: {} as {
-    context: { data: unknown }
-    events: { type: "FETCH" }
-  },
-  actors: {
-    fetchData: fromPromise(async ({ input }: { input: { url: string } }) => {
-      const response = await fetch(input.url)
-      const data: unknown = await response.json()
-      return data
-    })
-  }
-}).createMachine({
-  id: "fetcher",
-  initial: "idle",
-  context: { data: null },
-  states: {
-    idle: {
-      on: { FETCH: "loading" }
-    },
-    loading: {
-      invoke: {
-        src: "fetchData",
-        input: { url: "/api/data" },
-        onDone: {
-          target: "success",
-          actions: assign({ data: ({ event }) => Option.getOrNull(event.output) })
-        }
-      }
-    },
-    success: {}
-  }
-})
-```
-
-### With Delays
-
-```typescript
+```ts
 import { setup } from "@jambudipa/xstate-effect"
 
-export const machine = setup({
+const lights = setup({ actions: { note: () => console.log("note") } })
+
+const green = lights.createStateConfig({ on: { TIMER: { target: "yellow", actions: "note" } } })
+
+export const machine = lights.createMachine({ initial: "green", states: { green, yellow: {} } })
+```
+
+## setup.createAction
+
+Gives an action back, typed by the setup: an inline function of
+`({ context, event, self, system }, params)`, or a built-in action.
+
+### Signature
+
+`createAction<const TAction extends SetupAction<TContext, TEvent>>(action: TAction): TAction`
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `action` | `SetupAction<TContext, TEvent>`: an `ActionFunction` or an `ActionDefinition` | The action. |
+
+### Returns
+
+The same action, with its literal type.
+
+### Example
+
+```ts
+import { setup } from "@jambudipa/xstate-effect"
+
+const counter = setup({ types: {} as { context: { count: number } } })
+
+const report = counter.createAction(({ context }) => console.log(context.count))
+
+export const machine = counter.createMachine({ context: { count: 0 }, entry: report })
+```
+
+## Bound action creators
+
+Each member is the built-in action of the same name with the setup's context and events: its
+callbacks need no type annotations, and its arguments are checked against the setup's types. In
+the signatures, `TNames` is the setup's names (`SetupNames`): a delay name, an actor name, an
+emitted event and a name that `enqueueActions` enqueues or checks must be one of the setup's.
+
+| Member | Signature | Module function |
+|---|---|---|
+| `assign` | `assign<TParams = undefined>(assignment: Assignment<TContext, TEvent, TParams>)` | [`assign`](./actions/assign.md) |
+| `raise` | `raise(event: RaiseEvent<TContext, TEvent, TEvent>, options?: RaiseOptions<TContext, TEvent, TNames["delays"]>)`; the raised event is one of the setup's events | [`raise`](./actions/raise.md) |
+| `sendTo` | `sendTo(target: SendToTarget<TContext, TEvent, TTarget>, event: SendToTargetEvent<TContext, TEvent, TTarget, TSentEvent>, options?: SendToOptions<TContext, TEvent, TNames["delays"]>)` | [`sendTo`](./actions/send-to.md) |
+| `log` | `log(value?: LogMessage<TContext, TEvent>, labelOrOptions?: string \| LogOptions)` | [`log`](./actions/log.md) |
+| `cancel` | `cancel(id: CancelId<TContext, TEvent>)` | [`cancel`](./actions/cancel.md) |
+| `stopChild` | `stopChild(child: StopChildTarget<TContext, TEvent>)` | [`stopChild`](./actions/stop-child.md) |
+| `enqueueActions` | `enqueueActions<TParams = void>(collect: CollectActions<TContext, TEvent, TParams, TNames>)` | [`enqueueActions`](./actions/enqueue-actions.md) |
+| `emit` | `emit(event: EmitEvent<TContext, TEvent, TNames["emitted"]>)`; the event is one of `types.emitted`, or any event object when the setup declares none | [`emit`](./actions/emit.md) |
+| `spawnChild` | `spawnChild(...args: SpawnChildArguments<TContext, TEvent, TLogic, TNames>)`: the name of one of the setup's actors, with an id that `types.children` gives it and its logic's input, or actor logic | [`spawnChild`](./actions/spawn-child.md) |
+
+Each member returns an `ActionDefinition` of the setup's context and events; `enqueueActions`
+returns an `EnqueueActionsDefinition`.
+
+### Example
+
+```ts
+import { setup } from "@jambudipa/xstate-effect"
+
+const counter = setup({
   types: {} as {
-    context: { timeout: number }
-    events: { type: "START" }
-  },
-  delays: {
-    TIMEOUT: ({ context }) => context.timeout
+    context: { count: number }
+    events: { type: "INC" } | { type: "CHECK" }
   }
-}).createMachine({
-  id: "timer",
-  initial: "idle",
-  context: { timeout: 5000 },
-  states: {
-    idle: {
-      on: { START: "running" }
-    },
-    running: {
-      after: {
-        TIMEOUT: "complete"
-      }
-    },
-    complete: { type: "final" }
+})
+
+export const machine = counter.createMachine({
+  context: { count: 0 },
+  on: {
+    INC: { actions: [counter.assign({ count: ({ context }) => context.count + 1 }), counter.raise({ type: "CHECK" })] },
+    CHECK: { actions: counter.log(({ context }) => `count: ${context.count}`) }
   }
 })
 ```
 
-### Complete Example
+## Implementation records
 
-```typescript
-import { setup, assign, fromPromise } from "@jambudipa/xstate-effect"
-import { Console, Option } from "effect"
+| Member | Type | Description |
+|---|---|---|
+| `actors` | `TActors` | The `actors` record as given; `{}` when the config has none. `extend` keeps it. |
+| `actions` | `TActions` | The `actions` record; `{}` when the config has none. |
+| `guards` | `TGuards` | The `guards` record; `{}` when the config has none. |
+| `delays` | `TDelays` | The `delays` record; `{}` when the config has none. |
 
-interface User {
-  id: string
-  name: string
-}
+### Example
 
-export const userMachine = setup({
-  types: {} as {
-    context: {
-      userId: string
-      user: User | null
-      error: string | null
-    }
-    events:
-      | { type: "FETCH"; userId: string }
-      | { type: "RETRY" }
-      | { type: "RESET" }
-    input: { initialUserId?: string }
-  },
-  actors: {
-    fetchUser: fromPromise(async ({ input }: { input: { userId: string } }) => {
-      const response = await fetch(`/api/users/${input.userId}`)
-      if (!response.ok) throw new Error("Failed to fetch")
-      const user: User = await response.json()
-      return user
-    })
-  },
-  actions: {
-    setUserId: assign({
-      userId: ({ event }) => event.type === "FETCH" ? event.userId : ""
-    }),
-    setUser: assign({
-      user: (_, params: { user: User | null }) => params.user,
-      error: null
-    }),
-    setError: assign({
-      error: (_, params: { message: string }) => params.message
-    }),
-    reset: assign({
-      user: null,
-      error: null
-    }),
-    logFetch: ({ context }) => Console.log(`Fetching user: ${context.userId}`)
-  },
-  guards: {
-    hasUserId: ({ context }) => context.userId.length > 0
-  }
-}).createMachine({
-  id: "user",
-  initial: "idle",
-  context: ({ input }) => ({
-    userId: input?.initialUserId ?? "",
-    user: null,
-    error: null
-  }),
-  states: {
-    idle: {
-      on: {
-        FETCH: {
-          target: "loading",
-          actions: ["setUserId", "logFetch"]
-        }
-      }
-    },
-    loading: {
-      invoke: {
-        id: "fetchUser",
-        src: "fetchUser",
-        input: ({ context }) => ({ userId: context.userId }),
-        onDone: {
-          target: "success",
-          actions: {
-            type: "setUser",
-            params: ({ event }) => ({ user: Option.getOrNull(event.output) })
-          }
-        },
-        onError: {
-          target: "failure",
-          actions: {
-            type: "setError",
-            params: ({ event }) => ({
-              message: event.error instanceof Error ? event.error.message : String(event.error)
-            })
-          }
-        }
-      }
-    },
-    success: {
-      on: {
-        FETCH: {
-          target: "loading",
-          actions: ["setUserId", "logFetch"]
-        },
-        RESET: {
-          target: "idle",
-          actions: "reset"
-        }
-      }
-    },
-    failure: {
-      on: {
-        RETRY: {
-          guard: "hasUserId",
-          target: "loading"
-        },
-        FETCH: {
-          target: "loading",
-          actions: ["setUserId", "logFetch"]
-        }
-      }
-    }
-  },
-  output: ({ context }) => ({ user: context.user })
+```ts
+import { setup } from "@jambudipa/xstate-effect"
+
+const timers = setup({ delays: { short: 100, long: 1000 } })
+
+export const delayNames = Object.keys(timers.delays) // ["short", "long"]
+```
+
+## Schema setup members
+
+The members that `setupWithSchema` adds to the setup.
+
+| Member | Type | Description |
+|---|---|---|
+| `contextSchema` | `TContextSchema` | The `context` schema as given. |
+| `eventSchema` | `TEventSchema` | The `events` schema as given. |
+| `validateContext` | `(value: unknown) => Effect<TContext, Schema.SchemaError>` | Decodes a value with the context schema. |
+| `validateEvent` | `(value: unknown) => Effect<TEvent, Schema.SchemaError>` | Decodes a value with the event schema. |
+
+### Errors
+
+| Error | When |
+|---|---|
+| `Schema.SchemaError` | The value does not decode with the schema. |
+
+### Example
+
+```ts
+import { Effect, Schema } from "effect"
+import { setupWithSchema } from "@jambudipa/xstate-effect"
+
+const counterSetup = setupWithSchema({
+  context: Schema.Struct({ count: Schema.Number }),
+  events: Schema.Struct({ type: Schema.Literal("RESET") })
+})
+
+export const checked = Effect.gen(function* () {
+  const event = yield* counterSetup.validateEvent({ type: "RESET" })
+  const failure = yield* Effect.flip(counterSetup.validateContext({ count: "zero" }))
+  return [event.type, failure.message] as const
 })
 ```
 
-## Notes
+## action
 
-- The `types` property uses the `{} as { ... }` assertion to define types without runtime values
-- Named actions, guards, and actors can be referenced by string in machine config
-- A named action that takes params is used as `{ type, params }`; `params` can be a function of the context and the event
-- Setup enables type inference across the entire machine definition
-- Every property of the setup config is optional, `types` included
+Builds an action definition whose `exec` returns an Effect of an `ActionResult`, which the engine
+carries out.
 
-## See Also
+### Signature
 
-- [The `createMachine` method](../tutorials/01-first-state-machine.md#the-createmachine-method) - Tutorial 1 explains the machine config
-- [Actions Reference](./actions/)
-- [Guards](../tutorials/03-guards-and-transitions.md) - Tutorial 3 defines named guards in `setup`
+```ts
+import type { Effect } from "effect"
+import type { ActionContext, ActionDefinition, ActionResult, EventObject } from "@jambudipa/xstate-effect"
+
+export declare function action<TContext, TEvent extends EventObject, TParams = void, R = never>(
+  type: string,
+  exec: (ctx: ActionContext<TContext, TEvent>, params: TParams) => Effect.Effect<ActionResult, never, R>
+): ActionDefinition<TContext, TEvent, TParams, R>
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `type` | `string` | The action's name, as the definition and the JSON form show it. The engine never looks it up. |
+| `exec` | `(ctx, params) => Effect<ActionResult, never, R>` | Runs once for each use. `ctx` holds `context`, `event`, `self`, `system`, `children`, `defer`, `emit`, `spawn`, `stopChild`, `evaluateGuard` and `resolveDelay`. |
+
+The `ActionResult` constructors are in `Types.ActionResult`: `NoOp`, `ContextUpdate` (the whole
+new context), `SpawnChild`, `StopChild`, `SendEvent`, `RaiseEvent`, `EmitEvent`, `Cancel`,
+`Log` and `Enqueued`.
+
+### Returns
+
+An `ActionDefinition<TContext, TEvent, TParams, R>` with the given `type` and `exec`.
+
+### Errors
+
+A failure or a defect of the Effect at run time stops the macrostep, and the actor gets the
+status `error`.
+
+### Example
+
+```ts
+import { Effect } from "effect"
+import { Types, action, createMachine } from "@jambudipa/xstate-effect"
+
+type Context = { count: number }
+type Event = { type: "INC" }
+
+const increment = action<Context, Event>("increment", ({ context }) =>
+  Effect.succeed(Types.ActionResult.ContextUpdate({ ...context, count: context.count + 1 }))
+)
+
+export const machine = createMachine({
+  types: {} as { context: Context; events: Event },
+  context: { count: 0 },
+  on: { INC: { actions: increment } }
+})
+```
+
+## guard
+
+Builds a guard definition whose predicate returns an `Effect<boolean>`.
+
+### Signature
+
+```ts
+import type { Effect } from "effect"
+import type { EventObject, GuardContext, GuardDefinition } from "@jambudipa/xstate-effect"
+
+export declare function guard<TContext, TEvent extends EventObject, TParams = void>(
+  type: string,
+  predicate: (ctx: GuardContext<TContext, TEvent>, params: TParams) => Effect.Effect<boolean>
+): GuardDefinition<TContext, TEvent, TParams>
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `type` | `string` | The guard's name, as the JSON form shows it. The evaluator never looks it up. |
+| `predicate` | `(ctx, params) => Effect<boolean>` | Decides the guard. `ctx` holds `context`, `event`, `self`, `system`, and optionally `implementations` and `snapshot`. |
+
+### Returns
+
+A `GuardDefinition<TContext, TEvent, TParams>` with the given `type` and `predicate`.
+
+### Example
+
+```ts
+import { Effect } from "effect"
+import { createMachine, guard } from "@jambudipa/xstate-effect"
+
+type Context = { ready: boolean }
+type Event = { type: "SUBMIT" }
+
+const isReady = guard<Context, Event>("isReady", ({ context }) => Effect.succeed(context.ready))
+
+export const machine = createMachine({
+  types: {} as { context: Context; events: Event },
+  context: { ready: false },
+  initial: "editing",
+  states: {
+    editing: { on: { SUBMIT: { guard: isReady, target: "sent" } } },
+    sent: {}
+  }
+})
+```
+
+## when
+
+Builds a guard definition from a synchronous predicate. Its `type` is `"xstate.when"`.
+
+### Signature
+
+```ts
+import type { EventObject, GuardContext, GuardDefinition } from "@jambudipa/xstate-effect"
+
+export declare function when<TContext, TEvent extends EventObject>(
+  predicate: (ctx: GuardContext<TContext, TEvent>) => boolean
+): GuardDefinition<TContext, TEvent>
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `predicate` | `(ctx: GuardContext<TContext, TEvent>) => boolean` | Decides the guard. |
+
+### Returns
+
+A `GuardDefinition<TContext, TEvent>` whose predicate wraps the result in an Effect.
+
+### Example
+
+```ts
+import { createMachine, when } from "@jambudipa/xstate-effect"
+
+type Context = { todos: ReadonlyArray<string> }
+type Event = { type: "CLEAR" }
+
+const hasTodos = when<Context, Event>(({ context }) => context.todos.length > 0)
+
+export const machine = createMachine({
+  types: {} as { context: Context; events: Event },
+  context: { todos: [] },
+  on: { CLEAR: { guard: hasTodos, actions: () => console.log("clear") } }
+})
+```
+
+## Related pages
+
+- [createMachine and the machine](./create-machine.md)
+- [Type utilities](./type-utilities.md): `ContextFrom`, `EventFrom`, `ActorsFrom`, `ActionsFrom`,
+  `GuardsFrom`, `DelaysFrom` and the other setup types
+- [Guards](./guards.md)
+- [How to type a machine's context, events, input and output](../how-to/define-custom-types.md)
+- [How to type a machine from Effect Schemas](../how-to/validate-events-with-schema.md)
+- [How to give a machine's actions and actors Effect services](../how-to/provide-services-to-a-machine.md)
+- [How services reach actions and actors](../explanation/services-and-requirements.md)

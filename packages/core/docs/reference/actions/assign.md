@@ -1,396 +1,221 @@
-# assign
+---
+title: assign and assignProperty
+doc-type: reference
+sources: [packages/core/src/actions/assign.ts]
+---
 
-Updates the machine's context with new values.
+# assign and assignProperty
 
-## Signature
+> **TL;DR:** `assign` builds an action that merges new values into the machine's context; `assignProperty` builds the same action for one key. An assignment is a partial context, an object of property assigners, or a function that returns a partial context or an Effect of one. A throw, a failed Effect, or a snapshot without context gives the actor status `error`.
 
-```typescript
-import type { ActionDefinition, Assigner, EventObject, PropertyAssigner } from "@jambudipa/xstate-effect"
+Both functions come from `@jambudipa/xstate-effect` and from `@jambudipa/xstate-effect/actions`.
 
-// Simplified: the full type also carries the params type of the action's uses, every event
-// of the machine and the names of the machine's implementations
-export declare function assign<TContext, TEvent extends EventObject>(
-  assignment: Partial<TContext> | PropertyAssigner<TContext, TEvent> | Assigner<TContext, TEvent>
-): ActionDefinition<TContext, TEvent>
+## Summary
+
+| Export | Kind | Description |
+| --- | --- | --- |
+| [`assign`](#assign) | function | Builds an `xstate.assign` action from an assignment. |
+| [`assignProperty`](#assignproperty) | function | Builds an `xstate.assign` action that sets one context key. |
+| [`Assignment`](#types) | type | The argument of `assign`: a partial context, a `PropertyAssigner` or an `Assigner`. |
+| [`Assigner`](#types) | type | The function form of an assignment. |
+| [`PropertyAssigner`](#types) | type | The object form of an assignment. |
+| [`Assign`](#types) | type | The type of `assign`. |
+| [`AssignArgs`](#types) | type | The first argument an assigner receives. |
+| [`PartialAssigner`](#types) | type | A function that computes one context property. |
+| [`AssignAction`](#types) | type | The action that `assign` returns. |
+
+`Assignment` and `Assign` come from `@jambudipa/xstate-effect/actions` only. The other types come from both entry points.
+
+## assign
+
+### Signature
+
+```ts
+import type { ActionDefinition, EventObject, ImplementationNames, Types } from "@jambudipa/xstate-effect"
+import type { Assignment } from "@jambudipa/xstate-effect/actions"
+
+export declare function assign<
+  TContext,
+  TEvent extends EventObject,
+  TParams = undefined,
+  TSelfEvent extends EventObject = TEvent,
+  TNames extends ImplementationNames = ImplementationNames
+>(
+  assignment: Assignment<NoInfer<TContext>, NoInfer<TEvent>, TParams, NoInfer<TSelfEvent>, NoInfer<TNames>>
+): ActionDefinition<TContext, TEvent, Types.AssignDefinitionParams<NoInfer<TParams>>, never, TNames, TSelfEvent> &
+  Types.ImplementsParams<TParams>
 ```
 
-The context and event types come from where the action is used: the `types` of the machine
-or of its `setup`, and the event of the transition that runs the action.
+`Assign` has a second call signature that no value can call. It exists only so that TypeScript types an inline `assign` from the machine config around it.
 
-## Parameters
+### Type parameters
 
-### assignment
+| Type parameter | Comes from | Description |
+| --- | --- | --- |
+| `TContext` | where the action is used | The machine's context type. |
+| `TEvent` | where the action is used | The event of the transition that runs the action: the event of the `on` descriptor, or every event of the machine. |
+| `TParams` | an annotated `params` argument, the type argument, or an implementation slot that knows the params of its uses | The params of the use. `undefined` when nothing gives it. |
+| `TSelfEvent` | where the action is used | Every event of the machine. The `self` reference takes these events. |
+| `TNames` | where the action is used | The implementation names of the setup or machine. `spawn` takes only the actors that these names name. |
 
-Either an object with property assignments or a function returning the context properties to change.
+The context and event types never come from the assignment itself.
 
-**Property Assigner** (recommended): each key holds a value, or a function that computes it:
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
+### Parameters
 
-export const counter = setup({
-  types: {} as {
-    context: { count: number; label: string }
-  },
-  actions: {
-    update: assign({
-      count: 1,                                          // a value
-      label: ({ context }) => `Count: ${context.count}` // or a function of the arguments
-    })
-  }
-})
-```
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `assignment` | `Assignment<TContext, TEvent, TParams, TSelfEvent, TNames>` | One of the three forms below. Required. |
 
-**Function Assigner**: the function returns the properties to change, and `assign` merges them into the context:
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
+| Form | Shape | Result |
+| --- | --- | --- |
+| Partial context | `{ count: 0 }` | The values are copied into the context. |
+| Property assigners | `{ count: ({ context }) => context.count + 1 }` | A function value computes the value of its key; any other value is copied. |
+| Assigner | `({ context, event }, params) => ({ count: 1 })` | The function returns the keys to change, or an `Effect.Effect<Partial<TContext>, unknown>` of them. |
 
-export const counter = setup({
-  types: {} as {
-    context: { count: number; label: string }
-  },
-  actions: {
-    increment: assign(({ context }) => ({ count: context.count + 1 }))
-  }
-})
-```
+### Assigner arguments
 
-### Assignment Function Arguments
+An assigner and each property assigner receive two arguments.
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `context` | `TContext` | Current context |
-| `event` | `TEvent` | Event that triggered the action |
-| `self` | `ActorRef` | Reference to the current actor |
-| `system` | `ActorSystem` | The actor system |
-| `spawn` | `Spawner` | Spawns a child actor and gives its reference at once |
+| Argument | Type | Description |
+| --- | --- | --- |
+| first | `ActionContext<TContext, TEvent, TSelfEvent, TNames>` | The action context (members below). |
+| second | `TParams` | The params of the use: the `params` of a `{ type, params }` action that this assign implements; `undefined` for an inline assign and for a string reference. |
 
-The params of the action's use are the second argument of each function.
+| Member of the action context | Type | Description |
+| --- | --- | --- |
+| `context` | `TContext` | The context before this action. |
+| `event` | `TEvent` | The event that the transition handles. |
+| `self` | `ActorRef` | The machine actor itself. It takes `TSelfEvent`. |
+| `system` | `ActorSystemService` | The actor system of the actor. |
+| `spawn` | `Spawner` | Spawns a child and returns its reference at once. |
+| `children` | `Readonly<Record<string, ActorRefBase>>` | The children of the snapshot at this point of the action list. |
+| `defer` | `(effect) => Effect<void>` | Queues an Effect to run after the current transition. |
+| `emit` | `(event) => Effect<void>` | Emits an event to the actor's listeners once the macrostep commits. |
+| `stopChild` | `(child) => Effect<void>` | Stops a child of this actor. |
+| `evaluateGuard` | `(guard) => Effect<boolean, GuardError>` | Evaluates a guard with this action's context and event. |
+| `resolveDelay` | `(name, params) => Option<number>` | The milliseconds that a delay name of the machine stands for. |
 
-## Usage
+### Return value
 
-### Static Values
+An `ActionDefinition` with `type: "xstate.assign"`. Use it inline in a config, in an `actions` record of `setup`, or as an implementation in `createMachine(config, { actions })` and `machine.provide`.
 
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
+### Behaviour
 
-export const profile = setup({
-  types: {} as {
-    context: { count: number; name: string; active: boolean }
-  },
-  actions: {
-    resetCount: assign({ count: 0 }),
-    resetProfile: assign({ name: "default", active: false })
-  }
-})
-```
+- The action runs at its place in the action list. It reads the context that the earlier actions of the same list left.
+- In the object form, every property assigner receives the same context: the context from before the action. A property assigner does not see the values of the other assigners of the same call.
+- The property assigners run in the key order of the object.
+- The engine merges the result into a shallow copy of the context (`{ ...context, ...partial }`). Keys that the result does not hold keep their values.
+- When an assigner returns an Effect, the engine runs that Effect and merges its value. The Effect has no requirements.
+- A child that `spawn` creates in an assigner joins `snapshot.children` together with the context change.
+- `assign` only builds an action. A custom action function that calls `assign` changes nothing, and the actor logs this warning: ``Custom actions should not call `assign()` directly, as it is not imperative. See https://stately.ai/docs/actions#built-in-actions for more details.``
 
-### Dynamic Values from Context
+### Errors
 
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
+Each error stops the macrostep. The context keeps its earlier value, the actor gets status `error`, and `snapshot.error` holds the error.
+
+| Condition | `snapshot.error` |
+| --- | --- |
+| The snapshot has no context (for example, a restored snapshot without one). A machine config without `context` starts with `{}`, so this case does not apply to it. | An `ActorError` with the message ``Cannot assign to undefined `context`. Ensure that `context` is defined in the machine config.`` |
+| An assigner or a property assigner throws. | The thrown value. |
+| The Effect that an assigner returns fails. | The failure value. |
+
+### Example
+
+```ts
+import { assign, setup } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
 
 export const cart = setup({
   types: {} as {
-    context: { count: number; total: number; items: Array<{ price: number }> }
+    context: { count: number; total: number }
+    events: { type: "ADD"; price: number } | { type: "CLEAR" }
   },
   actions: {
-    increment: assign({
-      count: ({ context }) => context.count + 1
-    }),
-    computeTotal: assign({
-      total: ({ context }) => context.items.reduce((sum, item) => sum + item.price, 0)
-    })
-  }
-})
-```
-
-### Values from Event
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const list = setup({
-  types: {} as {
-    context: { name: string; items: string[] }
-    events: { type: "SET_NAME"; name: string } | { type: "ADD_ITEM"; item: string }
-  },
-  actions: {
-    setName: assign({
-      name: ({ event }) => event.type === "SET_NAME" ? event.name : ""
-    }),
-    addItem: assign({
-      items: ({ context, event }) => {
-        if (event.type === "ADD_ITEM") {
-          return [...context.items, event.item]
-        }
-        return context.items
-      }
-    })
-  }
-})
-```
-
-### Multiple Properties
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const tracker = setup({
-  types: {} as {
-    context: { count: number; lastUpdated: number; history: number[] }
-  },
-  actions: {
-    record: assign({
+    // Property assigners: both read the context from before the action
+    add: assign({
       count: ({ context }) => context.count + 1,
-      lastUpdated: () => Date.now(),
-      history: ({ context }) => [...context.history, context.count]
-    })
-  }
-})
-```
-
-### Full Context Replacement
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const form = setup({
-  types: {} as {
-    context: { count: number; name: string; items: string[] }
-    events: { type: "RESET" } | { type: "SUBMIT" }
-  },
-  actions: {
-    reset: assign(({ context, event }) => {
-      if (event.type === "RESET") {
-        return { count: 0, name: "", items: [] }
-      }
-      return context
-    })
-  }
-})
-```
-
-## Examples
-
-### Counter
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const counterMachine = setup({
-  types: {} as {
-    context: { count: number }
-    events:
-      | { type: "INCREMENT" }
-      | { type: "DECREMENT" }
-      | { type: "SET"; value: number }
-  },
-  actions: {
-    increment: assign({ count: ({ context }) => context.count + 1 }),
-    decrement: assign({ count: ({ context }) => context.count - 1 }),
-    set: assign({ count: ({ event }) => event.type === "SET" ? event.value : 0 })
+      total: ({ context, event }) => (event.type === "ADD" ? context.total + event.price : context.total)
+    }),
+    // A partial context
+    clear: assign({ count: 0, total: 0 }),
+    // An assigner that returns an Effect
+    double: assign(({ context }) => Effect.succeed({ total: context.total * 2 }))
   }
 }).createMachine({
-  id: "counter",
-  initial: "active",
-  context: { count: 0 },
-  states: {
-    active: {
-      on: {
-        INCREMENT: { actions: "increment" },
-        DECREMENT: { actions: "decrement" },
-        SET: { actions: "set" }
-      }
-    }
+  context: { count: 0, total: 0 },
+  on: {
+    ADD: { actions: "add" },
+    CLEAR: { actions: "clear" }
   }
 })
 ```
 
-### Form Fields
+## assignProperty
 
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
+### Signature
 
-export const formMachine = setup({
-  types: {} as {
-    context: {
-      fields: Record<string, string>
-      errors: Record<string, string>
-      touched: Record<string, boolean>
-    }
-    events:
-      | { type: "SET_FIELD"; field: string; value: string }
-      | { type: "BLUR_FIELD"; field: string }
-      | { type: "SET_ERROR"; field: string; error: string }
-      | { type: "CLEAR_ERRORS" }
-  },
-  actions: {
-    setField: assign({
-      fields: ({ context, event }) => {
-        if (event.type !== "SET_FIELD") return context.fields
-        return { ...context.fields, [event.field]: event.value }
-      }
-    }),
-    touchField: assign({
-      touched: ({ context, event }) => {
-        if (event.type !== "BLUR_FIELD") return context.touched
-        return { ...context.touched, [event.field]: true }
-      }
-    }),
-    setError: assign({
-      errors: ({ context, event }) => {
-        if (event.type !== "SET_ERROR") return context.errors
-        return { ...context.errors, [event.field]: event.error }
-      }
-    }),
-    clearErrors: assign({ errors: {} })
-  }
-}).createMachine({
-  id: "form",
-  initial: "editing",
-  context: { fields: {}, errors: {}, touched: {} },
-  states: {
-    editing: {
-      on: {
-        SET_FIELD: { actions: "setField" },
-        BLUR_FIELD: { actions: "touchField" },
-        SET_ERROR: { actions: "setError" },
-        CLEAR_ERRORS: { actions: "clearErrors" }
-      }
-    }
-  }
-})
+```ts
+import type { ActionContext, ActionDefinition, EventObject } from "@jambudipa/xstate-effect"
+
+export declare function assignProperty<TContext, TEvent extends EventObject, K extends keyof TContext, TParams = void>(
+  key: K,
+  value: TContext[K] | ((ctx: ActionContext<TContext, TEvent>, params: TParams) => TContext[K])
+): ActionDefinition<TContext, TEvent, TParams>
 ```
 
-### Immutable Updates
+### Parameters
 
-An `assign` written under an event in `on` reads that event's type, so it needs no check of `event.type`:
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `key` | `K extends keyof TContext` | The context key to set. Required. |
+| `value` | `TContext[K]` or a function of the action context and the params | The new value, or a property assigner that computes it. Required. |
 
-```typescript
-import { createMachine, assign } from "@jambudipa/xstate-effect"
+### Return value
 
-interface Item {
-  id: string
-  name: string
-  done: boolean
+An `ActionDefinition` with `type: "xstate.assign"`.
+
+### Behaviour
+
+- The action is `assign({ [key]: value })`: the same merge, the same arguments for a function value, and the same errors.
+- TypeScript does not infer `TContext` and `TEvent` from the place where the action is used. Give them as type arguments.
+- A custom action function that calls `assignProperty` gets no warning.
+
+### Errors
+
+The errors of [`assign`](#errors).
+
+### Example
+
+```ts
+import { assignProperty } from "@jambudipa/xstate-effect"
+
+interface Context {
+  readonly count: number
 }
 
-export const listMachine = createMachine({
-  types: {} as {
-    context: { items: Item[]; user: { profile: { name: string; bio: string } } }
-    events:
-      | { type: "ADD_ITEM"; item: Item }
-      | { type: "REMOVE_ITEM"; itemId: string }
-      | { type: "UPDATE_ITEM"; itemId: string; updates: Partial<Item> }
-      | { type: "SET_NAME"; name: string }
-  },
-  context: { items: [], user: { profile: { name: "", bio: "" } } },
-  on: {
-    // Adding to array
-    ADD_ITEM: {
-      actions: assign({
-        items: ({ context, event }) => [...context.items, event.item]
-      })
-    },
-    // Removing from array
-    REMOVE_ITEM: {
-      actions: assign({
-        items: ({ context, event }) =>
-          context.items.filter(item => item.id !== event.itemId)
-      })
-    },
-    // Updating array item
-    UPDATE_ITEM: {
-      actions: assign({
-        items: ({ context, event }) =>
-          context.items.map(item =>
-            item.id === event.itemId ? { ...item, ...event.updates } : item
-          )
-      })
-    },
-    // Updating nested object
-    SET_NAME: {
-      actions: assign({
-        user: ({ context, event }) => ({
-          ...context.user,
-          profile: {
-            ...context.user.profile,
-            name: event.name
-          }
-        })
-      })
-    }
-  }
-})
+type Event = { readonly type: "INC" }
+
+export const increment = assignProperty<Context, Event, "count">("count", ({ context }) => context.count + 1)
 ```
 
-## Notes
+## Types
 
-- `assign` always returns a new context object (immutable update)
-- Property assigners are evaluated in order
-- Every property assigner of one `assign` call reads the context from before the action, not the results of the other assigners
-- An assigner function may return an Effect of the properties to change; a failure of that Effect becomes the actor's error
-- Always handle the possibility that the event type doesn't match when using event data
-- Use TypeScript's type narrowing for type-safe event access
+| Type | Definition |
+| --- | --- |
+| `Assignment<TContext, TEvent, TParams = void, TSelfEvent = TEvent, TNames = ImplementationNames>` | `Partial<TContext> \| PropertyAssigner<…> \| Assigner<…>` |
+| `Assigner<TContext, TEvent, TParams = void, TSelfEvent = TEvent, TNames = ImplementationNames>` | `(ctx: ActionContext<TContext, TEvent, TSelfEvent, TNames>, params: TParams) => Partial<TContext> \| Effect.Effect<Partial<TContext>, unknown>` |
+| `PropertyAssigner<TContext, TEvent, TParams = void, TSelfEvent = TEvent, TNames = ImplementationNames>` | `{ readonly [K in keyof TContext]?: TContext[K] \| ((ctx: ActionContext<TContext, TEvent, TSelfEvent, TNames>, params: TParams) => TContext[K]) }` |
+| `Assign` | The interface of `assign`: the signature above, and the second signature that only defers the type check. |
+| `AssignArgs<TContext, TExpressionEvent, TEvent, TActor>` | The `ActionContext` that an assigner receives, whose `spawn` takes the provided actors `TActor`. |
+| `PartialAssigner<TContext, TExpressionEvent, TParams, TEvent, TActor, TKey>` | `(args: AssignArgs<TContext, TExpressionEvent, TEvent, TActor>, params: TParams) => TContext[TKey]` |
+| `AssignAction<TContext, TExpressionEvent, TParams, TEvent, TActor>` | `ActionDefinition<TContext, TExpressionEvent, AssignDefinitionParams<TParams>, never, ImplementationNames, TEvent> & ImplementsParams<TParams>` |
 
-## Common Patterns
+`AssignArgs`, `PartialAssigner` and `AssignAction` carry the names and type parameters of XState's types of the same names.
 
-### Type-Safe Event Access
+## Related
 
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const valueSetup = setup({
-  types: {} as {
-    context: { value: number | undefined }
-    events: { type: "SET_VALUE"; value: number } | { type: "CLEAR" }
-  },
-  actions: {
-    setValue: assign({
-      value: ({ event }) => {
-        // Type narrowing
-        if (event.type === "SET_VALUE") {
-          return event.value
-        }
-        return undefined
-      }
-    }),
-    // Or with a conditional expression
-    setValueInline: assign({
-      value: ({ event }) =>
-        event.type === "SET_VALUE" ? event.value : undefined
-    })
-  }
-})
-```
-
-### Conditional Assignment
-
-```typescript
-import { setup, assign } from "@jambudipa/xstate-effect"
-
-export const bounded = setup({
-  types: {} as {
-    context: { count: number; min: number; max: number }
-    events: { type: "INCREMENT" } | { type: "DECREMENT" }
-  },
-  actions: {
-    step: assign({
-      count: ({ context, event }) => {
-        if (event.type === "INCREMENT" && context.count < context.max) {
-          return context.count + 1
-        }
-        if (event.type === "DECREMENT" && context.count > context.min) {
-          return context.count - 1
-        }
-        return context.count
-      }
-    })
-  }
-})
-```
-
-## See Also
-
-- [Actions in the package entry points](../../../README.md#entry-points) - Every action that `@jambudipa/xstate-effect/actions` exports
-- [Working with Context](../../tutorials/02-working-with-context.md) - Tutorial 2 updates context with `assign`
+- [Keep data in context](../../tutorials/02-working-with-context.md): a lesson that uses `assign`.
+- [How to type a machine's context, events, input and output](../../how-to/define-custom-types.md)
+- [setup and setupWithSchema](../setup.md): the `actions` record and the bound `setup(...).assign`.
+- [spawnChild](./spawn-child.md) and [enqueueActions](./enqueue-actions.md)
+- [Errors](../errors.md): `ActorError`.
