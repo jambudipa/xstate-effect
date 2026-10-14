@@ -972,9 +972,11 @@ export const make = <
     persisted: unknown
   ) => Effect.Effect<TSnapshot, RestoreError, ActorScope | R>
 
+  // As the ActorLogic interface's: it runs in the actor's own scope (D12), so a fiber it forks
+  // with `Effect.forkScoped` lives until the actor ends, and `Scope` is no requirement of `R`
   readonly start?: (
     snapshot: TSnapshot
-  ) => Effect.Effect<void, StartError, ActorScope | R>
+  ) => Effect.Effect<void, StartError, ActorScope | Scope.Scope | R>
 
   readonly config?: unknown
 }): ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> => {

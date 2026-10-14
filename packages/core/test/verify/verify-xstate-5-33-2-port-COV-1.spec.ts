@@ -33,11 +33,14 @@
  *   `provide` adds the services of the given implementations.
  * - Guard names (`src/Types.ts`): an inline `and`, `or` or `not` in a setup machine's config
  *   names only the setup's guards, each with params of its type.
+ * - Custom logic (`src/ActorLogic.ts`): `makeActorLogic`'s `start` runs in the actor's scope,
+ *   so a fiber it forks with `Effect.forkScoped` adds no requirement and ends with the actor.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Chunk, Context, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ActorClass, allocateChild, buildChild, createSpawnFunction, restoreChild } from "../../src/Actor.js"
+import type * as ActorLogicModule from "../../src/ActorLogic.js"
 import { ActorScope, type ActorScopeService, createGuardContext } from "../../src/ActorLogic.js"
 import * as ActorRefModule from "../../src/ActorRef.js"
 import {
@@ -1321,6 +1324,33 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
 
       assert.strictEqual((yield* actor.getSnapshot).value, "gone")
       assert.strictEqual(typeof unknownNames, "function")
+    })
+  )
+
+  it.effect("[COV-1] makeActorLogic's start runs in the actor's scope: a fiber it forks with forkScoped adds no requirement and is interrupted when the actor stops", () =>
+    Effect.gen(function* () {
+      const events: Array<string> = []
+      const ticking = makeActorLogic({
+        transition: (snapshot: SnapshotType) => Effect.succeed(snapshot),
+        getInitialSnapshot: () => Effect.succeed(active()),
+        getPersistedSnapshot: (snapshot) => Effect.succeed(snapshot),
+        start: () =>
+          Effect.asVoid(
+            Effect.forkScoped(
+              Effect.never.pipe(Effect.onInterrupt(() => Effect.sync(() => events.push("interrupted"))))
+            )
+          ),
+      })
+      typeHolds<[ActorLogicModule.ActorLogic.RequirementsOf<typeof ticking>] extends [never] ? true : false>(true)
+
+      const actor = yield* createActor(ticking)
+      yield* actor.start
+      yield* Effect.yieldNow
+      const beforeStop = [...events]
+      yield* actor.stop
+
+      assert.deepStrictEqual(beforeStop, [])
+      assert.deepStrictEqual(events, ["interrupted"])
     })
   )
 })
