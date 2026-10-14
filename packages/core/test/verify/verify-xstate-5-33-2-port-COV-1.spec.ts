@@ -28,9 +28,12 @@
  *   events that each fired delivery sent within the system are processed.
  * - Schema setup (`src/setup.ts`, `src/StateMachine.ts`): a machine from `setupWithSchema`
  *   checks each event, its context, its input and its output against the schemas' types.
+ * - Requirements (`src/Types.ts`, `src/setup.ts`, `src/StateMachine.ts`, SD-8): a setup
+ *   machine requires the services of its config's inline actions and inline logic, and
+ *   `provide` adds the services of the given implementations.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Chunk, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
+import { Cause, Chunk, Context, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ActorClass, allocateChild, buildChild, createSpawnFunction, restoreChild } from "../../src/Actor.js"
 import { ActorScope, type ActorScopeService, createGuardContext } from "../../src/ActorLogic.js"
@@ -51,6 +54,7 @@ import {
   makeMachineSnapshot,
   type MachineSnapshot,
   sendTo,
+  setup,
   setupWithSchema,
   type SnapshotType,
   spawnChild,
@@ -66,6 +70,20 @@ import * as Types from "../../src/Types.js"
 import { guardEvaluationFailed } from "./upstream-messages.js"
 
 // ---------------------------------------------------------------- helpers
+
+/** Compiles only for `true`. */
+const typeHolds = <T extends true>(holds: T): T => holds
+
+/** The services a machine's transitions require, without the actor scope every machine needs. */
+type ServicesOf<TMachine> = TMachine extends { readonly transition: (...args: never) => Effect.Effect<infer _A, infer _E, infer R> }
+  ? Exclude<R, ActorScope>
+  : never
+
+/** A service an inline action reads. */
+class Mailbox extends Context.Service<Mailbox, { readonly sent: Array<string> }>()("cov1/Mailbox") {}
+
+/** A service a replacement action reads. */
+class Audit extends Context.Service<Audit, { readonly lines: Array<string> }>()("cov1/Audit") {}
 
 /** A value through `JSON.stringify` and `JSON.parse`, as a stored snapshot comes back. */
 const throughJson = (value: unknown): unknown => {
@@ -1199,6 +1217,47 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
       yield* finished.start
       yield* finished.send({ type: "FINISH" })
       assert.deepStrictEqual((yield* finished.getSnapshot).output, Option.some({ total: 12 }))
+    })
+  )
+
+  it.effect("[COV-1] a setup machine requires the services of its inline actions, and provide adds the services of the given implementations", () =>
+    Effect.gen(function* () {
+      const machine = setup({
+        types: {} as { events: { type: "SEND" } },
+        actions: { record: () => {} },
+      }).createMachine({
+        initial: "idle",
+        states: {
+          idle: {
+            on: {
+              SEND: {
+                target: "sent",
+                actions: [
+                  "record",
+                  () => Effect.gen(function* () { (yield* Mailbox).sent.push("hello") }),
+                ],
+              },
+            },
+          },
+          sent: {},
+        },
+      })
+      const audited = machine.provide({
+        actions: { record: () => Effect.gen(function* () { (yield* Audit).lines.push("record") }) },
+      })
+      typeHolds<[ServicesOf<typeof machine>] extends [Mailbox] ? ([Mailbox] extends [ServicesOf<typeof machine>] ? true : false) : false>(true)
+      typeHolds<[ServicesOf<typeof audited>] extends [Mailbox | Audit] ? ([Mailbox | Audit] extends [ServicesOf<typeof audited>] ? true : false) : false>(true)
+
+      const sent: Array<string> = []
+      const lines: Array<string> = []
+      yield* Effect.gen(function* () {
+        const actor = yield* createActor(audited)
+        yield* actor.start
+        yield* actor.send({ type: "SEND" })
+      }).pipe(Effect.provideService(Mailbox, { sent }), Effect.provideService(Audit, { lines }))
+
+      assert.deepStrictEqual(sent, ["hello"])
+      assert.deepStrictEqual(lines, ["record"])
     })
   )
 })

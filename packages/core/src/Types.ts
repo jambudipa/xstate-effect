@@ -2053,6 +2053,86 @@ export type DelayConfig<TContext, TEvent extends EventObject> =
   | DelayFunction<TContext, TEvent, never>
 
 /**
+ * What the Effect `T` requires (its `R`): nothing for a value that is not an Effect, and
+ * nothing for `any` (a mock such as `vi.fn()` returns `any`, which would otherwise require
+ * `unknown`).
+ *
+ * @since 0.2.1
+ * @category Types
+ */
+export type EffectRequirementsOf<T> = 0 extends 1 & T ? never : T extends Effect.Effect<infer _A, infer _E, infer R> ? R : never
+
+/**
+ * The services an action needs (SD-8): what the Effect an inline function returns requires,
+ * or what the Effect the `exec` of a definition returns requires. A name or a
+ * `{ type, params }` use needs nothing here: its implementation counts where it is given. An
+ * array of actions needs what each one needs.
+ *
+ * @since 0.2.1
+ * @category Types
+ */
+export type ActionRequirementsOf<TAction> = TAction extends ReadonlyArray<infer TEach>
+  ? ActionRequirementsOf<TEach>
+  : TAction extends (...args: never) => infer TResult
+    ? EffectRequirementsOf<TResult>
+    : TAction extends { readonly exec: (...args: never) => infer TResult }
+      ? EffectRequirementsOf<TResult>
+      : never
+
+/** The services the actions of a transition config need: one config, an array of them, or a target. */
+type TransitionRequirementsOf<TTransition> = TTransition extends ReadonlyArray<infer TEach>
+  ? TransitionRequirementsOf<TEach>
+  : TTransition extends { readonly actions: infer TActions }
+    ? ActionRequirementsOf<TActions>
+    : never
+
+/** The services an `invoke` config needs: its inline actor logic, and the actions of its transitions. */
+type InvokeRequirementsOf<TInvoke> = TInvoke extends ReadonlyArray<infer TEach>
+  ? InvokeRequirementsOf<TEach>
+  :
+      | (TInvoke extends { readonly src: infer TSrc } ? (TSrc extends string ? never : ActorLogic.RequirementsOf<TSrc>) : never)
+      | (TInvoke extends { readonly onDone: infer TDone } ? TransitionRequirementsOf<TDone> : never)
+      | (TInvoke extends { readonly onError: infer TError } ? TransitionRequirementsOf<TError> : never)
+      | (TInvoke extends { readonly onSnapshot: infer TSnapshot } ? TransitionRequirementsOf<TSnapshot> : never)
+
+/**
+ * The services a machine config as written needs (SD-8): the Effects of its inline actions
+ * (`entry`, `exit`, and the actions of `on`, `always`, `after`, `onDone` and `invoke`
+ * transitions) and its inline actor logic (an `invoke` src that is logic), in every state.
+ * Named actions and actors count through the implementations instead. A config typed as a
+ * whole, with any state key, needs nothing here.
+ *
+ * @since 0.2.1
+ * @category Types
+ */
+export type ConfigRequirementsOf<TConfig> =
+  | (TConfig extends { readonly entry: infer TEntry } ? ActionRequirementsOf<TEntry> : never)
+  | (TConfig extends { readonly exit: infer TExit } ? ActionRequirementsOf<TExit> : never)
+  | (TConfig extends { readonly on: infer TOn } ? { readonly [K in keyof TOn]: TransitionRequirementsOf<TOn[K]> }[keyof TOn] : never)
+  | (TConfig extends { readonly always: infer TAlways } ? TransitionRequirementsOf<TAlways> : never)
+  | (TConfig extends { readonly after: infer TAfter } ? { readonly [K in keyof TAfter]: TransitionRequirementsOf<TAfter[K]> }[keyof TAfter] : never)
+  | (TConfig extends { readonly onDone: infer TDone } ? TransitionRequirementsOf<TDone> : never)
+  | (TConfig extends { readonly invoke: infer TInvoke } ? InvokeRequirementsOf<TInvoke> : never)
+  | (TConfig extends { readonly states: infer TStates }
+      ? string extends keyof TStates ? never : { readonly [K in keyof TStates]: ConfigRequirementsOf<TStates[K]> }[keyof TStates]
+      : never)
+
+/**
+ * The services the implementations given to a machine's `provide` need (SD-8): what each
+ * action's Effect requires, and the requirements of each actor logic.
+ *
+ * @since 0.2.1
+ * @category Types
+ */
+export type ImplementationsRequirementsOf<TImplementations> =
+  | (TImplementations extends { readonly actions: infer TActions }
+      ? { readonly [K in keyof TActions]: ActionRequirementsOf<TActions[K]> }[keyof TActions]
+      : never)
+  | (TImplementations extends { readonly actors: infer TActors }
+      ? { readonly [K in keyof TActors]: ActorLogic.RequirementsOf<TActors[K]> }[keyof TActors]
+      : never)
+
+/**
  * Machine implementations for actions, guards, actors, and delays: any name in each record.
  * A machine whose `types` declare names takes {@link DeclaredImplementations} instead.
  *

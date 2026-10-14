@@ -23,6 +23,8 @@ import { sendTo, type SendToOptions, type SendToTarget, type SendToTargetEvent }
 import { spawnChild, type SpawnChildArguments, type UntypedSpawnChildOptions } from "./actions/spawnChild.js"
 import { stopChild, type StopChildTarget } from "./actions/stopChild.js"
 import type {
+  ActionRequirementsOf,
+  ConfigRequirementsOf,
   MachineConfig,
   MachineConfigMembers,
   MachineImplementations,
@@ -217,19 +219,6 @@ export type SetupConfigMembers<
 >
 
 /**
- * What the Effect `T` requires; nothing for a value that is not an Effect, and nothing for
- * `any` (a mock such as `vi.fn()` returns `any`, which would otherwise require `unknown`).
- */
-type EffectRequirementsOf<T> = 0 extends 1 & T ? never : T extends Effect.Effect<infer _A, infer _E, infer R> ? R : never
-
-/** The services one action implementation needs: what the Effect it returns (or its `exec` returns) requires. */
-type ActionRequirementsOf<TAction> = TAction extends (...args: never) => infer TResult
-  ? EffectRequirementsOf<TResult>
-  : TAction extends { readonly exec: (...args: never) => infer TResult }
-    ? EffectRequirementsOf<TResult>
-    : never
-
-/**
  * The services the machines of a setup need (their `R`, SD-8): what the Effect each action
  * returns requires, and the requirements of each actor logic, so `createActor` of a setup
  * machine asks the caller for them. A record not given (its `string`-keyed default) needs none.
@@ -340,7 +329,7 @@ export type SetupCreateMachine<
   TProvided,
   SetupChildren<TChildrenMap, TNames["actorLogic"], TConfig>,
   TTag,
-  TRequirements
+  TRequirements | ConfigRequirementsOf<TConfig>
 >
 
 /**

@@ -46,6 +46,7 @@ import type {
 } from "./Errors.js"
 import * as Errors from "./Errors.js"
 import type {
+  ImplementationsRequirementsOf,
   MachineConfig,
   MachineImplementations,
   DeclaredImplementations,
@@ -324,10 +325,29 @@ export interface StateMachine<
    * })
    * const tested = machine.provide({ actions: { track: (_, params) => console.log(params.id) } })
    * ```
+   *
+   * The new machine requires this machine's services and the services the given
+   * implementations need (`ImplementationsRequirementsOf`), so a replacement action whose
+   * Effect reads a new service adds that service to `createActor`'s requirements.
    */
-  provide(
-    implementations: TProvided
-  ): StateMachine<Id, TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta, TStateSchema, TProvided, TStateValue, TChildren, TTag>
+  provide<const TGiven extends TProvided>(
+    implementations: TGiven
+  ): StateMachine<
+    Id,
+    TContext,
+    TEvent,
+    TInput,
+    TOutput,
+    TEmitted,
+    R | ImplementationsRequirementsOf<TGiven>,
+    TStateMeta,
+    TTransitionMeta,
+    TStateSchema,
+    TProvided,
+    TStateValue,
+    TChildren,
+    TTag
+  >
 
   /**
    * Creates a new machine with different context. Its {@link provide} takes the wide
@@ -2012,10 +2032,14 @@ type CreatedMachineImplementations<
  * Without declared events the event type is `AnyEventObject`, as upstream: an event with any
  * other members.
  *
- * The Effect requirement `R` is never inferred: the config holds no place for it, so it is
- * `never` unless given as a type argument. `NoInfer` keeps the call's context from choosing
- * it, so `createActor(createMachine({ ... }))` gives the same machine type as a machine built
- * first, and its actor needs only a `Scope`. The call's context never chooses the event type
+ * The Effect requirement `R` is never inferred: XState types `config` and `implementations`
+ * by the declared types alone, not as written (its excess-name errors depend on that), and
+ * the port keeps that inference, so neither the config's inline actions nor the given
+ * implementations add services here. Use `setup`, whose `createMachine` reads the config as
+ * written and whose records carry their types, for a machine whose actions need services.
+ * `R` is `never` unless given as a type argument; `NoInfer` keeps the call's context from
+ * choosing it, so `createActor(createMachine({ ... }))` gives the same machine type as a
+ * machine built first, and its actor needs only a `Scope`. The call's context never chooses the event type
  * either (see `CreatedMachineEvent`): a machine written inline where any logic is
  * expected (an invocation's `src`) keeps the event type of its own config, as a machine built
  * first does.
