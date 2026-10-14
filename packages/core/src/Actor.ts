@@ -290,7 +290,7 @@ export interface Actor<
    * actor errors, the stream fails with the actor's original error, also when it runs after
    * the error; it never gives a snapshot with status `error` (SD-4). A running stream is an
    * observer with an error listener: an actor whose errors reach one reports nothing through
-   * its logger (SD-21).
+   * the Effect logger (SD-21).
    *
    * This is the Effect-idiomatic way to observe snapshot changes,
    * allowing use of all Stream combinators.
@@ -315,8 +315,8 @@ export interface Actor<
    * for them); at a stop it receives the active snapshot that a transition logic gives for the
    * stop event (upstream). An observer that throws, fails or dies is reported through the
    * logger and keeps its subscription (SD-21). It is an observer without an error listener,
-   * so an actor that errors while it is subscribed reports the error through its logger
-   * (upstream `_reportError`). The subscription ends when the caller's scope closes.
+   * so an actor that errors while it is subscribed reports the error through the Effect
+   * logger (upstream `_reportError`). The subscription ends when the caller's scope closes.
    */
   readonly subscribe: (
     observer: (snapshot: TSnapshot) => Effect.Effect<void>
@@ -802,7 +802,7 @@ const unregisterRecursively = (system: ActorSystemService, ref: AR.ActorRefBase)
  *   stops, its scope closes (its children stop, SD-27), its `changes` streams fail with the
  *   value, and its parent receives `xstate.error.actor.<id>` with the raw value. A root actor
  *   that no observer with an error listener watches, or that a `subscribe` callback watches,
- *   reports the value once through its logger (SD-21).
+ *   reports the value once through the Effect logger (`Effect.logError`, SD-21).
  * - It takes an `AnyStateMachine` too (upstream `createActor(machine: AnyStateMachine)`, as
  *   the SCXML runner holds one): the actor's snapshots are `AnyMachineSnapshot`s and its
  *   events `EventObject`s; and an `AnyActorLogic`, which gives the root `AnyActor` (see

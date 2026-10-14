@@ -488,8 +488,10 @@ amendment changes its decision from that date on.
   symmetric `StateValue.matches` rule stays because `StateValue.matches` is kept) are
   rewritten by the task that changes the behaviour.
 - **SD-21 Unhandled errors and listener errors.** A root actor with no parent and no error
-  subscriber reports an unhandled error once through its logger (`Effect.logError` by
-  default, replaceable through the `logger` option); upstream rethrows asynchronously
+  subscriber reports an unhandled error once with `Effect.logError`, through the Effect
+  `Logger` of the fiber that meets it, which a program replaces as it replaces any Effect
+  logger (amended 2026-10-14: the actor's `logger` option is XState's, for the output of
+  `log` actions only, and never received these errors); upstream rethrows asynchronously
   through `reportUnhandledError`, which an Effect library must not do (ledger row).
   Errors thrown by `actor.on` listeners and inspection functions are reported the same way
   and never change the actor status (upstream `createActor.ts`). Rewrites replace
