@@ -511,7 +511,9 @@ export interface ActorLogic<
   /**
    * Restores a snapshot from persisted state.
    *
-   * Optional - if not provided, actors cannot be restored from persistence.
+   * Optional. Without it, an actor created with the `snapshot` option takes the persisted
+   * value as its snapshot, unchanged (upstream `this.logic.restoreSnapshot ? ... :
+   * options.snapshot`), so the persisted form must already be a valid snapshot.
    */
   readonly restoreSnapshot?: (
     persisted: unknown
