@@ -64,6 +64,12 @@ them in the `testing` namespace (`testing.transition`); there is no `/testing` s
   types from the logic's own `transition` method: its snapshot type, its event type, the
   services that it needs and the error that it fails with. The signature blocks declare this as
   `TransitionTypes<TLogic>`. The package does not export that name.
+- **The types of the actions.** The action arrays name the special built-in actions and each
+  action that the machine names, with the params of its uses. See
+  [`ExecutableActionsFrom`](#executableactionsfrom). `initialTransition` and
+  `getInitialMicrosteps` take the logic as given (`TLogic`, `TMachine`) to read those names. Their
+  signature blocks declare the named actions as `NamedExecutableActions<TLogic>`, which the
+  package does not export either.
 
 ## getInitialSnapshot
 
@@ -212,25 +218,33 @@ import type {
   ActorLogic,
   AnyMachineSnapshot,
   EventObject,
+  ExecutableActionsFrom,
   InitializationError,
   Snapshot,
   SpecialExecutableAction
 } from "@jambudipa/xstate-effect"
 
-// The element type of the actions: the built-in actions for a machine, none for other logic
+// The special built-in actions for a machine, none for other logic
 type ExecutableActionsOf<TSnapshot> = TSnapshot extends AnyMachineSnapshot ? SpecialExecutableAction : never
+
+// The actions that the logic names, each with the params of its uses
+type NamedExecutableActions<TLogic> = Exclude<ExecutableActionsFrom<TLogic>, SpecialExecutableAction>
 
 export declare function initialTransition<
   TSnapshot extends Snapshot,
   TEvent extends EventObject,
   TInput,
   TEmitted extends EventObject,
-  R
+  R,
+  TLogic = unknown
 >(
-  logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>,
+  logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & TLogic,
   ...[input]: undefined extends TInput ? [input?: TInput] : [input: TInput]
 ): Effect.Effect<
-  readonly [nextSnapshot: TSnapshot, actions: Array<ExecutableActionsOf<TSnapshot>>],
+  readonly [
+    nextSnapshot: TSnapshot,
+    actions: Array<ExecutableActionsOf<TSnapshot> | NamedExecutableActions<TLogic>>
+  ],
   InitializationError,
   Exclude<R, Scope.Scope>
 >
@@ -240,7 +254,7 @@ export declare function initialTransition<
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `logic` | `ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>` | A machine or any other actor logic. |
+| `logic` | `ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & TLogic` | A machine or any other actor logic. `TLogic` is its type as given, which carries the names of a machine's actions. |
 | `input` | `TInput` | The input. Optional when the input type admits `undefined`. |
 
 ### Returns
@@ -257,16 +271,22 @@ transition, entry actions included, in the order that they would run.
 - The snapshot equals the one that `getInitialSnapshot` gives for the same input.
 - What the context factory or an entry `assign` throws gives a snapshot with status `error`, as
   in `getInitialSnapshot`.
-- The array type names only the `SpecialExecutableAction` members for a machine, and `never`
-  for other logic. At run time, a machine's array also holds the custom actions and the other
-  built-in actions, each as an [`ExecutableActionObject`](#executableactionobject). The array of
-  any other logic is empty.
+- For a machine, the array type names the special built-in actions (`xstate.raise`,
+  `xstate.sendTo` and `xstate.spawnChild`) and each action that the machine names: an action of
+  the setup's `actions` record, or an action that the machine's `types` declare. A named action
+  is a [`ToExecutableAction`](#toexecutableaction) with the params of its uses, so a check such
+  as `action.type === "track"` narrows `action.params` to the params of `track`.
+- At run time, a machine's array also holds its inline actions and the other built-in actions
+  (`log`, `emit`, `cancel` and `stopChild`), each as an
+  [`ExecutableActionObject`](#executableactionobject). The array type does not name them, as in
+  XState.
+- For any other logic, the array is empty and its element type is `never`.
 
 ### Example
 
 ```ts
 import { Effect } from "effect"
-import { initialTransition, setup, type ExecutableActionObject } from "@jambudipa/xstate-effect"
+import { initialTransition, setup } from "@jambudipa/xstate-effect"
 
 const light = setup({
   actions: { turnOn: () => Effect.void }
@@ -279,7 +299,7 @@ export const program = Effect.gen(function* () {
   const [snapshot, actions] = yield* initialTransition(light)
   return {
     value: snapshot.value, // "on"
-    types: actions.map((action: ExecutableActionObject) => action.type) // ["turnOn"]
+    types: actions.map((action) => action.type) // ["turnOn"]
   }
 })
 ```
@@ -291,11 +311,10 @@ import type { Effect } from "effect"
 import type {
   ActorScope,
   AnyActorLogic,
-  AnyMachineSnapshot,
   EventObject,
+  ExecutableActionsFrom,
   GuardError,
-  Snapshot,
-  SpecialExecutableAction
+  Snapshot
 } from "@jambudipa/xstate-effect"
 
 // The snapshot, event, services and error of the logic's own `transition`
@@ -308,9 +327,6 @@ type TransitionTypes<TLogic> = TLogic extends {
   ? readonly [snapshot: TSnapshot, event: TEvent, requirements: R, error: E]
   : never
 
-// The element type of the actions: the built-in actions for a machine, none for other logic
-type ExecutableActionsOf<TSnapshot> = TSnapshot extends AnyMachineSnapshot ? SpecialExecutableAction : never
-
 export declare function transition<TLogic extends AnyActorLogic>(
   logic: TLogic,
   snapshot: TransitionTypes<TLogic>[0],
@@ -318,7 +334,7 @@ export declare function transition<TLogic extends AnyActorLogic>(
 ): Effect.Effect<
   readonly [
     nextSnapshot: TransitionTypes<TLogic>[0],
-    actions: Array<ExecutableActionsOf<TransitionTypes<TLogic>[0]>>
+    actions: Array<ExecutableActionsFrom<TLogic>>
   ],
   TransitionTypes<TLogic>[3] | GuardError,
   Exclude<TransitionTypes<TLogic>[2], ActorScope>
@@ -346,22 +362,24 @@ order that the transition handed them to the action executor.
   the event's microstep, then those of each eventless and raised-event microstep.
 - A raise without a delay is in the actions, although the macrostep has already processed its
   event. A delayed raise and an `after` timer are `xstate.raise` actions with their `delay`.
-- The array type is the one that [`initialTransition`](#initialtransition) describes: at run
-  time it also holds custom actions and the other built-in actions.
+- The array type is [`ExecutableActionsFrom<TLogic>`](#executableactionsfrom), as for
+  [`initialTransition`](#initialtransition): the special built-in actions and the actions that
+  the machine names, each with the params of its uses. At run time the array also holds inline
+  actions and the other built-in actions, which the type does not name.
 
 ### Example
 
 ```ts
 import { Effect } from "effect"
-import { initialTransition, setup, transition, type ExecutableActionObject } from "@jambudipa/xstate-effect"
+import { initialTransition, setup, transition } from "@jambudipa/xstate-effect"
 
 const toggle = setup({
   types: {} as { events: { type: "TOGGLE" } },
-  actions: { notify: () => Effect.void }
+  actions: { track: (_, params: { readonly id: string }) => Effect.log(params.id) }
 }).createMachine({
   initial: "off",
   states: {
-    off: { on: { TOGGLE: { target: "on", actions: "notify" } } },
+    off: { on: { TOGGLE: { target: "on", actions: { type: "track", params: { id: "switched-on" } } } } },
     on: { on: { TOGGLE: "off" } }
   }
 })
@@ -371,7 +389,9 @@ export const program = Effect.gen(function* () {
   const [next, actions] = yield* transition(toggle, initial, { type: "TOGGLE" })
   return {
     value: next.value, // "on"
-    types: actions.map((action: ExecutableActionObject) => action.type) // ["notify"]
+    types: actions.map((action) => action.type), // ["track"]
+    // The type names `track` with its params, so the check narrows `action.params`
+    ids: actions.flatMap((action) => (action.type === "track" ? [action.params.id] : [])) // ["switched-on"]
   }
 })
 ```
@@ -386,6 +406,7 @@ import type {
   AnyMachineSnapshot,
   AnyStateMachine,
   EventObject,
+  ExecutableActionsFrom,
   GuardError,
   InitializationError,
   Snapshot,
@@ -394,20 +415,29 @@ import type {
   TransitionError
 } from "@jambudipa/xstate-effect"
 
-// The element type of the actions: the built-in actions for a machine
+// The special built-in actions for a machine
 type ExecutableActionsOf<TSnapshot> = TSnapshot extends AnyMachineSnapshot ? SpecialExecutableAction : never
+
+// The actions that the machine names, each with the params of its uses
+type NamedExecutableActions<TMachine> = Exclude<ExecutableActionsFrom<TMachine>, SpecialExecutableAction>
 
 export declare function getInitialMicrosteps<
   TSnapshot extends Snapshot,
   TEvent extends EventObject,
   TInput,
   TEmitted extends EventObject,
-  R
+  R,
+  TMachine = unknown
 >(
-  machine: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & Pick<AnyStateMachine, StateMachineTypeId>,
+  machine: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & Pick<AnyStateMachine, StateMachineTypeId> & TMachine,
   ...[input]: undefined extends TInput ? [input?: TInput] : [input: TInput]
 ): Effect.Effect<
-  Array<readonly [snapshot: TSnapshot, actions: Array<ExecutableActionsOf<TSnapshot>>]>,
+  Array<
+    readonly [
+      snapshot: TSnapshot,
+      actions: Array<ExecutableActionsOf<TSnapshot> | NamedExecutableActions<TMachine>>
+    ]
+  >,
   InitializationError | TransitionError | GuardError,
   Exclude<Exclude<R, ActorScope>, Scope.Scope>
 >
@@ -417,7 +447,7 @@ export declare function getInitialMicrosteps<
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `machine` | a state machine | Only a state machine; other actor logic is a type error. |
+| `machine` | a state machine | Only a state machine; other actor logic is a type error. `TMachine` is its type as given, which carries the names of its actions. |
 | `input` | `TInput` | The input. Optional when the input type admits `undefined`. |
 
 ### Returns
@@ -436,6 +466,8 @@ guard throws. Any other value that the initialization throws is a defect.
 
 - No action runs. The context factory runs, so each snapshot holds the context of its
   microstep.
+- The actions of each microstep have the types that [`initialTransition`](#initialtransition)
+  describes.
 
 ### Example
 
@@ -467,12 +499,11 @@ export const program = Effect.gen(function* () {
 import type { Effect } from "effect"
 import type {
   ActorScope,
-  AnyMachineSnapshot,
   AnyStateMachine,
   EventObject,
+  ExecutableActionsFrom,
   GuardError,
-  Snapshot,
-  SpecialExecutableAction
+  Snapshot
 } from "@jambudipa/xstate-effect"
 
 // The snapshot, event, services and error of the machine's own `transition`
@@ -485,9 +516,6 @@ type TransitionTypes<TLogic> = TLogic extends {
   ? readonly [snapshot: TSnapshot, event: TEvent, requirements: R, error: E]
   : never
 
-// The element type of the actions: the built-in actions for a machine
-type ExecutableActionsOf<TSnapshot> = TSnapshot extends AnyMachineSnapshot ? SpecialExecutableAction : never
-
 export declare function getMicrosteps<TMachine extends AnyStateMachine>(
   machine: TMachine,
   snapshot: TransitionTypes<TMachine>[0],
@@ -496,7 +524,7 @@ export declare function getMicrosteps<TMachine extends AnyStateMachine>(
   Array<
     readonly [
       snapshot: TransitionTypes<TMachine>[0],
-      actions: Array<ExecutableActionsOf<TransitionTypes<TMachine>[0]>>
+      actions: Array<ExecutableActionsFrom<TMachine>>
     ]
   >,
   TransitionTypes<TMachine>[3] | GuardError,
@@ -529,6 +557,8 @@ microstep of the event first, then each eventless and raised-event microstep.
 - A snapshot that is not active (`done`, `error` or `stopped`) gives the first microstep only.
   A `done` snapshot stays `done`, and the microstep holds the exit actions of every active
   state node.
+- The actions of each microstep have the type
+  [`ExecutableActionsFrom<TMachine>`](#executableactionsfrom).
 
 ### Example
 
@@ -679,9 +709,35 @@ export type SpecialExecutableAction =
 
 ## ExecutableActionsFrom
 
-`ExecutableActionsFrom<TLogic>` is `SpecialExecutableAction` when the snapshot type of `TLogic`
-is a machine snapshot, and `never` for any other logic. The machine type does not carry the
-names of its actions, so the type has no member for a named action.
+The element type of the action arrays that the pure functions give for a logic.
+
+| Logic | `ExecutableActionsFrom<TLogic>` |
+| --- | --- |
+| A machine that names actions | `SpecialExecutableAction`, and for each named action a `ToExecutableAction` with the name as its `type` and the params of its uses as its `params`. |
+| A machine that names no action | `SpecialExecutableAction`. |
+| Any other logic | `never`. |
+
+A machine names the actions of its setup's `actions` record, or the actions that its `types`
+declare. The params of a named action are the type of the second parameter of its
+implementation, or the `params` that `types` declares for it.
+
+Inline actions and the other built-in actions (`log`, `emit`, `cancel` and `stopChild`) are not
+members of the type, as in XState. They are in the arrays at run time, each as an
+[`ExecutableActionObject`](#executableactionobject). `assign` is never in the arrays.
+
+```ts
+import { setup, type ExecutableActionsFrom } from "@jambudipa/xstate-effect"
+
+export const machine = setup({
+  types: {} as { events: { type: "SAVE" } },
+  actions: { track: (_, params: { readonly id: string }) => console.log(params.id) }
+}).createMachine({
+  on: { SAVE: { actions: { type: "track", params: { id: "save" } } } }
+})
+
+// SpecialExecutableAction | ToExecutableAction<{ type: "track"; params: { readonly id: string } }>
+export type MachineAction = ExecutableActionsFrom<typeof machine>
+```
 
 ## ToExecutableAction
 

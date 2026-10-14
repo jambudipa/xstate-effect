@@ -173,7 +173,7 @@ export const machine = createMachine({
 import type { BuiltInGuardDefinition, EventObject, Guard, MachineImplementations } from "@jambudipa/xstate-effect"
 
 // Simplified: the full type also records the guard names that the list holds,
-// which a setup checks against its own guards
+// which a machine with named guards checks against its own guards
 export declare function and<TContext, TEvent extends EventObject>(
   guards: ReadonlyArray<Guard<TContext, TEvent>>,
   implementations?: MachineImplementations<TContext, TEvent>
@@ -204,8 +204,11 @@ A `BuiltInGuardDefinition` with `type: "xstate.and"` and `params: { guards, impl
 - Passes when every guard passes. An empty list passes.
 - A name or `{ type, params }` resolves against the machine's implementations, or the
   `implementations` argument when given, at any depth of nesting.
-- In a setup machine, the type checker checks the names that `and` holds against the setup's
-  guards and their params.
+- In a machine with named guards (a setup with `guards`, or a machine whose `types` declare
+  `guards`), the type checker checks each name that `and` holds, at any depth, against those
+  guards: an unknown name, or a name without the params that its guard's type needs, is a type
+  error. The check is the same for an `and` written inline as a transition's guard and for one
+  in the setup's `guards` record. Without named guards, any name and any params pass.
 
 ### Errors
 
@@ -247,7 +250,7 @@ export const machine = setup({
 import type { BuiltInGuardDefinition, EventObject, Guard, MachineImplementations } from "@jambudipa/xstate-effect"
 
 // Simplified: the full type also records the guard names that the list holds,
-// which a setup checks against its own guards
+// which a machine with named guards checks against its own guards
 export declare function or<TContext, TEvent extends EventObject>(
   guards: ReadonlyArray<Guard<TContext, TEvent>>,
   implementations?: MachineImplementations<TContext, TEvent>
@@ -276,7 +279,7 @@ A `BuiltInGuardDefinition` with `type: "xstate.or"` and `params: { guards, imple
 
 - Evaluates each guard in order through `evaluateGuard` and stops at the first one that passes.
 - Passes when any guard passes. An empty list fails.
-- Names resolve as for [`and`](#and).
+- Names resolve, and the type checker checks them, as for [`and`](#and).
 
 ### Errors
 
@@ -321,7 +324,7 @@ export const machine = setup({
 import type { BuiltInGuardDefinition, EventObject, Guard, MachineImplementations } from "@jambudipa/xstate-effect"
 
 // Simplified: the full type also records the guard names that the argument holds,
-// which a setup checks against its own guards
+// which a machine with named guards checks against its own guards
 export declare function not<TContext, TEvent extends EventObject>(
   guard: Guard<TContext, TEvent>,
   implementations?: MachineImplementations<TContext, TEvent>
@@ -348,8 +351,8 @@ A `BuiltInGuardDefinition` with `type: "xstate.not"` and `params: { guard, imple
 
 ### Behaviour
 
-Evaluates `guard` through `evaluateGuard` and passes when it fails. Names resolve as for
-[`and`](#and).
+Evaluates `guard` through `evaluateGuard` and passes when it fails. Names resolve, and the type
+checker checks them, as for [`and`](#and).
 
 ### Errors
 
@@ -471,12 +474,24 @@ export const program = Effect.gen(function* () {
 ### Definition
 
 ```ts
-import type { EventObject, GuardDefinition, GuardPredicate, GuardReference, ImplementationNames } from "@jambudipa/xstate-effect"
+import type {
+  EventObject,
+  GuardDefinition,
+  GuardPredicate,
+  GuardReference,
+  ImplementationNames,
+  ParameterizedObject
+} from "@jambudipa/xstate-effect"
+
+// The check on a built-in guard written inline; the package does not export this name
+type ReferencedGuardsCheck<TGuards extends ParameterizedObject> = string extends TGuards["type"]
+  ? unknown
+  : { readonly "~guards"?: TGuards }
 
 export type Guard<TContext, TEvent extends EventObject, TNames extends ImplementationNames = ImplementationNames> =
   | GuardReference<TContext, TEvent, TNames["guards"]>
   | GuardPredicate<TContext, TEvent>
-  | Pick<GuardDefinition<TContext, TEvent, never>, "type" | "predicate">
+  | (Pick<GuardDefinition<TContext, TEvent, never>, "type" | "predicate"> & ReferencedGuardsCheck<TNames["guards"]>)
 ```
 
 A guard in one of these forms:
@@ -489,8 +504,15 @@ A guard in one of these forms:
 | A guard definition | `stateIn("ready")`, `and([...])` |
 
 `TNames` holds the guard names a reference may name, with their params. With the default, any
-name and any params are accepted. With declared guards (a setup), a name alone is accepted for a
-guard whose params may be `undefined`, else `{ type, params }` with params of that guard's type.
+name and any params are accepted. With named guards (a setup's `guards`, or the guards that a
+machine's `types` declare), a name alone is accepted for a guard whose params may be
+`undefined`, else `{ type, params }` with params of that guard's type.
+
+A built-in `and`, `or` or `not` records the guards that it names, at any depth, in a type-only
+`"~guards"` member that is never set. With named guards, each of these must be one of the named
+guards, with params of its type, so an inline `and(["isValid", "isMissing"])` is a type error
+when no guard is named `isMissing`. `stateIn` and `stateNotIn` name no guard. With the default,
+every guard definition is accepted.
 
 ## `GuardArgs`
 

@@ -38,7 +38,9 @@ snapshots over time), use an actor instead: see
    tuple: the next snapshot and the actions of the step.
 3. Check the snapshot: `value`, `context`, `status`, or `matches(...)`.
 4. Check the actions: each one has a `type` and resolved `params`. The actions did not run;
-   they only tell you what an actor would do.
+   they only tell you what an actor would do. For an action that the machine names, the type
+   carries its params: a check of `action.type` narrows `action.params` to the params of that
+   action.
 5. Repeat step 2 from the snapshot you got, for the next event.
 
 This test checks a cart. Each `console.log` marks a check: replace it with your test runner's
@@ -97,7 +99,8 @@ export const cartTest = Effect.gen(function* () {
   const [paying, actions] = yield* transition(cartMachine, withBook, { type: "CHECKOUT" })
   console.log(paying.value) // paying
   console.log(actions.map((action) => action.type)) // ["track", "xstate.raise"]
-  console.log(actions[0]?.params) // { name: "checkout" }
+  // Checking the type narrows the params of the named action "track"
+  console.log(actions.flatMap((action) => (action.type === "track" ? [action.params.name] : []))) // ["checkout"]
 
   const [done] = yield* transition(cartMachine, paying, { type: "PAID" })
   console.log(done.value, done.status) // done done

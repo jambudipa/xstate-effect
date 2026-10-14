@@ -69,8 +69,9 @@ export const documentMachine = setup({
 })
 ```
 
-With `setup`, the type checker accepts only the names in `guards`, and requires `params` of the
-right type for a guard that declares them.
+With `setup`, the type checker accepts only the names in `guards`, also inside an `and`, `or` or
+`not` that you write inline, and requires `params` of the right type for a guard that declares
+them. A machine whose `types` declare its guards gets the same check.
 
 `and` evaluates its guards in order and stops at the first that fails; `or` stops at the first
 that passes. Put a cheap or likely-deciding guard first.
@@ -211,7 +212,8 @@ export const trialMachine = setup({
 A name with no implementation fails the evaluation with a `GuardError`
 (`Guard '<name>' is not implemented.'.`), and the running actor gets status `error`. A guard
 function that throws, or whose Effect dies, also puts the actor in status `error`. With
-`setup`, the type checker catches an unknown name before the code runs. See
+`setup`, the type checker catches an unknown name before the code runs, also a name inside
+`and`, `or` or `not`. See
 [How to handle actor errors](handle-actor-errors.md).
 
 ## Related

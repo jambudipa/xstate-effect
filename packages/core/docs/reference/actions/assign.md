@@ -20,11 +20,12 @@ Both functions come from `@jambudipa/xstate-effect` and from `@jambudipa/xstate-
 | [`Assigner`](#types) | type | The function form of an assignment. |
 | [`PropertyAssigner`](#types) | type | The object form of an assignment. |
 | [`Assign`](#types) | type | The type of `assign`. |
+| [`AssignProperty`](#types) | type | The type of `assignProperty`. |
 | [`AssignArgs`](#types) | type | The first argument an assigner receives. |
 | [`PartialAssigner`](#types) | type | A function that computes one context property. |
 | [`AssignAction`](#types) | type | The action that `assign` returns. |
 
-`Assignment` and `Assign` come from `@jambudipa/xstate-effect/actions` only. The other types come from both entry points.
+`Assignment`, `Assign` and `AssignProperty` come from `@jambudipa/xstate-effect/actions` only. The other types come from both entry points.
 
 ## assign
 
@@ -155,13 +156,33 @@ export const cart = setup({
 ### Signature
 
 ```ts
-import type { ActionContext, ActionDefinition, EventObject } from "@jambudipa/xstate-effect"
+import type { ActionContext, ActionDefinition, EventObject, Types } from "@jambudipa/xstate-effect"
 
-export declare function assignProperty<TContext, TEvent extends EventObject, K extends keyof TContext, TParams = void>(
+export declare function assignProperty<
+  TContext,
+  TEvent extends EventObject,
+  K extends keyof TContext = keyof TContext,
+  TParams = undefined
+>(
   key: K,
-  value: TContext[K] | ((ctx: ActionContext<TContext, TEvent>, params: TParams) => TContext[K])
-): ActionDefinition<TContext, TEvent, TParams>
+  value:
+    | NoInfer<TContext[K]>
+    | ((ctx: ActionContext<NoInfer<TContext>, NoInfer<TEvent>>, params: TParams) => NoInfer<TContext[K]>)
+): ActionDefinition<TContext, TEvent, Types.AssignDefinitionParams<NoInfer<TParams>>> & Types.ImplementsParams<TParams>
 ```
+
+As `Assign`, `AssignProperty` has a second call signature that no value can call. It exists only so that TypeScript types an inline `assignProperty` from the machine config around it.
+
+### Type parameters
+
+| Type parameter | Comes from | Description |
+| --- | --- | --- |
+| `TContext` | where the action is used, or the type argument | The machine's context type. |
+| `TEvent` | where the action is used, or the type argument | The event of the transition that runs the action. |
+| `K` | the `key` argument | The context key to set. |
+| `TParams` | an annotated `params` argument, or the type argument | The params of the use. `undefined` when nothing gives it. |
+
+The context and event types never come from `value`.
 
 ### Parameters
 
@@ -172,13 +193,14 @@ export declare function assignProperty<TContext, TEvent extends EventObject, K e
 
 ### Return value
 
-An `ActionDefinition` with `type: "xstate.assign"`.
+An `ActionDefinition` with `type: "xstate.assign"`. Use it where `assign` goes: inline in a config, in an `actions` record of `setup`, or as an implementation.
 
 ### Behaviour
 
 - The action is `assign({ [key]: value })`: the same merge, the same arguments for a function value, and the same errors.
-- TypeScript does not infer `TContext` and `TEvent` from the place where the action is used. Give them as type arguments.
-- A custom action function that calls `assignProperty` gets no warning.
+- Written inline in a machine config, or in a setup's `actions` record, it reads `TContext` and `TEvent` from that place. It needs no type arguments there.
+- Called on its own, outside a config or a setup, nothing gives it the context type, and the call is a type error. Give the type arguments: `assignProperty<Context, Event, "count">(...)`. A fourth type argument gives the params type.
+- `assignProperty` only builds an action. A custom action function that calls `assignProperty` changes nothing, and the actor logs the warning of `assign`: ``Custom actions should not call `assign()` directly, as it is not imperative. See https://stately.ai/docs/actions#built-in-actions for more details.``
 
 ### Errors
 
@@ -187,14 +209,32 @@ The errors of [`assign`](#errors).
 ### Example
 
 ```ts
-import { assignProperty } from "@jambudipa/xstate-effect"
+import { assignProperty, createMachine, setup } from "@jambudipa/xstate-effect"
 
 interface Context {
   readonly count: number
+  readonly label: string
 }
 
-type Event = { readonly type: "INC" }
+type Event = { readonly type: "INC"; readonly by: number } | { readonly type: "RENAME" }
 
+// Inline: the machine config gives the context and event types
+export const counter = createMachine({
+  types: {} as { context: Context; events: Event },
+  context: { count: 0, label: "start" },
+  on: {
+    INC: { actions: assignProperty("count", ({ context, event }) => context.count + event.by) },
+    RENAME: { actions: assignProperty("label", "renamed") }
+  }
+})
+
+// In a setup's actions record: the setup gives the types
+export const counterSetup = setup({
+  types: {} as { context: Context; events: Event },
+  actions: { reset: assignProperty("count", 0) }
+})
+
+// On its own: give the type arguments
 export const increment = assignProperty<Context, Event, "count">("count", ({ context }) => context.count + 1)
 ```
 
@@ -206,6 +246,7 @@ export const increment = assignProperty<Context, Event, "count">("count", ({ con
 | `Assigner<TContext, TEvent, TParams = void, TSelfEvent = TEvent, TNames = ImplementationNames>` | `(ctx: ActionContext<TContext, TEvent, TSelfEvent, TNames>, params: TParams) => Partial<TContext> \| Effect.Effect<Partial<TContext>, unknown>` |
 | `PropertyAssigner<TContext, TEvent, TParams = void, TSelfEvent = TEvent, TNames = ImplementationNames>` | `{ readonly [K in keyof TContext]?: TContext[K] \| ((ctx: ActionContext<TContext, TEvent, TSelfEvent, TNames>, params: TParams) => TContext[K]) }` |
 | `Assign` | The interface of `assign`: the signature above, and the second signature that only defers the type check. |
+| `AssignProperty` | The interface of `assignProperty`: the signature in [assignProperty](#assignproperty), and the second signature that only defers the type check. |
 | `AssignArgs<TContext, TExpressionEvent, TEvent, TActor>` | The `ActionContext` that an assigner receives, whose `spawn` takes the provided actors `TActor`. |
 | `PartialAssigner<TContext, TExpressionEvent, TParams, TEvent, TActor, TKey>` | `(args: AssignArgs<TContext, TExpressionEvent, TEvent, TActor>, params: TParams) => TContext[TKey]` |
 | `AssignAction<TContext, TExpressionEvent, TParams, TEvent, TActor>` | `ActionDefinition<TContext, TExpressionEvent, AssignDefinitionParams<TParams>, never, ImplementationNames, TEvent> & ImplementsParams<TParams>` |

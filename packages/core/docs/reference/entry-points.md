@@ -15,8 +15,8 @@ sources: [packages/core/package.json, packages/core/src/index.ts, packages/core/
 
 | Specifier | Holds | Exports |
 |---|---|---|
-| [`@jambudipa/xstate-effect`](#root-entry-point) | Machines, `setup`, actors, actions, guards, actor logic, snapshots, events, errors, testing functions, types | 170 values, 300 types |
-| [`@jambudipa/xstate-effect/actions`](#actions) | The built-in actions and their types | 20 values, 52 types |
+| [`@jambudipa/xstate-effect`](#root-entry-point) | Machines, `setup`, actors, actions, guards, actor logic, snapshots, events, errors, testing functions, types | 170 values, 301 types |
+| [`@jambudipa/xstate-effect/actions`](#actions) | The built-in actions and their types | 20 values, 53 types |
 | [`@jambudipa/xstate-effect/actors`](#actors) | The actor logic creators, `createEmptyActor` and their types | 11 values, 24 types |
 | [`@jambudipa/xstate-effect/guards`](#guards) | The built-in guards and `evaluateGuard` | 6 values, 7 types |
 | [`@jambudipa/xstate-effect/graph`](#graph) | Graph traversal and model-based testing | 17 values, 24 types |
@@ -82,7 +82,7 @@ export const imported = [Effect.void, createActor, createMachine, assign, fromEf
 | Group | Types | Reference |
 |---|---|---|
 | Machines | `AnyStateMachine`, `StateMachineType`, `MachineConfig`, `MachineContext`, `MachineOptions`, `MachineTypes`, `MachineImplementations`, `ContextFactory`, `StateNodeConfig`, `StateSchema`, `TransitionConfig`, `TransitionsConfig`, `TransitionTarget`, `RouteTransitionConfig`, `InitialTransitionConfig`, `DelayedTransitionsConfig`, `DelayConfig`, `InvokeConfig`, `InvokeConfigMembers`, `InvokeInput`, `InvokeTransitionsConfig`, `OutputDefinition`, `StateNodeType`, `HistoryType`, `ProvidedActor`, `ParameterizedObject`, `ImplementationNames`, `RoutableStateId` | [createMachine and the machine](./create-machine.md) |
-| Setup | `SetupTypes`, `SetupConfig`, `SetupReturn`, `SetupHelpers`, `SetupExtension`, `SetupMachine`, `SetupMachineConfig`, `SetupConfigMembers`, `SetupCreateMachine`, `SetupChildren`, `SetupChildrenActors`, `SetupGuardChecks`, `SetupNames`, `SetupRecordNames`, `SetupRequirements`, `SetupProvideImplementations`, `SetupAction`, `SetupActionImplementation`, `SetupSchemaConfig`, `SetupSchemaReturn`, `ExtensionNames`, `MergedImplementations`, `NamesOf`, `ImplementationParams`, `ParameterizedObjectsOf`, `DeclaredEmitted`, `SpawnedLogicOf`, `ToProvidedActor`, `ActorNamesOf`, `ContextFrom`, `EventFrom`, `ActorsFrom`, `ActionsFrom`, `GuardsFrom`, `DelaysFrom` | [setup and setupWithSchema](./setup.md), [Type utilities](./type-utilities.md) |
+| Setup | `SetupTypes`, `SetupConfig`, `SetupReturn`, `SetupHelpers`, `SetupExtension`, `SetupMachine`, `SetupMachineConfig`, `SetupConfigMembers`, `SetupCreateMachine`, `SetupChildren`, `SetupChildrenActors`, `SetupGuardChecks`, `SetupNames`, `SetupRecordNames`, `SetupRequirements`, `SetupProvideImplementations`, `SetupAction`, `SetupActionImplementation`, `SetupSchemaConfig`, `SetupSchemaReturn`, `ExtensionNames`, `MergedImplementations`, `NamesOf`, `ImplementationParams`, `ParameterizedObjectsOf`, `DeclaredEmitted`, `SchemaTypeOr`, `SpawnedLogicOf`, `ToProvidedActor`, `ActorNamesOf`, `ContextFrom`, `EventFrom`, `ActorsFrom`, `ActionsFrom`, `GuardsFrom`, `DelaysFrom` | [setup and setupWithSchema](./setup.md), [Type utilities](./type-utilities.md) |
 | Actions and guards | `Action`, `ActionArgs`, `ActionContext`, `ActionDefinition`, `ActionFunction`, `ActionImplementation`, `ActionParams`, `ActionReference`, `ActionResult`, `DynamicParams`, `ParameterizedAction`, `TypedActorContext`, `SpawnOptions`, `Spawner`, `Guard`, `GuardArgs`, `GuardContext`, `GuardDefinition`, `GuardImplementation`, `GuardPredicate`, `GuardReference`, `GuardScope`, `ParameterizedGuard`, `UnknownGuard`, `BuiltInGuardDefinition`, `AssignAction`, `AssignArgs`, `Assigner`, `PartialAssigner`, `PropertyAssigner`, `CancelAction`, `EmitAction`, `EnqueueActionsAction`, `LogAction`, `RaiseAction`, `SendToAction`, `SpawnAction`, `SpawnActionOptions`, `StopAction`, `StopAllChildren`, `StopChild`, `StopChildTarget` | [Type utilities](./upstream-type-names.md#actions-and-parameters), [Guards](./guards.md) |
 | Actors and actor logic | `ActorType`, `AnyActor`, `Readable`, `ActorOptions`, `ActorOptionsArgs`, `RequiredActorOptionsKeys`, `ActorLogicType`, `AnyActorLogic`, `ActorScopeService`, `CustomActionExecution`, `ActorRefType`, `AnyActorRef`, `UnknownActorRef`, `SnapshotStream`, `ActorSystemInfo`, `ActorSystemService`, `SchedulerService`, `DevToolsAdapter`, `ActorRefFrom`, `ActorRefFromLogic`, `SnapshotFrom`, `InputFrom`, `OutputFrom`, `EmittedFrom`, `MachineImplementationsFrom`, `StateValueFrom`, `TagsFrom`, `PromiseActorLogic`, `PromiseActorRef`, `PromiseSnapshot`, `CallbackActorLogic`, `CallbackActorRef`, `CallbackLogicFunction`, `CallbackSnapshot`, `TransitionActorLogic`, `TransitionActorRef`, `TransitionActorScope`, `TransitionSnapshot`, `ObservableActorLogic`, `ObservableActorRef`, `ObservableSnapshot`, `Observer`, `Subscribable`, `EffectActorLogic`, `EffectActorRef`, `EffectSnapshot` | [createActor and the actor](./create-actor.md), [Actor references](./actor-refs.md), [Type utilities](./type-utilities.md) |
 | Snapshots, state values and state nodes | `SnapshotType`, `SnapshotStatus`, `MachineSnapshot`, `AnyMachineSnapshot`, `HistoryValue`, `AnyHistoryValue`, `PersistedHistoryValue`, `StateConfig`, `AnyStateConfig`, `ProcessingStatus`, `StateValueType`, `StateValueMap`, `StateNodeInterface`, `AnyStateNode`, `AnyStateNodeDefinition`, `HistoryStateNode`, `TransitionDefinition`, `Transitions`, `DelayedTransitionDefinition`, `InitialTransition`, `InitialTransitionDefinition`, `InvokeDefinition` | [Snapshots](./snapshots.md), [State values](./state-value.md), [State nodes](./state-nodes.md) |
@@ -105,9 +105,10 @@ The root names these exports only as members of a namespace:
 | Export | Namespace member | Also exported by |
 |---|---|---|
 | The error classes as values, `MachineDefinitionError`, `EventAssertionError` | `Errors.TransitionError`, `Errors.MachineDefinitionError`, … | — |
-| The `ActionResult` constructors, `DeclaredImplementations` and the other module types | `Types.ActionResult`, `Types.DeclaredImplementations`, … | — |
+| The `ActionResult` constructors, `DeclaredImplementations`, the requirement helpers `EffectRequirementsOf`, `ActionRequirementsOf`, `ConfigRequirementsOf` and `ImplementationsRequirementsOf`, and the other module types | `Types.ActionResult`, `Types.DeclaredImplementations`, `Types.ConfigRequirementsOf`, … | — |
+| The type helpers of actor logic and actor references | `ActorLogic.SnapshotOf`, `ActorLogic.EventOf`, `ActorLogic.InputOf`, `ActorLogic.EmittedOf`, `ActorLogic.RequirementsOf`, `ActorRef.SnapshotOf`, `ActorRef.EventOf`, `ActorRef.EmittedOf` | — |
 | `fromEffectRetry` and the actor argument types | `actors.fromEffectRetry`, … | `/actors` |
-| `spawnChildFromRegistry` and the action types | `actions.spawnChildFromRegistry`, … | `/actions` |
+| `spawnChildFromRegistry` and the action types, `Assign` and `AssignProperty` among them | `actions.spawnChildFromRegistry`, `actions.AssignProperty`, … | `/actions` |
 | `evaluateGuard` and the guard interfaces | `guards.evaluateGuard`, … | `/guards` |
 | `createSimulatedClock`, `createInertActorScope`, `Clock`, `SimulatedTimeout`, `ExecutableRaiseAction`, `ExecutableSendToAction` | `testing.createSimulatedClock`, … | — |
 
@@ -153,7 +154,7 @@ export const isTransitionError = (u: unknown): u is Errors.TransitionError => u 
 
 | Module | Types |
 |---|---|
-| assign | `Assign`, `Assignment`, `Assigner`, `PropertyAssigner`, `PartialAssigner`, `AssignArgs`, `AssignAction` |
+| assign | `Assign`, `AssignProperty`, `Assignment`, `Assigner`, `PropertyAssigner`, `PartialAssigner`, `AssignArgs`, `AssignAction` |
 | raise | `Raise`, `RaiseEvent`, `RaiseOptions`, `RaiseAction` |
 | sendTo | `SendTo`, `SendParent`, `SendSelf`, `ForwardTo`, `SendToTarget`, `SendToEvent`, `SendToTargetEvent`, `SendToOptions`, `SendToAction` |
 | emit | `Emit`, `EmitEvent`, `EmitAction` |

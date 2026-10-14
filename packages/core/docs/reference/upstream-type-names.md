@@ -48,6 +48,12 @@ class of this package. As a type it is the XState form.
 | `ActorSystem` | `ActorSystem<T extends ActorSystemInfo>` | The actor system module | — |
 | `StateValue` | The state value: a state key, or a map from each active child key to its value | The state value module | `StateValueType` |
 
+As namespaces, `ActorLogic` and `ActorRef` also hold the type helpers of their types:
+`ActorLogic.SnapshotOf<T>`, `ActorLogic.EventOf<T>`, `ActorLogic.InputOf<T>`,
+`ActorLogic.EmittedOf<T>` and `ActorLogic.RequirementsOf<T>`, and `ActorRef.SnapshotOf<T>`,
+`ActorRef.EventOf<T>` and `ActorRef.EmittedOf<T>`. The same helpers are also members of
+`ActorLogicType` and `ActorRefType`, for example `ActorLogicType.SnapshotOf<T>`.
+
 `Actor` is the actor class and a namespace of types, but not a root type. The actor type is
 `Actor.Actor<TSnapshot, TEvent, TEmitted>`, also exported as `ActorType`. `StateNode` is the
 state node class, and its instance type is also `StateNodeInterface`.
