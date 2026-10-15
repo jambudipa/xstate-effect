@@ -1459,7 +1459,7 @@ export type DelaysFrom<T> = T extends SetupReturn<infer _C, infer _E, infer _A, 
  * The type that a schema of a schema-based setup gives, or `TDefault` when the setup has no
  * such schema.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Setup
  */
 export type SchemaTypeOr<TSchema, TDefault> = TSchema extends Schema.Decoder<unknown> ? Schema.Schema.Type<TSchema> : TDefault

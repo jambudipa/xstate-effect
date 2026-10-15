@@ -606,7 +606,7 @@ export declare namespace ActorLogic {
  * The snapshot type of an ActorLogic (`ActorLogic.SnapshotOf` of the namespace above), also at the module
  * level, so the root's `ActorLogic.SnapshotOf<T>` resolves through the `ActorLogic` module.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actor Logic
  */
 export type SnapshotOf<T> = ActorLogic.SnapshotOf<T>
@@ -615,7 +615,7 @@ export type SnapshotOf<T> = ActorLogic.SnapshotOf<T>
  * The event type of an ActorLogic (`ActorLogic.EventOf` of the namespace above), also at the module
  * level, so the root's `ActorLogic.EventOf<T>` resolves through the `ActorLogic` module.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actor Logic
  */
 export type EventOf<T> = ActorLogic.EventOf<T>
@@ -624,7 +624,7 @@ export type EventOf<T> = ActorLogic.EventOf<T>
  * The input type of an ActorLogic (`ActorLogic.InputOf` of the namespace above), also at the module
  * level, so the root's `ActorLogic.InputOf<T>` resolves through the `ActorLogic` module.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actor Logic
  */
 export type InputOf<T> = ActorLogic.InputOf<T>
@@ -633,7 +633,7 @@ export type InputOf<T> = ActorLogic.InputOf<T>
  * The emitted events of an ActorLogic (`ActorLogic.EmittedOf` of the namespace above), also at the module
  * level, so the root's `ActorLogic.EmittedOf<T>` resolves through the `ActorLogic` module.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actor Logic
  */
 export type EmittedOf<T> = ActorLogic.EmittedOf<T>
@@ -642,7 +642,7 @@ export type EmittedOf<T> = ActorLogic.EmittedOf<T>
  * The Effect requirements of an ActorLogic (`ActorLogic.RequirementsOf` of the namespace above), also at the module
  * level, so the root's `ActorLogic.RequirementsOf<T>` resolves through the `ActorLogic` module.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actor Logic
  */
 export type RequirementsOf<T> = ActorLogic.RequirementsOf<T>

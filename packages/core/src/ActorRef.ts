@@ -304,7 +304,7 @@ export declare namespace ActorRef {
  * The snapshot type of an ActorRef (`ActorRef.SnapshotOf` of the namespace above), also at the module
  * level, so the root's `ActorRef.SnapshotOf<T>` resolves through the `ActorRef` module.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actor Ref
  */
 export type SnapshotOf<T> = ActorRef.SnapshotOf<T>
@@ -313,7 +313,7 @@ export type SnapshotOf<T> = ActorRef.SnapshotOf<T>
  * The event type of an ActorRef (`ActorRef.EventOf` of the namespace above), also at the module
  * level, so the root's `ActorRef.EventOf<T>` resolves through the `ActorRef` module.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actor Ref
  */
 export type EventOf<T> = ActorRef.EventOf<T>
@@ -322,7 +322,7 @@ export type EventOf<T> = ActorRef.EventOf<T>
  * The emitted events of an ActorRef (`ActorRef.EmittedOf` of the namespace above), also at the module
  * level, so the root's `ActorRef.EmittedOf<T>` resolves through the `ActorRef` module.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actor Ref
  */
 export type EmittedOf<T> = ActorRef.EmittedOf<T>

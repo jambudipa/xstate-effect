@@ -281,7 +281,7 @@ export const assignProperty: AssignProperty = (<TContext, TEvent extends EventOb
  * checker's deferral, so the first reads `TContext` and `TEvent` from where the action is
  * written. `K` is the key, and `TParams` the params of the use.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Actions
  */
 export interface AssignProperty {

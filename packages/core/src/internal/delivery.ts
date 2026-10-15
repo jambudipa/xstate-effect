@@ -49,7 +49,7 @@ export const hasWaitingDelivery = (
 /**
  * The key of an actor's drain.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Symbols
  */
 export const DrainKey: unique symbol = Symbol.for("@jambudipa/xstate-effect/Actor/drain")
@@ -61,7 +61,7 @@ export const DrainKey: unique symbol = Symbol.for("@jambudipa/xstate-effect/Acto
  * actor has processed since its creation, so a caller can tell whether a round of drains
  * processed any.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Models
  */
 export type Drain = Effect.Effect<number>
@@ -69,7 +69,7 @@ export type Drain = Effect.Effect<number>
 /**
  * Whether `target` keeps a drain (every actor of the `Actor` module does).
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Guards
  */
 export const hasDrain = (target: ActorRefBase): target is ActorRefBase & { readonly [DrainKey]: Drain } =>
@@ -78,7 +78,7 @@ export const hasDrain = (target: ActorRefBase): target is ActorRefBase & { reado
 /**
  * The key of a system's settle.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Symbols
  */
 export const SettleKey: unique symbol = Symbol.for("@jambudipa/xstate-effect/ActorSystem/settle")
@@ -88,7 +88,7 @@ export const SettleKey: unique symbol = Symbol.for("@jambudipa/xstate-effect/Act
  * round finds that no actor processed a mailbox entry since the round before, and no actor
  * joined or left the system.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Models
  */
 export type Settle = Effect.Effect<void>
@@ -96,7 +96,7 @@ export type Settle = Effect.Effect<void>
 /**
  * Whether `system` keeps a settle (every system of the `ActorSystem` module does).
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Guards
  */
 export const hasSettle = (system: object): system is { readonly [SettleKey]: Settle } =>

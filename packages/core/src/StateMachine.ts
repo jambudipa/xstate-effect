@@ -1460,7 +1460,7 @@ const restoreChildren = (
  * `SchemaError` of a value that does not match the type of its schema. A setup without an
  * input or an output schema checks every input or output as valid.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Models
  */
 export interface SchemaChecks {

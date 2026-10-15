@@ -2078,7 +2078,7 @@ export type DelayConfig<TContext, TEvent extends EventObject> =
  * nothing for `any` (a mock such as `vi.fn()` returns `any`, which would otherwise require
  * `unknown`).
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Types
  */
 export type EffectRequirementsOf<T> = 0 extends 1 & T ? never : T extends Effect.Effect<infer _A, infer _E, infer R> ? R : never
@@ -2089,7 +2089,7 @@ export type EffectRequirementsOf<T> = 0 extends 1 & T ? never : T extends Effect
  * `{ type, params }` use needs nothing here: its implementation counts where it is given. An
  * array of actions needs what each one needs.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Types
  */
 export type ActionRequirementsOf<TAction> = TAction extends ReadonlyArray<infer TEach>
@@ -2124,7 +2124,7 @@ type InvokeRequirementsOf<TInvoke> = TInvoke extends ReadonlyArray<infer TEach>
  * Named actions and actors count through the implementations instead. A config typed as a
  * whole, with any state key, needs nothing here.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Types
  */
 export type ConfigRequirementsOf<TConfig> =
@@ -2145,7 +2145,7 @@ export type ConfigRequirementsOf<TConfig> =
  * The services the implementations given to a machine's `provide` need (SD-8): what each
  * action's Effect requires, and the requirements of each actor logic.
  *
- * @since 0.2.1
+ * @since 0.3.0
  * @category Types
  */
 export type ImplementationsRequirementsOf<TImplementations> =
