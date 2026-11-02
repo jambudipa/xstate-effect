@@ -29,6 +29,17 @@ export const toDelayMillis = (value: unknown): Option.Option<number> =>
       : Option.none()
 
 /**
+ * `true` for a delay that is sure to fire: a finite number or a finite `Duration`. A function may
+ * return anything, so it is not. The refusal of a machine's progress delay and the structural
+ * proof read this one test (NEG-10).
+ *
+ * @since 0.4.0
+ * @category Internal
+ */
+export const isFiniteDelay = (delay: unknown): boolean =>
+  typeof delay === "number" ? Number.isFinite(delay) : Duration.isDuration(delay) && Duration.isFinite(delay)
+
+/**
  * The delay a name configures, looked up as an own property of the `delays` implementations;
  * none for a name they lack.
  *

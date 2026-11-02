@@ -1,0 +1,66 @@
+import { assign, setup } from "../../../src/index.js"
+import { markAgentLogic } from "../../../src/internal/agentBrand.js"
+import { fromEffect } from "../../../src/actors/index.js"
+import { child } from "./support.js"
+import { Effect, Option } from "effect"
+
+/** Detect contextual types erased to any. */
+type IsAny<T> = 0 extends (1 & T) ? true : false
+/** Require the complete completion output type. */
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
+/** Turn each expected type into a compiler obligation. */
+const exact = <T extends true>(): void => undefined
+/** The first agent completes with a numeric output. */
+const agent = markAgentLogic(fromEffect(() => Effect.succeed(1)))
+/** The second agent exercises an onDone transition array. */
+const slow = markAgentLogic(fromEffect(() => Effect.succeed(1)))
+/** Ordinary actors can share an invocation array with agents. */
+const worker = fromEffect(() => Effect.succeed(1))
+/** The declared context supplies nested completion callbacks. */
+const s = setup({ types: {} as { context: { count: number }; events: { type: "GO" } }, actors: { agent, slow, worker, child } })
+
+/** Nested invocation arrays retain callback types and settlement structure. */
+export const array = s.createMachine({
+  context: { count: 0 }, initial: "work",
+  states: {
+    work: {
+      on: { GO: {} },
+      invoke: [
+        {
+          src: "agent",
+          onDone: { target: "done", actions: ({ event }) => {
+            exact<Equal<IsAny<typeof event>, false>>()
+            exact<Equal<typeof event.output, Option.Option<number>>>()
+          } },
+          onSnapshot: { actions: () => undefined }
+        },
+        {
+          src: "slow",
+          onDone: [{ guard: ({ event }) => {
+            exact<Equal<IsAny<typeof event>, false>>()
+            exact<Equal<typeof event.output, Option.Option<number>>>()
+            return true
+          }, target: "done" }, "done"]
+        },
+        { src: "worker" }
+      ]
+    },
+    done: { type: "final" }
+  }
+})
+
+/** The function form of assign keeps the output type inside nested onDone actions. */
+export const doneAssigned = s.createMachine({
+  context: { count: 0 }, initial: "work",
+  states: {
+    work: {
+      on: { GO: {} },
+      invoke: { src: "agent", onDone: { target: "done", actions: assign(({ context, event }) => {
+        exact<Equal<IsAny<typeof event.output>, false>>()
+        exact<Equal<typeof event.output, Option.Option<number>>>()
+        return { count: Option.getOrElse(event.output, () => context.count) }
+      }) } }
+    },
+    done: { type: "final" }
+  }
+})

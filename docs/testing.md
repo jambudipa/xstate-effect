@@ -10,6 +10,7 @@ three kinds of test and the guards of the default run.
 |---|---|
 | The whole suite | `pnpm test` |
 | The suite with the coverage gate (the pre-push hook and CI run this) | `pnpm test:coverage` |
+| Lint, type check, build and the settlement gate (`prepublishOnly` and CI run this) | `pnpm check` |
 | Type-check the source, then the source and the tests | `pnpm typecheck` |
 | The type check of the tests that CI runs | `pnpm exec tsc -p tsconfig.test.json --noEmit` |
 | One upstream rewrite | `pnpm test:upstream test/upstream/<file>.test.ts` |

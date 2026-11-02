@@ -37,6 +37,12 @@ other creators' definitions and returns them as one `Enqueued` result.
   first signature is the real one and whose second takes arguments that no value has. That
   second signature only makes the type checker defer an inline call until the machine has inferred its event type
   (see the `SendTo` JSDoc in `sendTo.ts`). Keep it when you change or add a creator.
+- **Agent logic is not spawnable.** `spawnChild` (with `enqueue.spawnChild` and a setup's)
+  refuses agent logic by type, given inline or by a declared name, and `stopChild` refuses an
+  id that `types.children` gives agent logic (NEG-3, NEG-9): agent logic ends only through an
+  invocation's `onDone`. A src the types cannot see (a cast, `spawnChildFromRegistry`) fails in
+  the engine with `AgentSpawnError` before the agent runs. Keep these refusals in any new spawn
+  or stop creator.
 - **Upstream names.** Upstream's exported type names (`SpawnAction`, `SpawnActionOptions` and
   the like) stay as aliases of the port's types, so code written against upstream's types
   still compiles.

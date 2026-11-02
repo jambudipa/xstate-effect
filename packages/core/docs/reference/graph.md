@@ -902,6 +902,7 @@ export type PathGenerator<TSnapshot extends Snapshot, TEvent extends EventObject
 
 ## Related
 
+- [Settlement proof and certificates](./settlement.md): `explore`, `proveSettlement`, `certify`, `checkCertificate` and `moduleClosure`
 - [How to generate tests from a machine](../how-to/generate-tests-from-a-machine.md)
 - [Pure transition functions](./testing/get-next-snapshot.md)
 - [createMachine and the machine](./create-machine.md)

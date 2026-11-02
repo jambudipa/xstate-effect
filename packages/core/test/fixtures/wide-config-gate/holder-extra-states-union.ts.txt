@@ -1,0 +1,5 @@
+import { holderSetup as s } from "./support.js"
+/** The input intentionally erases proof-relevant structure. */
+declare const unionStates: {readonly x:{readonly after:{readonly 1:'done'}};readonly done:{readonly type:'final'}}|Readonly<Record<string,object>>
+/** The proof must refuse this unreadable structural member. */
+export const statesUnion=s.createMachine({initial:'x',states:unionStates})

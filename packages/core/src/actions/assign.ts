@@ -7,6 +7,7 @@
 import { Effect, Predicate } from "effect"
 import { ActorError } from "../Errors.js"
 import type { EventObject } from "../Event.js"
+import { mergeContext } from "../internal/contextReads.js"
 import { warnIfInCustomAction } from "../internal/customAction.js"
 import type { ActionDefinition, ActionContext, AssignDefinitionParams, ImplementationNames, ImplementsParams } from "../Types.js"
 import * as Types from "../Types.js"
@@ -115,10 +116,7 @@ const resolveAssign = <TContext, TEvent extends EventObject, TParams, TSelfEvent
           ? yield* Effect.orDie(result)
           : result
 
-        return Types.ActionResult.ContextUpdate({
-          ...ctx.context,
-          ...partialContext,
-        })
+        return Types.ActionResult.ContextUpdate(mergeContext(ctx.context, partialContext))
       })
     : Effect.die(new ActorError({ message: undefinedContextMessage, actorId: ctx.self.id }))
 

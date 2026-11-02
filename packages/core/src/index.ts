@@ -39,6 +39,10 @@ export type {
   StartError,
   InvokeError,
   DelayError,
+  AgentSpawnError,
+  AgentRunError,
+  AgentProvideError,
+  ProgressDelayError,
   XStateError,
 } from "./Errors.js"
 
@@ -231,7 +235,9 @@ export type {
   ActorLogic as ActorLogicType,
   ActorScopeService,
   AnyActorLogic,
+  AnyLogicSlot,
   CustomActionExecution,
+  LogicTypes,
 } from "./ActorLogic.js"
 export {
   ActorLogicTypeId,
@@ -239,6 +245,57 @@ export {
   isActorLogic,
   make as makeActorLogic,
 } from "./ActorLogic.js"
+
+/**
+ * The agent brand, in types only: what tells agent logic apart, and the refusal shape for slots
+ * that must not take it. No entry point gives the run-time marker, so no logic but `fromAgent`'s
+ * can claim the agent progress guarantee.
+ *
+ * @since 0.4.0
+ */
+export type { AgentBranded, IsAgentLogic, NotAgentLogic } from "./internal/agentBrand.js"
+export type { CertifiedChild, HoldsAgents } from "./internal/agentBrand.js"
+export { certified } from "./settlement.js"
+export type { AgentDoneOutsideOnDone, SettlementMustExit } from "./internal/settlement.js"
+export type { AgentStateAcceptsNoEvents, AgentToolNotAccepted } from "./internal/agentMenu.js"
+export type { Unsettled, UnsettledReason } from "./actors/unsettled.js"
+
+/**
+ * The type-level settlement proof of a setup machine: typed targets (`TargetOf`,
+ * `TargetCheck`), the proof itself (`SettlementProof`, its data form `SettlementReport`) and
+ * the errors each names.
+ *
+ * @since 0.4.0
+ */
+export type {
+  CannotReachFinal,
+  CertificateNotProved,
+  Certified,
+  ChildSettlementCheck,
+  ChildSettlementUnhandled,
+  ConfigNotLiteral,
+  DuplicateStateId,
+  HistoryDefault,
+  HistoryNeedsDefaultTarget,
+  HoldsAgentsFlag,
+  Livelock,
+  MachineHasNoStates,
+  MachineTooLargeForTypeProof,
+  NoProgressGuarantee,
+  ProofMode,
+  RegionCannotComplete,
+  SettlementCertificate,
+  SettlementProof,
+  SettlementProofBound,
+  SettlementReport,
+  StaleCertificate,
+  StaleEdges,
+  StateKeyNotProvable,
+  TargetCheck,
+  TargetOf,
+  UnknownInitial,
+  UnknownTarget
+} from "./settlement.js"
 
 /**
  * ActorRef type.
@@ -727,6 +784,7 @@ export type {
   TagsFrom,
   InvokeConfig,
   InvokeConfigMembers,
+  AgentSettlementHandler,
   InvokeInput,
   InvokeTransitionsConfig,
   InvokeDefinition,
@@ -869,6 +927,32 @@ export {
   fromEffect,
   fromEffectBackground,
 } from "./actors/fromEffect.js"
+
+/**
+ * Agent logic: one model call that must move its invoking state, with a literal attempt
+ * budget and deadline, its tools (the menu its invoking state must accept), the `AgentTurn`
+ * capability for its turn, and `Unsettled` as its only output.
+ *
+ * @since 0.4.0
+ */
+export {
+  type AgentActorLogic,
+  type AgentAttemptEvent,
+  type AgentConfig,
+  type AgentSnapshot,
+  type AgentToolCall,
+  type AgentTools,
+  type AgentToolsOf,
+  AgentTurn,
+  type AgentTurnService,
+  type AttemptRecord,
+  type CheckedLiteral,
+  fromAgent,
+  type KeyedTools,
+  type PositiveIntegerLiteral,
+  type TransitionReply,
+  type TurnOutcome,
+} from "./actors/fromAgent.js"
 
 /**
  * Testing utilities.

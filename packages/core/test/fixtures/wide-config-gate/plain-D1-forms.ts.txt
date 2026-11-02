@@ -1,0 +1,12 @@
+import { assign, enqueueActions, setup } from "../../../src/index.js"
+
+/** A setup without agents keeps its existing contextual typing. */
+const s = setup({})
+/** The root assign form remains accepted without agents. */
+export const assigned = s.createMachine({ initial: "x", entry: assign({}), states: { x: { after: { 1: "done" } }, done: { type: "final" } } })
+/** The root destructuring form remains accepted without agents. */
+export const destructured = s.createMachine({ initial: "x", entry: ({ event }) => void event, states: { x: { after: { 1: "done" } }, done: { type: "final" } } })
+/** The context factory form remains accepted without agents. */
+export const factory = s.createMachine({ initial: "x", context: ({ input }) => ({ input }), states: { x: { after: { 1: "done" } }, done: { type: "final" } } })
+/** The enqueue form remains accepted without agents. */
+export const enqueued = s.createMachine({ initial: "x", entry: enqueueActions(({ enqueue }) => void enqueue), states: { x: { after: { 1: "done" } }, done: { type: "final" } } })

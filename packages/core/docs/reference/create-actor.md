@@ -108,6 +108,12 @@ started.
 `Actor with system ID '<systemId>' already exists.` when another actor of the same system holds
 the `systemId`.
 
+**Agent logic:** refused. Agent logic from [`fromAgent`](./actors/from-agent.md) runs only as a
+machine's invocation, whose `onDone` settles it. Passing it to `createActor` or `Actor.make`
+fails to type-check at that argument (TS2769, naming `[AgentBrand]`). A value whose brand a cast
+hid dies with [`AgentRunError`](./errors.md#agent-settlement-errors) before the agent's first
+turn.
+
 **Requires:** `Scope`, and `R`, the services of the logic.
 
 - Nothing happens until the Effect runs. Each run of the same Effect value creates a new actor.

@@ -1,0 +1,5 @@
+import { holderSetup as s } from "./support.js"
+/** The input intentionally erases proof-relevant structure. */
+declare const dynamic:any
+/** The proof must refuse this unreadable structural member. */
+export const targetAny=s.createMachine({initial:'x',states:{x:{after:{1:dynamic}},done:{type:'final'}}})

@@ -10,12 +10,25 @@
  * delivery guards find the drain of an actor and the settle of a system (SD-28) only where the
  * `Actor` and `ActorSystem` modules put them.
  */
-import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Logger, Scope } from "effect"
+import { assert, describe, it, vi } from "@effect/vitest"
+import { Cause, Deferred, Effect, Exit, Logger, Option, Scope } from "effect"
 import { makeActorSystem } from "../../src/ActorSystem.js"
 import { DrainKey, hasDrain, hasSettle, SettleKey } from "../../src/internal/delivery.js"
 import * as Outbox from "../../src/internal/outbox.js"
+import type { ActorLogic, AnyActorLogic, AnyLogicSlot } from "../../src/ActorLogic.js"
+import { raise } from "../../src/actions/raise.js"
+import { stopChild } from "../../src/actions/stopChild.js"
+import { fromAgent } from "../../src/actors/fromAgent.js"
+import { fromEffect } from "../../src/actors/fromEffect.js"
 import { createActor, createMachine } from "../../src/index.js"
+import {
+  AgentBrand,
+  hasAgentBrand,
+  type IsAgentLogic,
+  markAgentLogic,
+  type NotAgentLogic,
+} from "../../src/internal/agentBrand.js"
+import { delayOf } from "../../src/internal/actionDelay.js"
 import { isolateCallback, reportUnhandledError } from "../../src/internal/reportError.js"
 
 /** Lets every other ready fiber take twenty turns. */
@@ -46,7 +59,88 @@ const withLogger = <A, E, R>(entries: Array<Entry>, program: Effect.Effect<A, E,
     )
   )
 
+/** Ordinary effect logic: it carries no agent brand. */
+const ordinaryLogic = fromEffect(({ input }: { input: number }) => Effect.succeed(input + 1))
+
+/** Effect logic marked as agent logic, as `fromAgent` marks its own. */
+const agentLogic = markAgentLogic(fromEffect(({ input }: { input: number }) => Effect.succeed(input + 1)))
+
+/** `true` only when `A` and `B` are the same type, so a `boolean` result does not pass for `true`. */
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
+
+/** Accepts only `true`: a brand case below that does not hold fails `pnpm typecheck`. */
+type Holds<T extends true> = T
+
+/** The brand cases of `IsAgentLogic` (TS-115: a union is checked whole, never distributed). */
+export type AgentBrandCases = [
+  Holds<Equals<IsAgentLogic<typeof agentLogic>, true>>,
+  Holds<Equals<IsAgentLogic<typeof ordinaryLogic>, false>>,
+  Holds<Equals<IsAgentLogic<typeof agentLogic | typeof ordinaryLogic>, true>>,
+  Holds<Equals<IsAgentLogic<never>, false>>,
+  Holds<Equals<IsAgentLogic<AnyActorLogic>, false>>,
+]
+
+/** Ordinary logic fits a slot that refuses agent logic. */
+export const acceptedOrdinary: AnyActorLogic & NotAgentLogic = ordinaryLogic
+
+// @ts-expect-error agent logic does not fit a slot that refuses it ([AgentBrand] is not never)
+export const refusedAgent: AnyActorLogic & NotAgentLogic = agentLogic
+
+// @ts-expect-error agent logic does not widen to a declared AnyActorLogic, which keeps the capability optional
+export const widenedAgent: AnyActorLogic = agentLogic
+
+// @ts-expect-error agent logic does not widen to a declared ActorLogic, which keeps the capability optional
+export const widenedTyped: ActorLogic<any, any, any> = agentLogic
+
+/** Agent logic fits the slot the library's generics read. */
+const slot: AnyLogicSlot = agentLogic
+
+// @ts-expect-error the slot does not widen on to AnyActorLogic, so two steps are no way round the refusal
+export const widenedTwice: AnyActorLogic = slot
+
 describe("COV-4 shared private helpers (src/internal)", () => {
+  it("[COV-4] agentBrand: the run-time marker is a non-enumerable symbol property that survives structural copies", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(agentLogic, AgentBrand)
+    assert.isDefined(descriptor)
+    assert.isFalse(descriptor?.enumerable)
+    assert.isFalse(descriptor?.writable)
+    assert.isFalse(Object.keys(agentLogic).includes(String(AgentBrand)))
+    assert.isFalse(JSON.stringify(Object.keys(agentLogic)).includes("AgentBrand"))
+    assert.strictEqual(AgentBrand, Symbol.for("@jambudipa/xstate-effect/AgentBrand"))
+
+    assert.isTrue(hasAgentBrand(agentLogic))
+    assert.isTrue(hasAgentBrand({ ...agentLogic }))
+    assert.isTrue(hasAgentBrand(Object.assign({}, agentLogic)))
+    const hidden = agentLogic as unknown as AnyActorLogic
+    assert.isTrue(hasAgentBrand(hidden))
+
+    assert.isFalse(hasAgentBrand(ordinaryLogic))
+    assert.isFalse(hasAgentBrand({ ...ordinaryLogic }))
+    assert.isFalse(hasAgentBrand(undefined))
+    assert.isFalse(hasAgentBrand(null))
+    assert.isFalse(hasAgentBrand("agent"))
+    assert.isFalse(hasAgentBrand({ [AgentBrand]: "yes" }))
+  })
+
+  it("[COV-4] agentBrand: marking returns the same logic and leaves other logic of the same kind unmarked", () => {
+    const logic = fromEffect(() => Effect.void)
+    const marked = markAgentLogic(logic)
+    assert.strictEqual<unknown>(marked, logic)
+    assert.strictEqual<unknown>(markAgentLogic(marked), logic)
+    assert.isTrue(hasAgentBrand(logic))
+    assert.isFalse(hasAgentBrand(fromEffect(() => Effect.void)))
+  })
+
+  it.effect("[COV-4] agentBrand: the marker survives a provide in place of a declared actor", () =>
+    Effect.sync(() => {
+      const hidden = agentLogic as unknown as AnyActorLogic
+      const machine = createMachine({ invoke: { src: "worker" } })
+      const provided = machine.provide({ actors: { worker: hidden } })
+      assert.isTrue(hasAgentBrand(provided.implementations.actors?.["worker"]))
+      assert.isFalse(hasAgentBrand(machine.implementations.actors?.["worker"]))
+    })
+  )
+
   it.effect("[COV-4] outbox: a delivery posted inside a delivery runs at once, depth first; one that waits goes on in its own fiber without holding later posts", () =>
     Effect.gen(function* () {
       const order: Array<string> = []
@@ -215,6 +309,80 @@ describe("COV-4 shared private helpers (src/internal)", () => {
       if (hasSettle(system)) {
         yield* system[SettleKey]
       }
+    })
+  )
+})
+
+// ---------------------------------------------------------------- two copies of the library (F14)
+
+/** The modules of a second copy of the library, as a duplicate install gives a program. */
+const secondCopy = Effect.promise(() => {
+  vi.resetModules()
+  return Promise.all([
+    import("../../src/index.js"),
+    import("../../src/graph/settlement.js"),
+    import("../../src/actors/fromAgent.js"),
+    import("../../src/internal/actionDelay.js"),
+    import("../../src/internal/stopTarget.js"),
+  ]).then(([root, settlement, agents, actionDelay, stopTarget]) => ({ root, settlement, agents, actionDelay, stopTarget }))
+})
+
+describe("COV-4 two copies of the library in one program", () => {
+  it.effect("[COV-4] a stop target and an action delay written by one copy read in the other", () =>
+    Effect.gen(function* () {
+      const copy = yield* secondCopy
+      assert.isTrue(Option.contains(copy.stopTarget.stopTargetOf(stopChild("agent")), "agent"))
+      assert.isTrue(Option.contains(delayOf(copy.root.raise({ type: "LATER" }, { delay: 10 })), 10))
+      assert.isTrue(Option.contains(copy.actionDelay.delayOf(raise({ type: "LATER" }, { delay: 10 })), 10))
+      // Each stays out of the definition's enumerable form, as a WeakMap entry was
+      assert.deepStrictEqual(Object.keys(stopChild("agent")).sort(), ["exec", "type"])
+      assert.deepStrictEqual(Object.getOwnPropertySymbols({ ...stopChild("agent") }), [])
+    })
+  )
+
+  it.effect("[COV-4] the proof of one copy finds a stop of an invoked agent that the other copy's stopChild wrote", () =>
+    Effect.gen(function* () {
+      const copy = yield* secondCopy
+      const agent = copy.agents.fromAgent({ budget: 1, deadline: 1000, tools: {}, turn: () => Effect.void })
+      const machine = copy.root.createMachine({
+        id: "stopped",
+        initial: "asking",
+        states: {
+          asking: { invoke: { src: "agent", id: "agent", onDone: "done" }, on: { STOP: { actions: stopChild("agent") } } },
+          done: { type: "final" },
+        },
+      } as never, { actors: { agent } } as never)
+      const exit = yield* Effect.exit(copy.settlement.proveSettlement(machine))
+      const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      assert.deepInclude(JSON.stringify(error), "StopsInvokedAgent")
+    })
+  )
+
+  it.effect("[COV-4] agent logic of one copy under the runtime of the other fails closed: the actor errors, and no turn runs", () =>
+    Effect.gen(function* () {
+      const copy = yield* secondCopy
+      const runs = { count: 0 }
+      const turn = () => Effect.sync(() => runs.count++)
+      const ownAgent = fromAgent({ budget: 1, deadline: 1000, tools: {}, turn })
+      const otherAgent = copy.agents.fromAgent({ budget: 1, deadline: 1000, tools: {}, turn })
+      const config = {
+        id: "crossed",
+        initial: "asking",
+        states: {
+          asking: { invoke: { src: "agent", id: "agent", input: undefined, onDone: "done" } },
+          done: { type: "final" as const },
+        },
+      }
+      // This copy's machine and agent under the other copy's actor runtime
+      const underOther = yield* copy.root.createActor(createMachine(config as never, { actors: { agent: ownAgent } } as never))
+      yield* underOther.start
+      assert.strictEqual((yield* underOther.getSnapshotUntyped).status, "error")
+      // The other copy's agent in this copy's machine and runtime
+      const inOwn = yield* createActor(createMachine(config as never, { actors: { agent: otherAgent } } as never))
+      yield* inOwn.start
+      assert.strictEqual((yield* inOwn.getSnapshotUntyped).status, "error")
+      yield* settle
+      assert.strictEqual(runs.count, 0)
     })
   )
 })

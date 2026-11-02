@@ -1,0 +1,5 @@
+import { holderSetup as s } from "./support.js"
+/** Opaque callback values do not determine the machine graph. */
+declare const dynamic:any
+/** Opaque callback values do not erase the machine graph. */
+export const opaqueAny=s.createMachine({context:dynamic,entry:dynamic,initial:'x',states:{x:{after:{1:'done'}},done:{type:'final'}}})

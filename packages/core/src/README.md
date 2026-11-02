@@ -43,6 +43,16 @@ needs neither the engine nor the runtime goes in `internal/`.
   run time it imports only `Event.ts`. `Event.ts`, `Snapshot.ts`, `StateValue.ts` and
   `Errors.ts` are data modules that import no engine or runtime code.
 - `setup.ts` adds types only: its machines are `StateMachine` machines.
+- `settlement.ts` holds the settlement proof of a setup machine's config as written. It is type-only but for
+  `certified`, which binds a certificate to a machine that holds agents, so a parent can declare it as a child
+  (`Certified`, `HoldsAgentsFlag`, `ChildSettlementCheck`; decision 10, S17).
+  `TargetOf` resolves a transition target as the engine does, and `TargetCheck`, which
+  `setup.ts` applies, refuses a target that names no state (S6, S23). `SettlementProof`, which
+  `setup.ts` applies to a setup with agent actors, refuses a state with no progress guarantee,
+  a state that cannot reach a final state, a region that cannot complete, an `always`
+  livelock and a machine past `SettlementProofBound` (decision 4, 8 and 18); `SettlementReport`
+  gives its findings as data. The root exports them all. The agent `onDone` exit rules it builds
+  on are in `internal/settlement.ts`.
 
 ## Effect-native rules
 

@@ -38,7 +38,7 @@ export interface AnyEventObject extends EventObject {
  * below is an amendment of SD-22 (2026-10-07, see docs/decisions.md):
  *
  * - the output of an untyped invocation's done event (`DoneActorEvent<any>`), the snapshot of
- *   its snapshot event, and the input and event of `AnyActorLogic`
+ *   its snapshot event, and the input and event of `AnyLogicSlot`
  *   (`ActorLogic<any, any, any, any, any>`), so an inline logic written as an invocation's
  *   `src` reads any member of its input and events, as upstream;
  * - the snapshot of an `AnyActorRef` (`ActorRef<any, any, any>`), so the snapshot of a child

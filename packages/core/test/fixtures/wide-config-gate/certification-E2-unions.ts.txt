@@ -1,0 +1,19 @@
+import type { Certified, ConfigNotLiteral, HoldsAgentsFlag } from "../../../src/settlement.js"
+import type { HoldsAgents } from "../../../src/internal/agentBrand.js"
+import { agent } from "./support.js"
+
+/** Require the exact error or marker rather than a permissive supertype. */
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
+/** Turn the exported type contracts into compiler obligations. */
+const exact = <T extends true>(): void => undefined
+/** A readable union member must not hide another unreadable member. */
+type Unreadable = { readonly type: "final" } | { readonly states?: Readonly<Record<string, object>> }
+/** A superficially complete empty certificate cannot prove an unreadable config. */
+type Certificate = { readonly states: readonly []; readonly edges: readonly []; readonly explored: 0; readonly hash: "probe"; readonly verdict: "proved" }
+/** The certificate boundary must return its named refusal. */
+type CertificateCheck = Certified<HoldsAgents<Unreadable>, Certificate>
+/** The marker boundary must retain the agent-holding capability. */
+type Marker = HoldsAgentsFlag<Unreadable, { readonly src: "agent"; readonly logic: typeof agent }>
+
+exact<Equal<CertificateCheck, ConfigNotLiteral<"">>>()
+exact<Equal<Marker, HoldsAgents<Unreadable>>>()

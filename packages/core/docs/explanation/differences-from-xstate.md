@@ -166,6 +166,9 @@ XState's behaviour loses information:
 - **Streams.** `changes`, `emissions` and `select(...).changes` give snapshots, emitted events and
   selected values as Effect `Stream`s. `emissions` ends when the actor stops, is done or errors;
   `changes` ends when the actor stops or is done, and fails with the actor's error.
+- **Agent logic.** `fromAgent` runs a model call that must move its state, and the package proves
+  a machine with agent logic at compile time and at run time. See
+  [Why agent machines must settle](./agent-settlement.md).
 - **Schemas that check values.** A machine of `setupWithSchema` takes its types from Effect
   Schemas and checks its events, its context, its input and its output against them at run time.
   A value that does not match gives the actor status `error` with the `SchemaError`.

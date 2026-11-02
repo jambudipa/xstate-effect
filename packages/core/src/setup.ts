@@ -6,10 +6,15 @@
  */
 import { Effect, Option, Schema } from "effect"
 import type { EventObject, ExtractEvent } from "./Event.js"
+import type { NotInlineChild } from "./internal/agentBrand.js"
 import type { AnyEventObject } from "./internal/anyEventObject.js"
+import type { MenuCheck } from "./internal/agentMenu.js"
+import type { ProgressDelayMarker, ProgressDelayNames } from "./internal/provideCheck.js"
+import type { SettledSrc, SettlementCheck } from "./internal/settlement.js"
+import type { ChildSettlementCheck, HoldsAgentsFlag, SettlementProof, TargetCheck } from "./settlement.js"
 import type { StateMachine } from "./StateMachine.js"
 import * as SM from "./StateMachine.js"
-import type { ActorLogic, AnyActorLogic } from "./ActorLogic.js"
+import type { ActorLogic, AnyLogicSlot, LogicTypes } from "./ActorLogic.js"
 import type { ActorRef, ActorRefBase, AnyActorRef } from "./ActorRef.js"
 import type { StateValue } from "./StateValue.js"
 import type { Cast, NonReducibleUnknown } from "./typeUtils.js"
@@ -21,7 +26,7 @@ import { log, type LogMessage, type LogOptions } from "./actions/log.js"
 import { raise, type RaiseEvent, type RaiseOptions } from "./actions/raise.js"
 import { sendTo, type SendToOptions, type SendToTarget, type SendToTargetEvent } from "./actions/sendTo.js"
 import { spawnChild, type SpawnChildArguments, type UntypedSpawnChildOptions } from "./actions/spawnChild.js"
-import { stopChild, type StopChildTarget } from "./actions/stopChild.js"
+import { type NotAgentChild, stopChild, type StopChildTarget } from "./actions/stopChild.js"
 import type {
   ActionRequirementsOf,
   ConfigRequirementsOf,
@@ -65,7 +70,7 @@ import type {
 export interface SetupTypes<
   TContext,
   TEvent extends EventObject,
-  TActors extends Record<string, AnyActorLogic> = Record<string, AnyActorLogic>,
+  TActors extends Record<string, AnyLogicSlot> = Record<string, AnyLogicSlot>,
   TActions extends Record<string, SetupActionImplementation<TContext, TEvent>> = Record<string, SetupActionImplementation<TContext, TEvent>>,
   TGuards extends Record<string, GuardImplementation<TContext, TEvent>> = Record<string, GuardImplementation<TContext, TEvent>>,
   TDelays extends Record<string, DelayConfig<TContext, TEvent>> = Record<string, DelayConfig<TContext, TEvent>>
@@ -96,7 +101,7 @@ export interface SetupTypes<
 export interface SetupConfig<
   TContext,
   TEvent extends EventObject,
-  TActors extends Record<string, AnyActorLogic>,
+  TActors extends Record<string, AnyLogicSlot>,
   TActions extends Record<string, SetupActionImplementation<TContext, TEvent>>,
   TGuards extends Record<string, GuardImplementation<TContext, TEvent>>,
   TDelays extends Record<string, DelayConfig<TContext, TEvent>>,
@@ -284,8 +289,42 @@ type SetupStateSchema<TConfig, TStateKeys> = TConfig extends { readonly states?:
   : Cast<ToStateSchema<TConfig>, StateSchema>
 
 /**
+ * Infer the proof graph independently of callback contextual typing. TypeScript's first
+ * inference pass skips context-sensitive functions, so a naked config type falls back to
+ * its wide constraint. A recursive reverse map captures the structural fields in that pass.
+ * The original TConfig still supplies callback types and the complete returned config.
+ * Dictionary keys are state, event, or delay names, not config field names. Keep guard
+ * identity so an explicit undefined guard remains unguarded; keep actor src identity
+ * without walking the actor's implementation. Callback contents do not enter the proof.
+ * The leading union names the primitives of the template: without that hint, TypeScript 5.8 and
+ * tsgo 7.0.0-dev.20251207 widen a literal such as `type: "final"` in the graph, and refuse valid
+ * machines.
+ *
+ * @since 0.4.0
+ */
+type ConfigInference<T, Dictionary extends boolean = false> = (T extends string ? T : T extends number ? T : never) | {
+  [K in keyof T]: Dictionary extends true ? ConfigInference<T[K]>
+    : K extends "states" | "on" | "after" ? ConfigInference<T[K], true>
+    : K extends "context" | "entry" | "exit" | "actions" | "input" | "output" ? unknown
+    : K extends "src" | "guard" ? T[K]
+    : ConfigInference<T[K]>
+}
+
+/**
  * The `createMachine` of a setup: it takes the machine config as written (`TConfig`) and
- * gives a {@link SetupMachine} whose `provide` takes `TProvided`. The machine's input type is
+ * gives a {@link SetupMachine} whose `provide` takes `TProvided`. Every transition target of
+ * the config is checked against `TargetCheck`: a target that names no state of the machine and
+ * a duplicate state id do not compile (S6, S23), nor, in a setup with agent actors, a history
+ * state with no default target. A target error is checked first, so it is the one reported. When the setup has agent
+ * actors, the config is also checked against `SettlementCheck`: each agent invocation's
+ * `onDone` must leave its state on every branch, and no `on` key takes an agent's done event. Last, `MenuCheck`: each
+ * agent's tools must be events its invoking state accepts, and a state that accepts no event invokes no agent (S21).
+ * Then `SettlementProof` (decision 4): every non-final atomic state has a progress guarantee, every non-final state
+ * reaches a final state, no unguarded `always` loops for ever, and a machine too large for the proof is refused by
+ * name. Like the settlement and menu checks, it runs only when the setup has agent actors.
+ * In a setup with agent actors or a machine that holds agents, the machine's `provide` also learns the config's progress
+ * delays (`ProgressDelayNames`), each of which it then takes only as a positive integer literal
+ * (NEG-10). The machine's input type is
  * the setup's `types.input` (`TSetupInput`), as upstream fixes it: the context factory gets
  * that input, and an annotated factory does not change it. Its emitted events are the setup's
  * `types.emitted` (`TSetupEmitted`).
@@ -307,7 +346,8 @@ export type SetupCreateMachine<
   TTag extends string = string,
   TSetupOutput = unknown,
   TRequirements = never
-> = <
+> = [SettledSrc<TNames["providedActor"]>] extends [never]
+? (<
   // The setup's `types.output`, as upstream fixes the output type in `setup`
   TOutput = TSetupOutput,
   TEmitted extends EventObject = TSetupEmitted,
@@ -315,7 +355,14 @@ export type SetupCreateMachine<
   const TConfig extends SetupConfigMembers<TContext, TEvent, TStateMeta, TTransitionMeta, TNames> =
     SetupConfigMembers<TContext, TEvent, TStateMeta, TTransitionMeta, TNames>
 >(
-  config: SetupMachineConfig<TContext, TEvent, TSetupInput, TOutput, TStateMeta, TTransitionMeta, TStateKeys, TNames> & TConfig
+  config:
+    & SetupMachineConfig<TContext, TEvent, TSetupInput, TOutput, TStateMeta, TTransitionMeta, TStateKeys, TNames>
+    & TConfig
+    & NoInfer<TargetCheck<TConfig, TNames["providedActor"]>>
+    & NoInfer<SettlementCheck<TConfig, TNames["providedActor"]>>
+    & NoInfer<MenuCheck<TConfig, TNames["providedActor"]>>
+    & NoInfer<SettlementProof<TConfig, TNames["providedActor"]>>
+    & NoInfer<ChildSettlementCheck<TConfig, TNames["providedActor"]>>
 ) => SetupMachine<
   TContext,
   TEvent,
@@ -330,7 +377,41 @@ export type SetupCreateMachine<
   SetupChildren<TChildrenMap, TNames["actorLogic"], TConfig>,
   TTag,
   TRequirements | ConfigRequirementsOf<TConfig>
->
+> & HoldsAgentsFlag<TConfig, TNames["providedActor"]>)
+: (<
+  // The setup's `types.output`, as upstream fixes the output type in `setup`
+  TOutput = TSetupOutput,
+  TEmitted extends EventObject = TSetupEmitted,
+  TStateKeys = Readonly<Record<string, unknown>>,
+  const TConfig extends SetupConfigMembers<TContext, TEvent, TStateMeta, TTransitionMeta, TNames> =
+    SetupConfigMembers<TContext, TEvent, TStateMeta, TTransitionMeta, TNames>,
+  const TGraph extends object = object
+>(
+  config:
+    & SetupMachineConfig<TContext, TEvent, TSetupInput, TOutput, TStateMeta, TTransitionMeta, TStateKeys, TNames>
+    & TConfig
+    & ConfigInference<TGraph>
+    & NoInfer<TargetCheck<TGraph, TNames["providedActor"]>>
+    & NoInfer<SettlementCheck<TGraph, TNames["providedActor"]>>
+    & NoInfer<MenuCheck<TGraph, TNames["providedActor"]>>
+    & NoInfer<SettlementProof<TGraph, TNames["providedActor"]>>
+    & NoInfer<ChildSettlementCheck<TGraph, TNames["providedActor"]>>,
+  ...notAny: 0 extends (1 & TConfig) ? [never] : []
+) => SetupMachine<
+  TContext,
+  TEvent,
+  TSetupInput,
+  TOutput,
+  TEmitted,
+  TStateMeta,
+  TTransitionMeta,
+  TStateKeys,
+  TConfig,
+  TProvided & ProgressDelayMarker<ProgressDelayNames<TConfig>>,
+  SetupChildren<TChildrenMap, TNames["actorLogic"], TConfig>,
+  TTag,
+  TRequirements | ConfigRequirementsOf<TConfig>
+> & HoldsAgentsFlag<TConfig, TNames["providedActor"]>)
 
 /**
  * The `children` of a setup machine's snapshots (XState `ToChildren` of the setup's actors):
@@ -356,7 +437,7 @@ export type SetupChildren<TChildrenMap, TActors, TConfig> = Cast<
 export type ToProvidedActor<TChildrenMap, TActors> = {
   readonly [K in keyof TActors & string]: {
     readonly src: K
-    readonly logic: Cast<TActors[K], AnyActorLogic>
+    readonly logic: Cast<TActors[K], AnyLogicSlot>
     readonly id: [keyof TChildrenMap] extends [never] ? string | undefined
       : K extends TChildrenMap[keyof TChildrenMap] ? ChildIdOf<TChildrenMap, K>
       : string | undefined
@@ -390,7 +471,7 @@ type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) exten
  * @category Setup
  */
 export type SetupChildrenActors<TChildrenMap> = [keyof TChildrenMap] extends [never] ? unknown
-  : { readonly actors: { readonly [K in TChildrenMap[keyof TChildrenMap] & string]: AnyActorLogic } }
+  : { readonly actors: { readonly [K in TChildrenMap[keyof TChildrenMap] & string]: AnyLogicSlot } }
 
 /**
  * The `createMachine` of a setup, from the function that builds a machine of the setup's
@@ -432,7 +513,7 @@ const setupCreateMachine = <
 export interface SetupReturn<
   TContext,
   TEvent extends EventObject,
-  TActors extends Record<string, AnyActorLogic>,
+  TActors extends Record<string, AnyLogicSlot>,
   TActions extends Record<string, SetupActionImplementation<TContext, TEvent>>,
   TGuards extends Record<string, GuardImplementation<TContext, TEvent>>,
   TDelays extends Record<string, DelayConfig<TContext, TEvent>>,
@@ -611,10 +692,14 @@ export interface SetupReturn<
  * @category Setup
  */
 export interface SetupHelpers<TContext, TEvent extends EventObject, TNames extends ImplementationNames = ImplementationNames> {
-  /** `assign` with this setup's context and events (XState). */
+  /**
+   * `assign` with this setup's context and events (XState). Its assigners' `spawn` takes the
+   * setup's actor names, as the module `assign` written in the setup's config does, so it refuses
+   * the name of agent logic (NEG-3); the action carries the setup's names.
+   */
   readonly assign: <TParams = undefined>(
-    assignment: Assignment<TContext, TEvent, TParams>
-  ) => ActionDefinition<TContext, TEvent, AssignDefinitionParams<NoInfer<TParams>>>
+    assignment: Assignment<TContext, TEvent, TParams, TEvent, TNames>
+  ) => ActionDefinition<TContext, TEvent, AssignDefinitionParams<NoInfer<TParams>>, never, TNames>
 
   /** `raise` with this setup's context and events; the raised event is one of the events (XState). */
   readonly raise: (
@@ -635,8 +720,13 @@ export interface SetupHelpers<TContext, TEvent extends EventObject, TNames exten
   /** `cancel` with this setup's context and events (XState). */
   readonly cancel: (id: CancelId<TContext, TEvent>) => ActionDefinition<TContext, TEvent>
 
-  /** `stopChild` with this setup's context and events (XState). */
-  readonly stopChild: (child: StopChildTarget<TContext, TEvent>) => ActionDefinition<TContext, TEvent>
+  /**
+   * `stopChild` with this setup's context and events (XState). An id that `types.children` gives
+   * agent logic is refused (NEG-9): only the agent's settlement may end it.
+   */
+  readonly stopChild: <TChild extends StopChildTarget<TContext, TEvent>>(
+    child: NotAgentChild<TChild, TNames["providedActor"]>
+  ) => ActionDefinition<TContext, TEvent>
 
   /** `enqueueActions` with this setup's context and events (XState). */
   readonly enqueueActions: <TParams = void>(
@@ -657,7 +747,7 @@ export interface SetupHelpers<TContext, TEvent extends EventObject, TNames exten
    * The action carries the setup's names, so a machine of another setup without that actor
    * rejects it.
    */
-  readonly spawnChild: <TLogic extends AnyActorLogic>(
+  readonly spawnChild: <TLogic extends AnyLogicSlot>(
     ...args: SpawnChildArguments<TContext, TEvent, TLogic, TNames>
   ) => ActionDefinition<TContext, TEvent, void, never, TNames>
 }
@@ -771,7 +861,7 @@ interface ImplementsNames<TNames> {
 export interface SetupRecordNames<
   TGuards extends ParameterizedObject,
   TDelays extends string,
-  TActorLogic extends Readonly<Record<string, AnyActorLogic>>,
+  TActorLogic extends Readonly<Record<string, AnyLogicSlot>>,
   TEmitted extends AnyEventObject,
   TActionNames extends string = never
 > extends ImplementationNames {
@@ -821,7 +911,7 @@ export type ExtensionNames<
   TActions,
   TGuards,
   TDelays,
-  TActors extends Readonly<Record<string, AnyActorLogic>>,
+  TActors extends Readonly<Record<string, AnyLogicSlot>>,
   TEmitted extends EventObject,
   TExtendGuards,
   TExtendDelays,
@@ -892,7 +982,7 @@ export interface SetupNames<
   TActions,
   TGuards,
   TDelays,
-  TActors extends Readonly<Record<string, AnyActorLogic>>,
+  TActors extends Readonly<Record<string, AnyLogicSlot>>,
   TEmitted extends EventObject = EventObject,
   TTag extends string = string,
   TChildrenMap extends Record<string, string> = Record<never, never>
@@ -922,7 +1012,7 @@ export interface SetupNames<
  * does not name has no `id` member and takes any id. `never` for a setup without actors.
  */
 type SetupProvidedActor<
-  TActors extends Readonly<Record<string, AnyActorLogic>>,
+  TActors extends Readonly<Record<string, AnyLogicSlot>>,
   TChildrenMap = Record<never, never>
 > = {
   readonly [K in NamesOf<TActors>]: { readonly src: K; readonly logic: TActors[K] } & DeclaredChildIds<TChildrenMap, K>
@@ -995,9 +1085,9 @@ export interface SetupProvideImplementations<TContext, TEvent extends EventObjec
  * @category Setup
  */
 export type SpawnedLogicOf<TActors, TSrc> = TSrc extends keyof TActors
-  ? TActors[TSrc] extends AnyActorLogic ? TActors[TSrc] : AnyActorLogic
-  : TSrc extends AnyActorLogic ? TSrc
-  : AnyActorLogic
+  ? TActors[TSrc] extends AnyLogicSlot ? TActors[TSrc] : AnyLogicSlot
+  : TSrc extends AnyLogicSlot ? TSrc
+  : AnyLogicSlot
 
 /**
  * The bound helpers of a setup (XState): each calls the module function with the setup's
@@ -1008,7 +1098,8 @@ const bindHelpers = <TContext, TEvent extends EventObject, TNames extends Implem
   TEvent,
   TNames
 > => ({
-  assign: <TParams = undefined>(assignment: Assignment<TContext, TEvent, TParams>) => assign<TContext, TEvent, TParams>(assignment),
+  assign: <TParams = undefined>(assignment: Assignment<TContext, TEvent, TParams, TEvent, TNames>) =>
+    assign<TContext, TEvent, TParams, TEvent, TNames>(assignment),
   raise: (event, options) => raise<TContext, TEvent, TEvent>(event, options),
   sendTo: <TTarget extends ActorRefBase, TSentEvent extends EventObject>(
     target: SendToTarget<TContext, TEvent, TTarget>,
@@ -1017,11 +1108,11 @@ const bindHelpers = <TContext, TEvent extends EventObject, TNames extends Implem
   ) => sendTo<TContext, TEvent, TSentEvent, ImplementationNames, TTarget>(target, event, options),
   log: (value, labelOrOptions) => log<TContext, TEvent>(value, labelOrOptions),
   cancel: (id) => cancel<TContext, TEvent>(id),
-  stopChild: (child) => stopChild<TContext, TEvent>(child),
+  stopChild: (child: StopChildTarget<TContext, TEvent>) => stopChild<TContext, TEvent>(child),
   enqueueActions: <TParams>(collect: CollectActions<TContext, TEvent, TParams, TNames>) =>
     enqueueActions<TContext, TEvent, TParams, TNames>(collect),
   emit: (event: EmitEvent<TContext, TEvent, TNames["emitted"]>) => emit<TContext, TEvent, TNames>(event),
-  spawnChild: <TLogic extends AnyActorLogic>(src: string | TLogic, options?: UntypedSpawnChildOptions<TContext, TEvent>) =>
+  spawnChild: <TLogic extends AnyLogicSlot>(src: string | (TLogic & NotInlineChild), options?: UntypedSpawnChildOptions<TContext, TEvent>) =>
     // The bound helper's own signature checks the src and the options against the setup's
     // actors, so the call takes any name; its result type carries the setup's names
     spawnChild<TContext, TEvent, TLogic>(src, options),
@@ -1077,7 +1168,7 @@ const mergeImplementations = <TContext, TEvent extends EventObject, TActors>(
 const buildSetup = <
   TContext,
   TEvent extends EventObject,
-  TActors extends Record<string, AnyActorLogic>,
+  TActors extends Record<string, AnyLogicSlot>,
   TActions extends Record<string, SetupActionImplementation<TContext, TEvent>>,
   TGuards extends Record<string, GuardImplementation<TContext, TEvent>>,
   TDelays extends Record<string, DelayConfig<TContext, TEvent>>,
@@ -1213,7 +1304,7 @@ const buildSetup = <
 export const setup = <
   TContext,
   TEvent extends EventObject = AnyEventObject,
-  const TActors extends Record<string, AnyActorLogic> = Record<string, never>,
+  const TActors extends Record<string, AnyLogicSlot> = Record<string, never>,
   // TActions, TGuards and TDelays default to their constraints (TActions to its constraint
   // with any name, as a default names only earlier type parameters): inference reads it for
   // the contextual type of a plain-function action, guard or delay, so
@@ -1415,7 +1506,7 @@ export type EventFrom<
 type EventOf<T> = T extends SetupReturn<infer _C, infer E, infer _A, infer _Act, infer _G, infer _D, infer _SM, infer _TM, infer _I, infer _Em, infer _Ch, infer _Tg> ? E
   : (T extends (...args: never) => infer TReturn ? TReturn : T) extends infer TValue
     ? TValue extends ActorRef<infer _S, infer E, infer _Em> ? E
-    : TValue extends ActorLogic<infer _S, infer E, infer _I, infer _Em, infer _R> ? E
+    : TValue extends LogicTypes<infer _S, infer E, infer _I, infer _Em, infer _R> ? E
     : never
   : never
 
@@ -1477,7 +1568,7 @@ export type SchemaTypeOr<TSchema, TDefault> = TSchema extends Schema.Decoder<unk
 export interface SetupSchemaConfig<
   TContextSchema extends Schema.Decoder<unknown>,
   TEventSchema extends Schema.Decoder<unknown>,
-  TActors extends Record<string, AnyActorLogic>,
+  TActors extends Record<string, AnyLogicSlot>,
   TActions extends Record<string, SetupActionImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   TGuards extends Record<string, GuardImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
@@ -1526,7 +1617,7 @@ export interface SetupSchemaReturn<
   TEvent extends EventObject,
   TContextSchema extends Schema.Decoder<unknown>,
   TEventSchema extends Schema.Decoder<unknown>,
-  TActors extends Record<string, AnyActorLogic>,
+  TActors extends Record<string, AnyLogicSlot>,
   TActions extends Record<string, SetupActionImplementation<TContext, TEvent>>,
   TGuards extends Record<string, GuardImplementation<TContext, TEvent>>,
   TDelays extends Record<string, DelayConfig<TContext, TEvent>>,
@@ -1613,7 +1704,7 @@ interface SetupSchemas<TContextSchema, TEventSchema> {
 const buildSchemaSetup = <
   TContextSchema extends Schema.Decoder<unknown>,
   TEventSchema extends Schema.Decoder<unknown>,
-  TActors extends Record<string, AnyActorLogic>,
+  TActors extends Record<string, AnyLogicSlot>,
   TActions extends Record<string, SetupActionImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   TGuards extends Record<string, GuardImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
@@ -1732,7 +1823,7 @@ const buildSchemaSetup = <
 export const setupWithSchema = <
   TContextSchema extends Schema.Decoder<unknown>,
   TEventSchema extends Schema.Decoder<unknown>,
-  const TActors extends Record<string, AnyActorLogic> = Record<string, never>,
+  const TActors extends Record<string, AnyLogicSlot> = Record<string, never>,
   const TActions extends Record<string, SetupActionImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>> = Record<string, SetupActionImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   const TGuards extends Record<string, GuardImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>> = Record<string, GuardImplementation<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,
   const TDelays extends Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>> = Record<string, DelayConfig<Schema.Schema.Type<TContextSchema>, Schema.Schema.Type<TEventSchema> & EventObject>>,

@@ -20,6 +20,10 @@ Understanding-oriented discussion of the design: why the package is built as it 
 - [How an actor processes events](./event-processing.md) — Each actor has its own mailbox and its own fiber, and it processes one event at a time, to completion: one macrostep per event, which publishes one snapshot.
 - [How failures surface](./failure-model.md) — A failure inside a running actor — in an action, a guard, an assigner or the actor's logic — does not throw and does not fail `send`.
 
+## Agents
+
+- [Why agent machines must settle](./agent-settlement.md) — A model can answer and move nothing, so `fromAgent` gives each attempt a move or a named outcome, and three proof layers check what the others cannot.
+
 ## Compared with XState
 
 - [How this package differs from XState](./differences-from-xstate.md) — The package aims at XState 5.33.2's behaviour, not at its signatures.

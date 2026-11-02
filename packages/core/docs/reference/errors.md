@@ -34,12 +34,16 @@ also exports with `export type`.
 | [`StartError`](#starterror) | `StartError` | yes | the failure type of a custom logic's `start` |
 | [`InvokeError`](#actionerror-invokeerror-and-delayerror) | `InvokeError` | yes | never: no function raises it |
 | [`DelayError`](#actionerror-invokeerror-and-delayerror) | `DelayError` | yes | never: no function raises it |
+| [`AgentSpawnError`](#agent-settlement-errors) | `AgentSpawnError` | yes | a spawning actor's error |
+| [`AgentRunError`](#agent-settlement-errors) | `AgentRunError` | yes | a defect of `createActor`, `Actor.make` and agent logic |
+| [`AgentProvideError`](#agent-settlement-errors) | `AgentProvideError` | yes | the error of an actor of a refused `provide` |
+| [`ProgressDelayError`](#agent-settlement-errors) | `ProgressDelayError` | yes | the error of an actor of a refused `provide` |
 | [`MachineDefinitionError`](#machinedefinitionerror) | `MachineDefinitionError` | no | a failure of `resolveState`, `getStateNodes` and `getTransitionData`; the `cause` of other errors |
 | [`EventAssertionError`](#eventassertionerror) | `Error` | no | a failure of `assertEvent` |
 
 | Type | Definition |
 | --- | --- |
-| [`XStateError`](#xstateerror) | The union of the twelve classes with a root type export. |
+| [`XStateError`](#xstateerror) | The union of the sixteen classes with a root type export. |
 
 ### Other error classes
 
@@ -301,17 +305,36 @@ Read it as `Errors.MachineDefinitionError`; the root has no type export of it.
 **Raised by:** `assertEvent(event, type)`, when no given type matches the event. In an action,
 it is the actor's error. Read it as `Errors.EventAssertionError`. See [Events](./events.md#assertevent).
 
+## Agent settlement errors
+
+Agent logic settles only through the `onDone` of an invocation. The types refuse it everywhere
+else; these errors are the run-time half, for a value whose brand a cast hid. Each is a tagged
+error with a `message`.
+
+| Class | Fields | Raised when |
+| --- | --- | --- |
+| `AgentSpawnError` | `src`, `machineId` | a spawn of agent logic, inline, by name, through the registry, through `createSpawnFunction` or by a logic that reads `ActorScope` (NEG-3). The spawning actor errors; a `createSpawnFunction` call dies. |
+| `AgentRunError` | none | agent logic given to `createActor` or `Actor.make` (NEG-4), or one of its methods called without the runtime's capability; or a `budget` or `deadline` that is no positive safe integer, through a cast or plain JavaScript (NEG-5). The creation, the method or the invoking actor's start dies with it. |
+| `AgentProvideError` | `actor`, `machineId` | `provide` gave agent logic in place of an actor whose logic is not agent logic (NEG-7). Each initial or restored snapshot of the new machine dies with it. |
+| `ProgressDelayError` | `delay`, `machineId` | a machine that holds agent logic, directly, inline or through a child, has a progress delay, from `provide`, `setup` or `createMachine`, given as infinity, NaN, an infinite `Duration` or a function (NEG-10). As `AgentProvideError`. |
+
+See [`machine.provide`](./create-machine.md#agent-logic-and-progress-delays).
+
 ## XStateError
 
 ```ts
 import type {
   ActionError,
   ActorError,
+  AgentProvideError,
+  AgentRunError,
+  AgentSpawnError,
   DelayError,
   GuardError,
   InitializationError,
   InvalidPersistedSnapshotError,
   InvokeError,
+  ProgressDelayError,
   RestoreError,
   SerializationError,
   StartError,
@@ -332,6 +355,10 @@ export type XStateErrorShape =
   | StartError
   | InvokeError
   | DelayError
+  | AgentSpawnError
+  | AgentRunError
+  | AgentProvideError
+  | ProgressDelayError
 ```
 
 `XStateError` does not hold `MachineDefinitionError` or `EventAssertionError`.

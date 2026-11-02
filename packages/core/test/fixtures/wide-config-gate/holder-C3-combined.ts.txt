@@ -1,0 +1,4 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { holderSetup as s } from "./support.js"
+/** This declaration supplies the holder-C3-combined acceptance case. */
+export const machine=s.createMachine({context:({input})=>({input}), entry:[assign({}),({event})=>void event,enqueueActions(({enqueue})=>void enqueue)],initial:"x", states:{x:{after:{1:"done"}},done:{type:"final"}}});

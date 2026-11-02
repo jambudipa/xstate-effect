@@ -29,6 +29,39 @@ const TIMER_BAN_MESSAGE =
   'Upstream rewrites control time with TestClock or SimulatedClock, not with real or fake timers.';
 
 /**
+ * A spread inside the `states` of a `createMachine` config (owner decision on D4, 2026-11-02).
+ * When an explicit key follows a spread, TypeScript erases the spread's keys, so the type proof
+ * cannot see those states (the A5 counterexample of docs/wide-config-gate-investigation.md).
+ * Oxlint has no such rule, so this ban lives in ESLint.
+ */
+const SPREAD_BAN_MESSAGE =
+  'TypeScript erases spread keys, so the type proof cannot see those states. Write each state out in the machine config.';
+
+/** A `createMachine` call: the root function, a setup variable, a setup chain or a namespace. */
+const MACHINE_CALL = "CallExpression:matches([callee.name='createMachine'], [callee.property.name='createMachine'])";
+
+/** The `states` property of a config, at any depth; a quoted key is the same property. */
+const STATES_KEY = ":matches(Property[key.name='states'], Property[key.value='states'])";
+
+/**
+ * Every spread below `states`, at any depth, except in a callback: a callback body holds data
+ * that the proof does not read. A spread on a state node erases keys in the same way.
+ */
+const SPREAD_BELOW_STATES = {
+  selector: `${MACHINE_CALL} ${STATES_KEY} SpreadElement:not(${STATES_KEY} :function SpreadElement)`,
+  message: SPREAD_BAN_MESSAGE,
+};
+
+/**
+ * A spread directly in a `states` object, at any depth of nesting. Tests keep this form: their
+ * state nodes spread test helpers (`...tracked(log, "a")`) and upstream's `...pedestrianStates`.
+ */
+const SPREAD_IN_STATES = {
+  selector: `${MACHINE_CALL} :matches(${STATES_KEY} > ObjectExpression > SpreadElement, ${STATES_KEY} > TSAsExpression > ObjectExpression > SpreadElement, ${STATES_KEY} > TSSatisfiesExpression > ObjectExpression > SpreadElement)`,
+  message: SPREAD_BAN_MESSAGE,
+};
+
+/**
  * Type-aware rule exemptions for files where typed linting should be relaxed.
  */
 const TYPE_AWARE_EXEMPTIONS = {
@@ -192,6 +225,23 @@ export const eslintConfigFor = (pendingRewrites) => tseslint.config(
   effectLintConfig(['src/**/*.ts']),
 
   // ============================================
+  // SECTION: The spread ban in machine states (D4)
+  // ============================================
+  // ESLint replaces a rule's options per block, so the timer ban below repeats SPREAD_IN_STATES.
+  {
+    files: ['src/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', SPREAD_BELOW_STATES],
+    },
+  },
+  {
+    files: ['test/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', SPREAD_IN_STATES],
+    },
+  },
+
+  // ============================================
   // SECTION: The one scoped block of src (SD-22). It relaxes no canonical Effect rule.
   // ============================================
   // Every src file resolves every rule of the canonical Effect bundle at error (SD-3 and SD-22,
@@ -240,6 +290,7 @@ export const eslintConfigFor = (pendingRewrites) => tseslint.config(
     rules: {
       'no-restricted-syntax': [
         'error',
+        SPREAD_IN_STATES,
         {
           selector: "CallExpression[callee.object.name='vi'][callee.property.name='useFakeTimers']",
           message: TIMER_BAN_MESSAGE,

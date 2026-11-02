@@ -15,11 +15,11 @@ sources: [packages/core/package.json, packages/core/src/index.ts, packages/core/
 
 | Specifier | Holds | Exports |
 |---|---|---|
-| [`@jambudipa/xstate-effect`](#root-entry-point) | Machines, `setup`, actors, actions, guards, actor logic, snapshots, events, errors, testing functions, types | 170 values, 301 types |
-| [`@jambudipa/xstate-effect/actions`](#actions) | The built-in actions and their types | 20 values, 53 types |
-| [`@jambudipa/xstate-effect/actors`](#actors) | The actor logic creators, `createEmptyActor` and their types | 11 values, 24 types |
+| [`@jambudipa/xstate-effect`](#root-entry-point) | Machines, `setup`, actors, actions, guards, actor logic, snapshots, events, errors, testing functions, types | 196 values, 341 types |
+| [`@jambudipa/xstate-effect/actions`](#actions) | The built-in actions and their types | 20 values, 54 types |
+| [`@jambudipa/xstate-effect/actors`](#actors) | The actor logic creators, `createEmptyActor` and their types | 13 values, 41 types |
 | [`@jambudipa/xstate-effect/guards`](#guards) | The built-in guards and `evaluateGuard` | 6 values, 7 types |
-| [`@jambudipa/xstate-effect/graph`](#graph) | Graph traversal and model-based testing | 17 values, 24 types |
+| [`@jambudipa/xstate-effect/graph`](#graph) | Graph traversal, model-based testing and the settlement proof | 33 values, 42 types |
 | [`@jambudipa/xstate-effect/dev`](#dev) | The dev tools hook | 4 values, 1 type |
 
 ## Package format
@@ -34,6 +34,7 @@ sources: [packages/core/package.json, packages/core/src/index.ts, packages/core/
 | `engines.node` | `>=20.0.0` | The supported Node.js versions. |
 | `peerDependencies.effect` | `^4.0.0` | The application installs `effect` itself. |
 | `files` | `dist`, `src`, `README.md`, `LICENSE`, `llms.txt` | The published contents. |
+| `bin` | `xstate-effect-certify`, `xstate-effect-certify-gate` | [Writes or checks a settlement certificate](./settlement.md#the-xstate-effect-certify-bin), and [gates that check in CI](./settlement.md#the-xstate-effect-certify-gate-bin). |
 
 ### Example
 
@@ -66,6 +67,7 @@ export const imported = [Effect.void, createActor, createMachine, assign, fromEf
 | Actions | `assign`, `assignProperty`, `raise`, `sendTo`, `sendParent`, `sendSelf`, `forwardTo`, `emit`, `cancel`, `log`, `logDebug`, `logInfo`, `logWarning`, `logError`, `spawnChild`, `stopChild`, `stop` (deprecated alias of `stopChild`), `stopAllChildren`, `enqueueActions`, `actions` (namespace of `/actions`) | [assign](./actions/assign.md), [raise](./actions/raise.md), [sendTo](./actions/send-to.md), [emit](./actions/emit.md), [cancel](./actions/cancel.md), [log](./actions/log.md), [spawnChild](./actions/spawn-child.md), [stopChild](./actions/stop-child.md), [enqueueActions](./actions/enqueue-actions.md) |
 | Guards | `and`, `or`, `not`, `stateIn`, `stateNotIn`, `guards` (namespace of `/guards`) | [Guards](./guards.md) |
 | Actor logic creators | `fromPromise`, `fromCallback`, `fromTransition`, `fromTransitionWithInput`, `fromObservable`, `fromEventObservable`, `fromStream`, `fromEffect`, `fromEffectBackground`, `actors` (namespace of `/actors`) | [fromPromise](./actors/from-promise.md), [fromCallback](./actors/from-callback.md), [fromTransition](./actors/from-transition.md), [fromObservable](./actors/from-observable.md), [fromStream](./actors/from-stream.md), [fromEffect](./actors/from-effect.md) |
+| Agent logic | `fromAgent`, `AgentTurn`, `certified` | [fromAgent and AgentTurn](./actors/from-agent.md), [Settlement proof and certificates](./settlement.md) |
 | Pure transition functions | `transition`, `initialTransition`, `getNextSnapshot`, `getInitialSnapshot`, `getMicrosteps`, `getInitialMicrosteps`, `getNextTransitions` | [Pure transition functions](./testing/get-next-snapshot.md) |
 | Waiting | `waitFor`, `waitForPromise`, `WaitForTimeoutError`, `WaitForTerminatedError`, `toEffect`, `toPromise`, `ActorOutputError` | [waitFor, toEffect and toPromise](./testing/wait-for.md) |
 | Simulated clock | `SimulatedClock`, `makeSimulatedClock`, `makeSimulatedClockEffect`, `TimeTravelError` | [SimulatedClock](./testing/simulated-clock.md) |
@@ -85,6 +87,7 @@ export const imported = [Effect.void, createActor, createMachine, assign, fromEf
 | Setup | `SetupTypes`, `SetupConfig`, `SetupReturn`, `SetupHelpers`, `SetupExtension`, `SetupMachine`, `SetupMachineConfig`, `SetupConfigMembers`, `SetupCreateMachine`, `SetupChildren`, `SetupChildrenActors`, `SetupGuardChecks`, `SetupNames`, `SetupRecordNames`, `SetupRequirements`, `SetupProvideImplementations`, `SetupAction`, `SetupActionImplementation`, `SetupSchemaConfig`, `SetupSchemaReturn`, `ExtensionNames`, `MergedImplementations`, `NamesOf`, `ImplementationParams`, `ParameterizedObjectsOf`, `DeclaredEmitted`, `SchemaTypeOr`, `SpawnedLogicOf`, `ToProvidedActor`, `ActorNamesOf`, `ContextFrom`, `EventFrom`, `ActorsFrom`, `ActionsFrom`, `GuardsFrom`, `DelaysFrom` | [setup and setupWithSchema](./setup.md), [Type utilities](./type-utilities.md) |
 | Actions and guards | `Action`, `ActionArgs`, `ActionContext`, `ActionDefinition`, `ActionFunction`, `ActionImplementation`, `ActionParams`, `ActionReference`, `ActionResult`, `DynamicParams`, `ParameterizedAction`, `TypedActorContext`, `SpawnOptions`, `Spawner`, `Guard`, `GuardArgs`, `GuardContext`, `GuardDefinition`, `GuardImplementation`, `GuardPredicate`, `GuardReference`, `GuardScope`, `ParameterizedGuard`, `UnknownGuard`, `BuiltInGuardDefinition`, `AssignAction`, `AssignArgs`, `Assigner`, `PartialAssigner`, `PropertyAssigner`, `CancelAction`, `EmitAction`, `EnqueueActionsAction`, `LogAction`, `RaiseAction`, `SendToAction`, `SpawnAction`, `SpawnActionOptions`, `StopAction`, `StopAllChildren`, `StopChild`, `StopChildTarget` | [Type utilities](./upstream-type-names.md#actions-and-parameters), [Guards](./guards.md) |
 | Actors and actor logic | `ActorType`, `AnyActor`, `Readable`, `ActorOptions`, `ActorOptionsArgs`, `RequiredActorOptionsKeys`, `ActorLogicType`, `AnyActorLogic`, `ActorScopeService`, `CustomActionExecution`, `ActorRefType`, `AnyActorRef`, `UnknownActorRef`, `SnapshotStream`, `ActorSystemInfo`, `ActorSystemService`, `SchedulerService`, `DevToolsAdapter`, `ActorRefFrom`, `ActorRefFromLogic`, `SnapshotFrom`, `InputFrom`, `OutputFrom`, `EmittedFrom`, `MachineImplementationsFrom`, `StateValueFrom`, `TagsFrom`, `PromiseActorLogic`, `PromiseActorRef`, `PromiseSnapshot`, `CallbackActorLogic`, `CallbackActorRef`, `CallbackLogicFunction`, `CallbackSnapshot`, `TransitionActorLogic`, `TransitionActorRef`, `TransitionActorScope`, `TransitionSnapshot`, `ObservableActorLogic`, `ObservableActorRef`, `ObservableSnapshot`, `Observer`, `Subscribable`, `EffectActorLogic`, `EffectActorRef`, `EffectSnapshot` | [createActor and the actor](./create-actor.md), [Actor references](./actor-refs.md), [Type utilities](./type-utilities.md) |
+| Agent logic and settlement | `AgentActorLogic`, `AgentTools`, `AgentTurnService`, `AnyLogicSlot`, `LogicTypes`, `SettlementProof`, `SettlementReport`, `Certified`, `SettlementCertificate`, `TargetOf`, `TargetCheck`, and the errors of the proof | [fromAgent and AgentTurn](./actors/from-agent.md), [Settlement proof and certificates](./settlement.md) |
 | Snapshots, state values and state nodes | `SnapshotType`, `SnapshotStatus`, `MachineSnapshot`, `AnyMachineSnapshot`, `HistoryValue`, `AnyHistoryValue`, `PersistedHistoryValue`, `StateConfig`, `AnyStateConfig`, `ProcessingStatus`, `StateValueType`, `StateValueMap`, `StateNodeInterface`, `AnyStateNode`, `AnyStateNodeDefinition`, `HistoryStateNode`, `TransitionDefinition`, `Transitions`, `DelayedTransitionDefinition`, `InitialTransition`, `InitialTransitionDefinition`, `InvokeDefinition` | [Snapshots](./snapshots.md), [State values](./state-value.md), [State nodes](./state-nodes.md) |
 | Events | `EventObject`, `AnyEventObject`, `WildcardEvent`, `EventlessEvent`, `EventType`, `EventByType`, `EventDescriptor`, `ExtractEvent` | [Events](./events.md) |
 | Errors | `TransitionError`, `InitializationError`, `ActorError`, `GuardError`, `ActionError`, `StateNodeNotFoundError`, `SerializationError`, `RestoreError`, `InvalidPersistedSnapshotError`, `StartError`, `InvokeError`, `DelayError`, `XStateError` | [Errors](./errors.md) |
@@ -279,7 +282,8 @@ built map are synchronous.
 | Paths | `getShortestPaths`, `getSimplePaths`, `getPathsFromEvents`, `joinPaths`, `createShortestPathsGen`, `createSimplePathsGen` |
 | Adjacency | `getAdjacencyMap`, `adjacencyMapToArray` |
 | State node tree | `getStateNodes`, `toDirectedGraph`, `serializeSnapshot` |
-| Errors | `TraversalLimitError`, `JoinPathsError`, `InvalidEventSequenceError`, `UnsupportedTestMachineError` |
+| Settlement | `proveSettlement`, `explore`, `timerFirings`, `processRestart`, `certify`, `checkCertificate`, `moduleClosure`, `unresolvedImports` |
+| Errors | `TraversalLimitError`, `JoinPathsError`, `InvalidEventSequenceError`, `UnsupportedTestMachineError`, `SettlementProofError`, `CertificateCheckError`, `CertificateUnreadableValue`, `UnabstractedField`, `CongruenceViolation`, `UndrivenInput`, `CannotReachFinal`, `UnrankedCycle`, `InvalidRanking`, `ExploreTimeout` |
 
 This `getStateNodes(stateNode | machine)` is synchronous and gives every state node below the
 argument. The root `getStateNodes(stateNode, stateValue)` is a different function: it returns
@@ -291,9 +295,14 @@ an Effect of the state nodes that a state value names.
 `EventExecutor`, `PathGenerator`, `SerializationConfig`, `SerializedEvent`, `SerializedSnapshot`,
 `StatePath`, `StatePlanMap`, `Step`, `Steps`, `TestMeta`, `TestModelOptions`, `TestParam`,
 `TestPath`, `TestPathResult`, `TestStepResult`, `TraversalConfig`, `TraversalError`,
-`TraversalOptions`, `VisitedContext`.
+`TraversalOptions`, `VisitedContext`; for settlement, `AbstractValue`, `CertificateExploration`,
+`CertificateInputs`, `CertificateModule`, `CertifyConfig`, `CertifyTarget`, `ExploreDriver`,
+`ExploreEdge`, `ExploreEnvironment`, `ExploreFailure`, `ExploreInput`, `ExploreResult`,
+`ExploreStep`, `ExploreTrace`, `ExploreTraceStep`, `SettlementFinding`, `SettlementFindingKind`,
+`SettlementTransitionMeta`.
 
-See [Graph and model-based testing](./graph.md).
+See [Graph and model-based testing](./graph.md) and
+[Settlement proof and certificates](./settlement.md).
 
 ### Example
 

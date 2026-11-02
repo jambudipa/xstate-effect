@@ -318,6 +318,11 @@ const ALLOWED_LOADER_TEXTS: ReadonlyArray<string> = [
  *   `createRequire` of that repository's `package.json`, a path it builds from its root argument,
  *   so no literal can name it; only its own `node --test` file (`scripts/docs-audit.test.mjs`)
  *   imports it, and Vitest collects neither;
+ * - the certify bin (`xstate-effect-certify`, `scripts/certify.ts`) loads a consumer's config
+ *   module by a path from its command line, so no literal can name it, and it imports the package
+ *   by name, as it runs compiled in `dist/scripts`, so no `node_modules` folder holds the name;
+ * - the library's settlement fixture (`scripts/settlement.config.mjs`) imports the package by name,
+ *   as the gate runs it against the build, so no `node_modules` folder holds the name;
  * - the TEA enforcement hook of the BMad skills (`tea-enforce.cjs`, in `.claude/skills/` and its
  *   copy in `.agents/skills/`) runs its main function only when Node runs it as the main module
  *   (`require.main === module`), as Claude Code runs a hook;
@@ -335,6 +340,8 @@ const ALLOWED_LOADER_TEXTS: ReadonlyArray<string> = [
  * does not name.
  */
 const CLEAN_CLI = "scripts/clean.ts"
+const CERTIFY_BIN = "scripts/certify.ts"
+const SETTLEMENT_FIXTURE = "scripts/settlement.config.mjs"
 const DOCS_GATE = "scripts/docs-audit.mjs"
 const TEA_HOOKS = [".claude", ".agents"].map((folder) => `../../${folder}/skills/bmad-testarch-framework/resources/hooks/tea-enforce.cjs`)
 const DRAFT_SCRIPT = "../../_bmad-output/goals/xstate-5-33-2-port.goal/orchestrator/draft-rewrite.mts"
@@ -348,6 +355,15 @@ const WALK_PROBLEM_ALLOWANCES: ReadonlyArray<readonly [file: string, problems: R
     `${DRAFT_SCRIPT}: "typescript" names a package that no node_modules folder holds`
   ]],
   [CLEAN_CLI, [`${CLEAN_CLI}:59 import(configPath) names a module the walk cannot read`]],
+  [CERTIFY_BIN, [
+    `${CERTIFY_BIN}:106 import(pathToFileURL(configFile).href) names a module the walk cannot read`,
+    `${CERTIFY_BIN}: "@jambudipa/xstate-effect" names a package that no node_modules folder holds`,
+    `${CERTIFY_BIN}: "@jambudipa/xstate-effect/graph" names a package that no node_modules folder holds`
+  ]],
+  [SETTLEMENT_FIXTURE, [
+    `${SETTLEMENT_FIXTURE}: "@jambudipa/xstate-effect" names a package that no node_modules folder holds`,
+    `${SETTLEMENT_FIXTURE}: "@jambudipa/xstate-effect/graph" names a package that no node_modules folder holds`
+  ]],
   [DOCS_GATE, [`${DOCS_GATE}:77 createRequire(join(root, 'package.json')) is a loader reference that the walk cannot follow`]]
 ]
 
@@ -385,7 +401,7 @@ const inGeneratedProgram = (found: string): boolean =>
  * module that holds an allowed problem or a generated program.
  */
 const assertAllowedWalkProblems = (list: ModuleList, root: string = PKG_ROOT): void => {
-  const allowedFiles = [...GENERATED_PROGRAMS, ...TEA_HOOKS, DRAFT_SCRIPT, CLEAN_CLI, DOCS_GATE]
+  const allowedFiles = [...GENERATED_PROGRAMS, ...TEA_HOOKS, DRAFT_SCRIPT, CLEAN_CLI, CERTIFY_BIN, SETTLEMENT_FIXTURE, DOCS_GATE]
   assert.deepStrictEqual(list.problems.filter((problem) => !inGeneratedProgram(problem)).sort(), [...allowedWalkProblems(list)].sort())
   const repository = repositoryScriptModules(root).paths
   assert.includeMembers([...list.paths], allowedFiles.filter((path) => repository.includes(path)))
@@ -2108,6 +2124,78 @@ it.effect("x", () => retryUntil(Effect.void))
     }), 60_000)
 })
 
+// ---------------------------------------------------------------- the spread ban in machine states
+
+/** The words of the spread ban's message that name its reason. */
+const SPREAD_BAN_REASON = "TypeScript erases spread keys"
+
+/**
+ * The line of each finding of the spread ban, read from ESLint's structured result. The rules
+ * come from the real config, so a case fails if the lint command would not see the rule. The
+ * path is a file that exists, as the typed parser opens only files of the project; the text is
+ * the case, and the path selects the config block. The one override drops the test block's
+ * `project`: with it, the first lint of a path reads the file on the disk, not the text.
+ */
+const spreadBanLines = (code: string, filePath: string) =>
+  Effect.promise(async () => {
+    const eslint = new ESLint({
+      cwd: PKG_ROOT,
+      overrideConfig: [{ files: ["test/**/*.ts"], languageOptions: { parserOptions: { project: null } } }]
+    })
+    const [result] = await eslint.lintText(code, { filePath: join(PKG_ROOT, filePath) })
+    assert.deepStrictEqual((result?.messages ?? []).filter((message) => message.fatal), [])
+    return (result?.messages ?? [])
+      .filter((message) => message.ruleId === "no-restricted-syntax" && message.message.includes(SPREAD_BAN_REASON))
+      .map((message) => message.line)
+  })
+
+/** One file of each block of the config that holds the rule. */
+const SPREAD_BAN_BLOCKS = { src: "src/index.ts", test: "test/scripts.test.ts", upstream: "test/upstream/assign.test.ts" } as const
+
+/** Every form of a spread directly in a `states` object, each with the spread on line 2. */
+const SPREAD_REFUSED = {
+  "root createMachine": `createMachine({\n  states: { ...wide, done: { type: "final" } }\n})\n`,
+  "setup variable": `s.createMachine({\n  states: { ...wide, done: { type: "final" } }\n})\n`,
+  "setup chain": `setup({}).createMachine({\n  states: { ...wide, done: { type: "final" } }\n})\n`,
+  "namespace call": `SM.createMachine({\n  states: { ...wide, done: { type: "final" } }\n})\n`,
+  "nested states": `s.createMachine({ states: { a: {\n  states: { ...wide, done: { type: "final" } }\n} } })\n`,
+  "quoted key": `s.createMachine({\n  "states": { ...wide, done: { type: "final" } }\n})\n`,
+  "as const": `s.createMachine({\n  states: { ...wide, done: { type: "final" } } as const\n})\n`,
+  "satisfies": `s.createMachine({\n  states: { ...wide, done: { type: "final" } } satisfies object\n})\n`,
+  "inside a function": `const make = () => s.createMachine({\n  states: { ...wide, done: { type: "final" } }\n})\n`
+} as const
+
+/** Forms the rule must leave alone. */
+const SPREAD_ALLOWED = {
+  "no spread": `s.createMachine({ initial: "a", states: { a: {}, done: { type: "final" } } })\n`,
+  "spread beside states": `s.createMachine({ ...base, context: { ...seed }, states: { a: {} } })\n`,
+  "spread in a callback": `s.createMachine({ states: { a: { entry: assign(({ context }) => ({ ...context, n: 1 })) } } })\n`,
+  "states of another call": `other({ states: { ...wide, done: {} } })\n`
+} as const
+
+describe("[T1.11] the spread ban in machine states", () => {
+  for (const [block, filePath] of Object.entries(SPREAD_BAN_BLOCKS)) {
+    for (const [form, code] of Object.entries(SPREAD_REFUSED)) {
+      it.effect(`[T1.11] ${block}: refuses a spread in states, ${form}`, () =>
+        Effect.gen(function* () {
+          assert.deepStrictEqual(yield* spreadBanLines(code, filePath), [2])
+        }), 60_000)
+    }
+    for (const [form, code] of Object.entries(SPREAD_ALLOWED)) {
+      it.effect(`[T1.11] ${block}: passes ${form}`, () =>
+        Effect.gen(function* () {
+          assert.deepStrictEqual(yield* spreadBanLines(code, filePath), [])
+        }), 60_000)
+    }
+  }
+
+  it.effect("[T1.11] src: refuses a spread at any depth below states, outside a callback", () =>
+    Effect.gen(function* () {
+      const code = "s.createMachine({ states: {\n  a: { ...wideNode },\n  b: { on: { ...wideOn } },\n  c: { invoke: [...wideInvokes] }\n} })\n"
+      assert.deepStrictEqual(yield* spreadBanLines(code, SPREAD_BAN_BLOCKS.src), [2, 3, 4])
+    }), 60_000)
+})
+
 // ---------------------------------------------------------------- the guard against fails and retry
 
 /** A fixture test file of the no-skip guard, and the lines its report must hold for the file. */
@@ -2493,7 +2581,10 @@ const lintExceptions = (eslint: ESLint, files: ReadonlyArray<string>, canonical:
     const severities = (rules: ResolvedRules): ReadonlyArray<readonly [string, unknown]> =>
       Object.keys(rules).sort().map((rule) => [rule, severityOf(rules, rule)])
     const expectedRelaxed = RELAXED_RULES.map((rule) => [rule, 0] as const)
-    if (JSON.stringify(severities(relaxed)) !== JSON.stringify(expectedRelaxed)) {
+    // The test block adds one rule at error, the spread ban of machine states (D4)
+    const expectedTests = [...expectedRelaxed, ["no-restricted-syntax", 2] as const]
+      .sort(([left], [right]) => left < right ? -1 : 1)
+    if (JSON.stringify(severities(relaxed)) !== JSON.stringify(expectedTests)) {
       problems.push("the relaxed test block turns off other rules than the type-aware exemptions")
     }
     if (JSON.stringify(severities(scripts)) !== JSON.stringify(expectedRelaxed)) {

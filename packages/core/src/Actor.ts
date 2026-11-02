@@ -6,7 +6,6 @@
  */
 import {
   Cause,
-  Context,
   Deferred,
   Effect,
   Exit,
@@ -41,6 +40,9 @@ import * as Errors from "./Errors.js"
 import { isolateCallback, reportUnhandledError } from "./internal/reportError.js"
 import { eventString } from "./internal/eventString.js"
 import { type Drain, DrainKey, type WaitingDelivery, WaitingDeliveryKey } from "./internal/delivery.js"
+import { ProcessingActors } from "./internal/processingActors.js"
+import { hasAgentBrand, type NotAgentLogic, type NotInlineChild } from "./internal/agentBrand.js"
+import { capabilityFor, isLogicCapability } from "./internal/logicCapability.js"
 import type { InspectionEventInput } from "./inspection.js"
 import {
   ACTOR_REF_TYPE,
@@ -611,16 +613,6 @@ const ActorProto = Object.assign(Object.create(ActorClass.prototype) as object, 
 // MAILBOX
 // ============================================================
 
-/**
- * The actors whose processing or callbacks the current fiber runs in: an actor's processing
- * fiber, its `start`, and its subscribe callbacks set it (SD-23). A send made from such a
- * fiber never waits for its macrostep, and a stop of one of these actors never waits for its
- * processing fiber, so an actor never waits for itself or for another actor.
- */
-const ProcessingActors = Context.Reference<ReadonlyArray<AR.ActorRefBase>>("@jambudipa/xstate-effect/Actor/ProcessingActors", {
-  defaultValue: () => [],
-})
-
 /** One event in an actor's mailbox. */
 type Envelope<TEvent extends EventObject> =
   | {
@@ -805,7 +797,7 @@ const unregisterRecursively = (system: ActorSystemService, ref: AR.ActorRefBase)
  *   reports the value once through the Effect logger (`Effect.logError`, SD-21).
  * - It takes an `AnyStateMachine` too (upstream `createActor(machine: AnyStateMachine)`, as
  *   the SCXML runner holds one): the actor's snapshots are `AnyMachineSnapshot`s and its
- *   events `EventObject`s; and an `AnyActorLogic`, which gives the root `AnyActor` (see
+ *   events `EventObject`s; and an `AnyLogicSlot`, which gives the root `AnyActor` (see
  *   {@link MakeActor}).
  *
  * @example
@@ -823,34 +815,41 @@ const unregisterRecursively = (system: ActorSystemService, ref: AR.ActorRefBase)
  * @category Constructors
  */
 export const make: MakeActor = ((
-  logic: AL.AnyActorLogic,
+  logic: AL.AnyLogicSlot,
   options?: ActorOptions<ActorLogic<Snapshot, EventObject, unknown>>
 ) =>
   // One function serves both signatures: each hands over a logic of some snapshot, event and
   // input types, and the actor is built for those, whatever the caller knows of them. Each
   // run of the Effect allocates its own actor object, so the same Effect value creates a new
-  // actor every time it runs (D6)
+  // actor every time it runs (D6). Agent logic whose brand a cast hid is refused before it is
+  // built, so its first turn never runs (NEG-4); invocations build through `buildChild`
   Effect.suspend(() =>
-    build(
-      allocateChild(),
-      logic as unknown as ActorLogic<Snapshot, EventObject, unknown>,
-      options
-    )
+    hasAgentBrand(logic)
+      ? Effect.die(new Errors.AgentRunError({ message: agentRunMessage }))
+      : build(
+        allocateChild(),
+        logic as unknown as ActorLogic<Snapshot, EventObject, unknown>,
+        options
+      )
   )) as unknown as MakeActor
+
+/** The message of the {@link Errors.AgentRunError} a cast agent gets from {@link make}. */
+const agentRunMessage =
+  "Agent logic cannot run as a root actor: it runs only as a machine's invocation, whose onDone settles it."
 
 /**
  * The signatures of {@link make} and `createActor` (upstream `createActor<TLogic extends
- * AnyActorLogic>`):
+ * AnyLogicSlot>`):
  *
  * - An `AnyStateMachine`, a machine whose types the caller does not know, gives an actor of
  *   `AnyMachineSnapshot` and `EventObject`, with any input; it needs no Effect service but
  *   its scope. Upstream reads `any` for those types; the port has no `any`.
  * - An `AnyActorLogic`, a logic whose types the caller does not know (upstream
- *   `createActor<TLogic extends AnyActorLogic>`, whose actor is `Actor<any>`), gives the
+ *   `createActor<TLogic extends AnyLogicSlot>`, whose actor is `Actor<any>`), gives the
  *   root {@link AnyActor}, with any input; it needs no Effect service but its scope.
  * - Actor logic of known types gives an actor of those types; it requires the `input`
  *   option when the logic's input type does not take `undefined` (`ActorOptionsArgs`).
- * - A logic whose type is a type parameter (`<T extends AnyActorLogic>(logic: T) =>
+ * - A logic whose type is a type parameter (`<T extends AnyLogicSlot>(logic: T) =>
  *   createActor(logic)`, upstream `Actor<TLogic>`) gives an actor of `ActorLogic.SnapshotOf`,
  *   `EventOf` and `EmittedOf` that logic, so it is the logic's `ActorRefFromLogic`; the input
  *   rule is the same, decided once the logic is known.
@@ -860,6 +859,13 @@ export const make: MakeActor = ((
  * `AnyActorLogicArgs`), which TypeScript does not report. Its own signature comes next, so it
  * decides the call and its errors (a missing input, a wrong option); the last signature
  * checks a known logic the same way, so it accepts no call that the logic's own rejects.
+ *
+ * Neither of the last two takes agent logic (NEG-4): it runs only as a machine's invocation,
+ * whose `onDone` settles it, so a call that passes it fails at that argument with an error that
+ * names `[AgentBrand]`. {@link make} refuses a cast agent at run time with `AgentRunError`. Both
+ * refuse it the same way, `logic & NotAgentLogic`: TypeScript first tries overloads by the
+ * subtype relation, which no logic without the optional brand key passes, so neither can win
+ * that first pass over the other and the logic's own signature still decides the call.
  *
  * @example
  * ```ts
@@ -877,18 +883,18 @@ export const make: MakeActor = ((
  * @category Constructors
  */
 export interface MakeActor {
-  <TLogic extends AL.AnyActorLogic>(
+  <TLogic extends AL.AnyLogicSlot>(
     ...args: AnyStateMachineArgs<TLogic>
   ): Effect.Effect<Actor<AnyMachineSnapshot, EventObject>, never, Scope.Scope>
-  <TLogic extends AL.AnyActorLogic>(
+  <TLogic extends AL.AnyLogicSlot>(
     ...args: AnyActorLogicArgs<TLogic>
   ): Effect.Effect<AnyActor, never, Scope.Scope>
   <TSnapshot extends Snapshot, TEvent extends EventObject, TInput, TEmitted extends EventObject, R>(
-    logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>,
+    logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & NotAgentLogic,
     ...[options]: ActorOptionsArgs<ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>>
   ): Effect.Effect<Actor<TSnapshot, TEvent, TEmitted>, never, Scope.Scope | R>
-  <TLogic extends AL.AnyActorLogic>(
-    logic: TLogic,
+  <TLogic extends AL.AnyLogicSlot>(
+    logic: TLogic & NotAgentLogic,
     ...[options]: GenericLogicOptionsArgs<TLogic>
   ): Effect.Effect<
     Actor<AL.ActorLogic.SnapshotOf<TLogic>, AL.ActorLogic.EventOf<TLogic>, AL.ActorLogic.EmittedOf<TLogic>>,
@@ -911,7 +917,7 @@ type AnyStateMachineArgs<TLogic> = TLogic extends AnyStateMachine
   : NoArguments
 
 /**
- * The arguments of the `AnyActorLogic` signature of {@link MakeActor}: the logic and optional
+ * The arguments of the `AnyLogicSlot` signature of {@link MakeActor}: the logic and optional
  * options when `TLogic` is a logic of unknown types (no machine, and no `ActorLogic` of its
  * own types); otherwise three arguments that no call gives, as {@link AnyStateMachineArgs}.
  */
@@ -931,12 +937,12 @@ type NoArguments = [never, never, never]
  * both of its branches while `TLogic` is generic, and a call with no options fits. For a
  * known logic it is `ActorOptionsArgs`.
  */
-type GenericLogicOptionsArgs<TLogic extends AL.AnyActorLogic> = RequiresOptions<TLogic> extends true
+type GenericLogicOptionsArgs<TLogic extends AL.AnyLogicSlot> = RequiresOptions<TLogic> extends true
   ? Required<[options?: ActorOptions<TLogic> & { readonly [K in Types.RequiredActorOptionsKeys<TLogic>]: unknown }]>
   : [options?: ActorOptions<TLogic>]
 
 /** Whether a logic requires an option key (upstream `IsNotNever<RequiredOptions<TLogic>>`). */
-type RequiresOptions<TLogic extends AL.AnyActorLogic> = [Types.RequiredActorOptionsKeys<TLogic>] extends [never] ? false : true
+type RequiresOptions<TLogic extends AL.AnyLogicSlot> = [Types.RequiredActorOptionsKeys<TLogic>] extends [never] ? false : true
 
 /**
  * The object an actor is built into. `make` builds into a new one; a parent's synchronous
@@ -953,7 +959,8 @@ export const allocateChild = (): AR.AnyActorRef => Object.create(ActorProto) as 
  * Builds a child of `parent` into `child`, an object `allocateChild` gave, from a spawn
  * request (upstream `createActor(logic, { parent, id, systemId, input, src, syncSnapshot })`
  * in `spawn` and `spawnChild`). The child is not started. A logic's requirements are the
- * parent's: the child reads the services of the fiber that builds it.
+ * parent's: the child reads the services of the fiber that builds it. Agent logic is refused
+ * unless the engine starts it as an invocation (see {@link refuseAgentChild}).
  *
  * @since 0.1.0
  * @category Constructors
@@ -966,14 +973,39 @@ export const buildChild = (
 ): Effect.Effect<Actor.Any, never, Scope.Scope> =>
   // The request holds any logic; the child is built as an actor of the base types, and its
   // logic's requirements are the parent's (SD-8)
-  build(child, request.logic as unknown as ActorLogic<Snapshot, EventObject, unknown>, {
-    id: Option.getOrUndefined(request.id),
-    systemId: Option.getOrUndefined(request.systemId),
-    input: request.input,
-    src: request.src,
-    syncSnapshot: request.syncSnapshot,
-    parent,
-  })
+  Effect.andThen(
+    refuseAgentChild(request, parent),
+    build(child, request.logic as unknown as ActorLogic<Snapshot, EventObject, unknown>, {
+      id: Option.getOrUndefined(request.id),
+      systemId: Option.getOrUndefined(request.systemId),
+      input: request.input,
+      src: request.src,
+      syncSnapshot: request.syncSnapshot,
+      parent,
+    })
+  )
+
+/**
+ * The one gate every child passes on its way to `build` (NEG-3): agent logic dies with
+ * `AgentSpawnError` unless the request holds the runtime's capability, which only the engine
+ * sets, for a state's invocation or the restore of a machine's children. The checks in
+ * `spawn.ts` stand before it, as they must refuse before a user's input function runs; this one
+ * holds the routes they do not see, `createSpawnFunction` and a logic that reads `ActorScope`.
+ */
+const refuseAgentChild = (
+  request: Pick<AL.SpawnRequest, "logic" | "src" | "invocation">,
+  parent: AR.AnyActorRef
+): Effect.Effect<void> => {
+  if (!hasAgentBrand(request.logic) || isLogicCapability(request.invocation)) return Effect.void
+  const src = typeof request.src === "string" ? request.src : "inline logic"
+  return Effect.die(
+    new Errors.AgentSpawnError({
+      message: `Agent logic '${src}' cannot be spawned by actor '${parent.id}': agent logic settles only through an invocation's onDone, so invoke it with a settlement handler instead`,
+      src,
+      machineId: parent.id,
+    })
+  )
+}
 
 /**
  * Builds a child of `parent` from its entry in a persisted snapshot (upstream
@@ -992,15 +1024,18 @@ export const restoreChild = (
   parent: AR.AnyActorRef,
   validateSnapshot = false
 ): Effect.Effect<Actor.Any, never, Scope.Scope> =>
-  build(allocateChild(), request.logic as unknown as ActorLogic<Snapshot, EventObject, unknown>, {
-    id: request.id,
-    systemId: Option.getOrUndefined(request.systemId),
-    snapshot: Option.getOrUndefined(request.snapshot),
-    src: request.src,
-    syncSnapshot: request.syncSnapshot,
-    parent,
-    validateSnapshot,
-  })
+  Effect.andThen(
+    refuseAgentChild(request, parent),
+    build(allocateChild(), request.logic as unknown as ActorLogic<Snapshot, EventObject, unknown>, {
+      id: request.id,
+      systemId: Option.getOrUndefined(request.systemId),
+      snapshot: Option.getOrUndefined(request.snapshot),
+      src: request.src,
+      syncSnapshot: request.syncSnapshot,
+      parent,
+      validateSnapshot,
+    })
+  )
 
 /**
  * Builds an actor into `target` (the body of `make`): `target` gets every member of the
@@ -1145,7 +1180,7 @@ const build = <
     // still pending, or that a restore gave it and `start` has not resumed yet (P4)
     const getPersistedSnapshot: Effect.Effect<unknown, SerializationError> = Effect.gen(function* () {
       const snapshot = yield* getSnapshot
-      const persisted = yield* logic.getPersistedSnapshot(snapshot)
+      const persisted = yield* logic.getPersistedSnapshot(snapshot, ...capabilityFor(logic))
       const pending = Object.values(yield* system.scheduler.scheduledEvents)
       const events = yield* persistScheduledEvents(pending, eventScope(snapshot), yield* Ref.get(restoredEvents))
       return withScheduledEvents(persisted, events)
@@ -1325,7 +1360,7 @@ const build = <
     const processStop = (current: TSnapshot): Effect.Effect<void> =>
       Effect.gen(function* () {
         const transitioned = yield* Effect.exit(
-          logic.transition(current, stopEvent as TEvent).pipe(
+          logic.transition(current, stopEvent as TEvent, ...capabilityFor(logic)).pipe(
             Effect.provideService(ProcessingActors, [actor]),
             Effect.provide(actorScopeLayer),
             Scope.provide(lifetime),
@@ -1712,7 +1747,7 @@ const build = <
             onNone: () => Effect.succeed(Option.none<unknown>()),
             onSome: (logicStart) =>
               failureOf(
-                Effect.suspend(() => logicStart(startSnapshot)).pipe(
+                Effect.suspend(() => logicStart(startSnapshot, ...capabilityFor(logic))).pipe(
                   Effect.provideService(ProcessingActors, [actor]),
                   Effect.provide(actorScopeLayer),
                   Scope.provide(lifetime),
@@ -2028,7 +2063,7 @@ const build = <
             const restored = yield* Option.match(Option.fromNullishOr(logic.restoreSnapshot), {
               // Upstream uses a snapshot as it is when the logic cannot restore one
               onNone: () => Effect.succeed(persisted as TSnapshot),
-              onSome: (restore) => restore(persisted),
+              onSome: (restore) => restore(persisted, ...capabilityFor(logic)),
             })
             const checked = options?.validateSnapshot === true ? yield* validateRestoredSnapshot(persisted, restored) : restored
             yield* Ref.set(restoredEvents, events)
@@ -2146,7 +2181,7 @@ const build = <
         // snapshot it had before the event, so nothing the macrostep changed or spawned is in
         // it, and it drops the macrostep's deferred effects: none of its sends goes out and no
         // child it spawned starts (SD-27, A9b). As upstream, no `@xstate.snapshot` follows.
-        const transitioned = yield* Effect.exit(logic.transition(currentSnapshot, event))
+        const transitioned = yield* Effect.exit(logic.transition(currentSnapshot, event, ...capabilityFor(logic)))
         if (Exit.isFailure(transitioned)) {
           const error = Cause.squash(transitioned.cause)
           yield* Ref.set(deferredEffects, Chunk.empty())
@@ -2302,8 +2337,8 @@ export const createActor = make
 export const createSpawnFunction = (
   _system: ActorSystemService,
   parent: AR.AnyActorRef
-) => <TLogic extends AL.AnyActorLogic>(
-  logic: TLogic,
+) => <TLogic extends AL.AnyLogicSlot>(
+  logic: TLogic & NotInlineChild,
   options?: Types.SpawnOptions<TLogic>
 ) =>
   Effect.gen(function* () {

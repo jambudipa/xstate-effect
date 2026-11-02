@@ -1,0 +1,16 @@
+import { setup } from "../../../src/index.js"
+
+/** No agent or certified child activates the new settlement gate. */
+const s = setup({})
+/** Existing wide annotations remain accepted in a plain setup. */
+declare const wide: { readonly initial: string; readonly states: Readonly<Record<string, object>> }
+/** Existing optional states remain accepted in a plain setup. */
+declare const optional: Partial<{ initial: "x"; states: { x: { after: { 1: "done" } }; done: { type: "final" } } }>
+/** Plain setups preserve their prior treatment of erased configurations. */
+declare const erased: any
+/** The annotated configuration remains accepted. */
+export const annotated = s.createMachine(wide)
+/** The optional configuration remains accepted. */
+export const partial = s.createMachine(optional)
+/** The erased configuration remains accepted. */
+export const anyConfig = s.createMachine(erased)

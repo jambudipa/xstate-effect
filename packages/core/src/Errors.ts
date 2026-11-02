@@ -233,6 +233,76 @@ export class EventAssertionError extends Data.TaggedError("EventAssertionError")
 }
 
 /**
+ * A spawn of agent logic (NEG-3, NEG-3.1; a port addition). Agent logic settles only through
+ * the `onDone` of an invocation, and a spawned child has none, so the types of every spawn entry
+ * point refuse it, `createSpawnFunction` included. This error is the run-time half, for a src
+ * the types cannot see: a cast that hid the brand, a string src whose logic `provide` or
+ * `spawnChildFromRegistry` supplies, or a logic that reads `ActorScope` and spawns or restores a
+ * child itself. The spawn fails with it as a defect before the agent's logic runs, which gives
+ * the actor status `error` (SD-4); a `createSpawnFunction` call dies with it.
+ *
+ * @since 0.4.0
+ * @category Errors
+ */
+export class AgentSpawnError extends Data.TaggedError("AgentSpawnError")<{
+  readonly message: string
+  /** The src as written: a name (a registry's name too), or `inline logic` for a logic given inline. */
+  readonly src: string
+  /** The id of the machine whose action asked for the spawn; of the parent actor on a direct route, which has no such action. */
+  readonly machineId: string
+}> {}
+
+/**
+ * Agent logic given to a standalone run entry point (NEG-4; a port addition): `createActor` or
+ * `Actor.make`. Agent logic runs only as a machine's invocation, whose `onDone` settles it, so
+ * those entry points refuse it by type. This error is the run-time half, for a cast that hid the
+ * brand: the creation dies with it before the agent's first turn.
+ *
+ * @since 0.4.0
+ * @category Errors
+ */
+export class AgentRunError extends Data.TaggedError("AgentRunError")<{
+  readonly message: string
+}> {}
+
+/**
+ * Agent logic given to `provide` in place of an actor whose implementation is not agent logic
+ * (NEG-7; a port addition). The machine's config gives that actor's invocations no settlement
+ * handler, so `provide` refuses it by type. This error is the run-time half, for a cast that hid
+ * the brand: the machine `provide` returns keeps it, and each initial or restored snapshot of
+ * that machine dies with it, which gives the actor status `error` before any child starts.
+ *
+ * @since 0.4.0
+ * @category Errors
+ */
+export class AgentProvideError extends Data.TaggedError("AgentProvideError")<{
+  readonly message: string
+  /** The actor name the agent logic was provided for. */
+  readonly actor: string
+  /** The id of the machine whose `provide` received it. */
+  readonly machineId: string
+}> {}
+
+/**
+ * A progress delay that `provide` replaced with one that may never fire (NEG-10; a port
+ * addition). In a machine that holds agent logic, directly, inline or through a child, a named
+ * delay that keys an `after` transition out of its state is that state's progress exit, so
+ * `provide` takes for it only a positive integer literal by type. This error is the run-time half
+ * for the merged delays, from `provide`, `setup` or `createMachine`: infinity, NaN, an infinite
+ * `Duration` or a function (which can return either). A later `provide` of a finite delay cures it.
+ *
+ * @since 0.4.0
+ * @category Errors
+ */
+export class ProgressDelayError extends Data.TaggedError("ProgressDelayError")<{
+  readonly message: string
+  /** The name of the refused delay. */
+  readonly delay: string
+  /** The id of the machine whose `provide` received it. */
+  readonly machineId: string
+}> {}
+
+/**
  * Union type of all XState Effect errors.
  *
  * @since 0.1.0
@@ -251,3 +321,7 @@ export type XStateError =
   | StartError
   | InvokeError
   | DelayError
+  | AgentSpawnError
+  | AgentRunError
+  | AgentProvideError
+  | ProgressDelayError

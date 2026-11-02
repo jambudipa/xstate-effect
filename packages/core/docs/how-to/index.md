@@ -43,6 +43,10 @@ Task-oriented recipes for a goal you already have. Each assumes you know the bas
 - [How to test delayed transitions](./test-delayed-transitions.md) — Create a `SimulatedClock`, give it to the root actor with `createActor(machine, { clock })`, and move time with `yield* clock.increment(ms)`.
 - [How to generate tests from a machine](./generate-tests-from-a-machine.md) — Build a test model with `createTestModel(machine, options)` from `@jambudipa/xstate-effect/graph`, generate its paths with `model.getShortestPaths()`, and run each one with `path.test({ events, states })`.
 
+## Agents
+
+- [How to prove that an agent machine settles](./prove-an-agent-machine-settles.md) — Declare the agent in `setup`, fix each compile error, run `proveSettlement` and `explore`, and check a certificate in CI.
+
 ## Coming from XState
 
 - [How to port XState code to this package](./migrate-from-xstate.md) — Machine configs port almost unchanged: change the imports and keep `setup`, `createMachine` and the action, guard and actor logic creators.

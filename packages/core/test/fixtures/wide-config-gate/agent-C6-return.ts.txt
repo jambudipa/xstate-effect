@@ -1,0 +1,38 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import type { HoldsAgents } from "../../../src/internal/agentBrand.js"
+import { agentSetup as s } from "./support.js"
+
+/** Read the config carried by the returned agent-holding machine. */
+type ConfigOf<T> = T extends HoldsAgents<infer Config> ? Config : never
+/** Require exact structural equality for the retained literals. */
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
+/** Make each literal assertion a compiler obligation. */
+const exact = <T extends true>(): void => undefined
+
+/** The inlineAssign form returns the exact config after successful proof. */
+export const inlineAssign = s.createMachine({ entry: assign({}), initial: "x", states: { x: { on: { PING: {} }, invoke: { src: "agent", input: 1, onDone: "done" }, after: { 1: "done" } }, done: { type: "final" } } })
+exact<Equal<ConfigOf<typeof inlineAssign>["initial"], "x">>()
+exact<Equal<keyof ConfigOf<typeof inlineAssign>["states"], "x" | "done">>()
+exact<Equal<ConfigOf<typeof inlineAssign>["states"]["done"]["type"], "final">>()
+exact<Equal<ConfigOf<typeof inlineAssign>["states"]["x"]["invoke"]["onDone"], "done">>()
+
+/** The destructure form returns the exact config after successful proof. */
+export const destructure = s.createMachine({ entry: ({ event }) => void event, initial: "x", states: { x: { on: { PING: {} }, invoke: { src: "agent", input: 1, onDone: "done" }, after: { 1: "done" } }, done: { type: "final" } } })
+exact<Equal<ConfigOf<typeof destructure>["initial"], "x">>()
+exact<Equal<keyof ConfigOf<typeof destructure>["states"], "x" | "done">>()
+exact<Equal<ConfigOf<typeof destructure>["states"]["done"]["type"], "final">>()
+exact<Equal<ConfigOf<typeof destructure>["states"]["x"]["invoke"]["onDone"], "done">>()
+
+/** The contextFactory form returns the exact config after successful proof. */
+export const contextFactory = s.createMachine({ context: ({ input }) => ({ input }), initial: "x", states: { x: { on: { PING: {} }, invoke: { src: "agent", input: 1, onDone: "done" }, after: { 1: "done" } }, done: { type: "final" } } })
+exact<Equal<ConfigOf<typeof contextFactory>["initial"], "x">>()
+exact<Equal<keyof ConfigOf<typeof contextFactory>["states"], "x" | "done">>()
+exact<Equal<ConfigOf<typeof contextFactory>["states"]["done"]["type"], "final">>()
+exact<Equal<ConfigOf<typeof contextFactory>["states"]["x"]["invoke"]["onDone"], "done">>()
+
+/** The enqueued form returns the exact config after successful proof. */
+export const enqueued = s.createMachine({ entry: enqueueActions(({ enqueue }) => void enqueue), initial: "x", states: { x: { on: { PING: {} }, invoke: { src: "agent", input: 1, onDone: "done" }, after: { 1: "done" } }, done: { type: "final" } } })
+exact<Equal<ConfigOf<typeof enqueued>["initial"], "x">>()
+exact<Equal<keyof ConfigOf<typeof enqueued>["states"], "x" | "done">>()
+exact<Equal<ConfigOf<typeof enqueued>["states"]["done"]["type"], "final">>()
+exact<Equal<ConfigOf<typeof enqueued>["states"]["x"]["invoke"]["onDone"], "done">>()

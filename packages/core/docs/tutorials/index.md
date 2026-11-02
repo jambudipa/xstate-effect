@@ -13,5 +13,6 @@ Learning-oriented lessons. Start with the first one: each builds on the one befo
 4. [Run side effects](./04-side-effects.md) — You make the turnstile act on the world: it reports its barrier, its credit and its passes on the console, and it locks itself again when nobody passes in time.
 5. [Invoke and spawn child actors](./05-child-actors.md) — You build a station that runs one turnstile actor for each of its gates.
 6. [Test your machine](./07-testing.md) — You write Vitest tests for the turnstile and the station of the two previous tutorials.
+7. [Add an agent that must settle](./08-agent-that-must-settle.md) — You give the station an inspector, agent logic that must move its state, and you prove the machine.
 
 When you have finished, the [how-to guides](../how-to/index.md) cover real tasks, and the [explanation](../explanation/index.md) pages cover the design.

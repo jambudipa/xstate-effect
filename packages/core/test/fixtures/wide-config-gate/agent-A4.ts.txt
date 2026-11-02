@@ -1,0 +1,6 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { agentSetup as s } from "./support.js"
+/** This declaration supplies the agent-A4 acceptance case. */
+function states(): Record<string, object> { return {done:{type:"final"}} };
+/** This declaration supplies the agent-A4 acceptance case. */
+export const machine=s.createMachine({initial:"done",states:states()});

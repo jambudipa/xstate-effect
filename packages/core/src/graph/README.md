@@ -3,13 +3,14 @@
 The `@jambudipa/xstate-effect/graph` entry point: the port of upstream `xstate/graph`
 (`src/graph/` at xstate@5.33.2). It walks a logic's transitions to build adjacency maps,
 shortest paths, simple paths and the path of an event sequence, draws a machine as a directed
-graph, and runs model-based tests (`TestModel`, `createTestModel`).
+graph, and runs model-based tests (`TestModel`, `createTestModel`). The port adds the settlement
+proof and the generic explorer.
 
 ## What belongs here
 
 Code that reads a logic through `getInitialSnapshot` and `transition` only, to enumerate its
-states and paths, and the test model built on those paths. Each file ports the upstream file of
-the same name.
+states and paths, the test model built on those paths, the structural settlement proof and the exhaustive
+explorer. Each other file ports the upstream file of the same name.
 
 It does not hold engine semantics (`src/stateUtils.ts`), the inert actor scope it borrows
 (`createInertActorScope` in `src/testing/`), or anything that starts a live actor. A traversal
@@ -24,6 +25,22 @@ never starts an actor.
   state takes, the initial snapshot as the start).
 - `adjacency.ts` is the breadth-first walk that the path functions build on.
 - `TestModel.ts` holds the test model and `createTestModel`.
+- `settlement.ts` holds `proveSettlement`, the structural settlement proof (a port addition). Unlike
+  the rest of this folder it reads the state node tree only, and it starts nothing. It also holds
+  `certify` and `checkCertificate`: `certify` lists a machine's states and edges in the form the
+  `Certified` type compares, and hashes the machine, its module closure, its provided
+  implementations and the library version. `checkCertificate` derives all of that again and never
+  trusts the file.
+- `explore.ts` holds `explore`, the exhaustive explorer over an environment's inputs (a port
+  addition), with the drivers `timerFirings` and `processRestart`. It runs real transitions in an
+  inert scope, reads a microstep's taken transitions from the inspection event, and records
+  context reads through `src/internal/contextReads.ts`.
+- `moduleClosure.ts` walks the imports of an entry module for that hash, through the `FileSystem`
+  and `Path` services, so this subpath imports no platform.
+- `importScan.ts` reads one file's imports for that walk, with no parser, as the package has no
+  dependency that holds one. A small lexer finds the real imports, which `moduleClosure` holds a
+  build to, and a pattern over the whole text finds every other name of an import form, which only
+  adds inputs to the hash. Its header lists what neither sees.
 
 ## Rules that span the files
 

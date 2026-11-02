@@ -7,6 +7,8 @@
 import { Effect, Option } from "effect"
 import type { EventObject } from "../Event.js"
 import type { ActorRefBase } from "../ActorRef.js"
+import type { AgentChildId } from "../internal/agentBrand.js"
+import { withStopTarget } from "../internal/stopTarget.js"
 import type { ActionDefinition, ActionContext } from "../Types.js"
 import * as Types from "../Types.js"
 
@@ -25,6 +27,20 @@ export type StopChildTarget<TContext, TEvent extends EventObject> =
   | ((ctx: ActionContext<TContext, TEvent>) => string | ActorRefBase | undefined)
 
 /**
+ * The target `stopChild` takes (the module's in a setup config, a setup's, and
+ * `enqueue.stopChild`): `TChild` itself, unless it is
+ * an id that `types.children` gives agent logic among the declared actors `TActor`, which no
+ * stop takes (NEG-9, a port addition). A stop by that id would end the agent without the
+ * settlement its invocation's `onDone` handles. A reference, a function, or an id the types do
+ * not tie to agent logic passes as before. The check reads each member: a union such as
+ * `cond ? "agent" : "other"` may name the agent at run time, so one agent id refuses it.
+ *
+ * @since 0.4.0
+ * @category Actions
+ */
+export type NotAgentChild<TChild, TActor> = TChild & ([Extract<TChild, AgentChildId<TActor>>] extends [never] ? unknown : never)
+
+/**
  * Creates an action that stops a child actor (upstream `stopChild`). The target is a child's
  * id, its systemId (D7, beyond XState), a reference, or a function of the action context
  * giving one of these. The engine removes the child from `snapshot.children`, gives up its
@@ -32,6 +48,8 @@ export type StopChildTarget<TContext, TEvent extends EventObject> =
  * at once (it never starts), a running child after the events already sent to it. An unknown
  * id changes nothing; an actor that is not a child sets the machine's status to `error` with
  * `Cannot stop child actor <child> of <actor> because it is not a child`.
+ * Written in a setup config, it reads the setup's names: an id that `types.children` gives agent
+ * logic fails type checking (NEG-9), as only the agent's settlement may end it.
  *
  * @example
  * ```ts
@@ -50,7 +68,7 @@ export type StopChildTarget<TContext, TEvent extends EventObject> =
  */
 export const stopChild: StopChild = (<TContext, TEvent extends EventObject>(
   child: StopChildTarget<TContext, TEvent>
-): ActionDefinition<TContext, TEvent> => ({
+): ActionDefinition<TContext, TEvent> => withStopTarget({
   type: "xstate.stopChild",
   exec: (ctx, _params) =>
     // Upstream `resolveStop`: a function target receives the action arguments; the engine
@@ -62,7 +80,7 @@ export const stopChild: StopChild = (<TContext, TEvent extends EventObject>(
         onSome: (target) => Types.ActionResult.StopChild(target),
       })
     ),
-})) as StopChild
+}, child)) as StopChild
 
 /**
  * The type of {@link stopChild}: its first signature is the one every call resolves to; the second
@@ -77,10 +95,12 @@ export const stopChild: StopChild = (<TContext, TEvent extends EventObject>(
 export interface StopChild {
   <
     TContext,
-    TEvent extends EventObject
+    TEvent extends EventObject,
+    TChild extends StopChildTarget<TContext, TEvent> = StopChildTarget<TContext, TEvent>,
+    TNames extends Types.ImplementationNames = Types.ImplementationNames
   >(
-    child: StopChildTarget<TContext, TEvent>
-  ): ActionDefinition<TContext, TEvent>
+    child: NotAgentChild<TChild, NoInfer<TNames>["providedActor"]>
+  ): ActionDefinition<TContext, TEvent, void, never, TNames>
   <TDeferred extends never>(first: TDeferred, second: TDeferred, third: TDeferred): (deferred: TDeferred) => never
 }
 

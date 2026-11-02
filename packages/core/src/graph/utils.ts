@@ -28,6 +28,17 @@ const encodeJson = Schema.encodeUnknownOption(Schema.fromJsonString(Schema.Unkno
 export const simpleStringify = (value: unknown): string => Option.getOrElse(encodeJson(value), () => String(value))
 
 /**
+ * `true` when a transition has no guard. A transition definition holds its guard as an `Option`,
+ * in the state node tree and in a microstep's inspection event alike, so a nullish check passes
+ * for each. The structural proof and the explorer read a guard through this one test, as a
+ * `meta.ranking` counts only on a guarded transition, for both.
+ *
+ * @since 0.4.0
+ * @category Settlement
+ */
+export const isUnguarded = (transition: { readonly guard: Option.Option<unknown> }): boolean => Option.isNone(transition.guard)
+
+/**
  * The event descriptors the active state nodes of a snapshot take, each once, in the order of
  * their first occurrence (upstream `getAllOwnEventDescriptors` of `src/utils.ts`, a native
  * `Set` in insertion order; the root entry point exports this function as

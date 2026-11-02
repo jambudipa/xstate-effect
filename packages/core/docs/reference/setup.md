@@ -303,7 +303,12 @@ Builds a machine of the setup: the setup's records become the machine's implemen
 
 ### Signature
 
-`createMachine<TConfig>(config: SetupMachineConfig<…> & TConfig): SetupMachine<…>`
+`createMachine<TOutput, TEmitted, TStateKeys, TConfig>(config: SetupMachineConfig<…> & TConfig & checks): SetupMachine<…>`
+
+`checks` is the [type proof](./settlement.md#the-type-proof) of the config as written. In a setup
+with an agent actor or a certified child, the signature takes a second inference parameter,
+`TGraph`, and a final `notAny` rest parameter, so an `any` config does not compile. Since 0.4.0 the
+two forms differ, so code that names the type arguments of `createMachine` can need a change.
 
 `SetupMachine` is a [`StateMachine.StateMachine`](./create-machine.md#the-machine) with these
 type parameters:
@@ -341,6 +346,10 @@ The type checker applies these rules to the config:
   compile (XState gives the same error). To type the output, name the logic in `actors` and
   invoke it by its name.
 - With `types.emitted`, `emit` and `enqueue.emit` take only those events.
+- Since 0.4.0, each transition target and `initial` must name a state: `UnknownTarget` and
+  `UnknownInitial`. A plain `createMachine` has no such check.
+- In a setup with an agent actor or a certified child, the config must also pass the
+  [settlement proof](./settlement.md#the-type-proof).
 - A setup without a record takes no name of that kind.
 
 ### Returns
@@ -398,6 +407,61 @@ const door = setup({ types: {} as { events: { type: "CLOSE" } } }).createMachine
 
 export const created: Effect.Effect<unknown, never, Scope.Scope | Audit> = createActor(door)
 ```
+
+### Limits of the compile-time proof
+
+In a setup with agent actors, `createMachine` proves the config it can read and refuses a config
+it cannot read. Since 0.4.0 this has known limits. Each limit below is marked "observed" (a
+compiler or a test showed it) or "inferred" (a conclusion from those results). The compiler alone
+does not guarantee settlement, so run `proveSettlement` too. The investigation record is
+`docs/wide-config-gate-investigation.md` at the repository root.
+
+- **Observed: the proof cannot read the value of a named delay.** An `after` key names a delay,
+  and the setup's `delays` type holds `number`, so `after: { slow: "done" }` counts as progress at
+  compile time whatever `slow` is. `proveSettlement` resolves the name, and refuses a name with no
+  implementation, an infinite delay and a function. An inline `Infinity` key is refused at
+  compile time.
+- **Observed: a spread into `states` with an explicit key compiles.** TypeScript 6.0.3 and tsgo
+  7.0.0-dev give 0 diagnostics on the form below, with `hidden` an agent state that has no
+  `onDone`. A config of only `{ ...wideStates }` is refused. To reproduce it, run
+  `node scripts/repro-wide-spread.mjs --tsgo <path>`.
+
+  ```text
+  const wideStates: Readonly<Record<string, object>> = { hidden: { invoke: { src: "agent", input: 1 } } }
+  s.createMachine({ initial: "done", states: { ...wideStates, done: { type: "final" } } })
+  ```
+
+  **Inferred:** a signature that sees only that type cannot refuse the form, as the inferred type
+  equals that of a valid config with no spread. This does not show that every other construction
+  API is impossible. A variable annotated `typeof plainConfig` gives the same result (observed).
+- **Observed: two other layers cover the spread.** `proveSettlement` refuses that machine with
+  `AgentWithoutSettlement` on `hidden`, and `test/verify/machine-states-spread.spec.ts` pins this.
+  This package's ESLint config refuses a spread inside `states`. That rule is in this repository's
+  config only: it does not ship with the package, so add the same `no-restricted-syntax` selector
+  to your own config.
+- **Observed: the lint rule sees only the syntax of the call.** In `src` it refuses every spread
+  below `states`, outside a callback. In `test` it refuses only a spread directly in a `states`
+  object. It does not see a config or a `states` object built in a variable, a spread beside
+  `states` that brings in `states`, an aliased `createMachine`, or a machine in a callback inside
+  the `states` of another machine. `pnpm lint` does not cover `scripts/`.
+- **Observed: only `SettlementProof` refuses a wide config.** For a wide config with an agent actor,
+  `TargetCheck`, `SettlementCheck`, `MenuCheck` and `ChildSettlementCheck` each resolve to `unknown`.
+  The call is still refused, as `setup` applies `SettlementProof`, which gives `ConfigNotLiteral`.
+  A direct use of one of the four other types passes a wide config.
+- **Observed: a setup with no agent actor and no certified child checks less.** There a wide config
+  compiles, and `TargetCheck` and `SettlementProof` resolve to `unknown`. This is the typing of 0.3.0.
+- **Observed: the proof depends on the compiler version.** TypeScript 6.0.3 and tsgo
+  7.0.0-dev.20260707.2 pass the 127 acceptance fixtures. tsgo 7.0.0-dev.20251207.1 fails them. It
+  refuses some valid machines: an inline form in a setup with a certified child, and an inline
+  `stopChild` action in a transition, each with `CannotReachFinal` or `NoProgressGuarantee`.
+  TypeScript 5.8.2 refused a valid machine before the literal hint in `ConfigInference`; it was not
+  measured after it, so treat it as unsupported (inferred). Use TypeScript 6.0.3 or later.
+- **Observed: a misspelt key can get a less exact error.** In a setup with agent actors,
+  `onDon: "done"` on an agent invocation is refused for the missing `onDone`, not as an excess
+  property, on TypeScript 6.0.3 and tsgo 7.0.0-dev.20260707.2.
+- **Observed: the type cost rose.** A 35-state machine in an agent setup takes 340,673 instantiations
+  on TypeScript 6.0.3, against 319,264 before this change: +21,409 (+6.71%). **Inferred cause:** the
+  second inference path and the structural scan. No wall-clock figure was measured.
 
 ### Errors
 

@@ -37,9 +37,27 @@
  *   so a fiber it forks with `Effect.forkScoped` adds no requirement and ends with the actor.
  * - Type helpers (`src/ActorLogic.ts`, `src/ActorRef.ts`): the root's `ActorLogic.SnapshotOf<T>`
  *   and `ActorRef.SnapshotOf<T>` resolve, as the namespaces' `ActorLogic.ActorLogic.SnapshotOf<T>` do.
+ * - Agent spawns (`src/spawn.ts`, `src/setup.ts`, `src/Errors.ts`, NEG-3, NEG-9): the `spawn` of
+ *   an assigner and a setup's `spawnChild` refuse agent logic by type, inline or by a declared
+ *   name, and a setup's `stopChild` refuses the id `types.children` gives an agent; a cast that
+ *   hides the brand fails the spawn at run time with `AgentSpawnError`, and the agent never runs.
+ * - Agent settlement (`src/Types.ts`, `src/setup.ts`, `src/internal/settlement.ts`, S1, S2, S15):
+ *   an invocation of agent logic requires an `onDone` that leaves the invoking state on every
+ *   branch, takes no `onError`, and types `event.output` as the agent's `Unsettled`; its done
+ *   event is handled through no `on` key; when one of two agents in a state settles, the other
+ *   is stopped and its `onDone` never runs.
+ * - Agent invocation (`src/Types.ts`, NEG-1, NEG-2): agent logic is no inline invocation `src`,
+ *   and a machine without setup invokes it neither inline nor by a name its `types` declare;
+ *   ordinary logic still invokes inline.
+ * - Agent runs and provide (`src/Actor.ts`, `src/testing/getNextSnapshot.ts`,
+ *   `src/StateMachine.ts`, NEG-4, NEG-7, NEG-10): `createActor`, `Actor.make` and the pure
+ *   helpers refuse agent logic by type, and a cast agent dies with `AgentRunError`; `provide`
+ *   refuses agent logic in place of an ordinary actor by type and with `AgentProvideError`, and,
+ *   in a machine with agent logic, a progress delay that is no positive integer literal by type
+ *   and with `ProgressDelayError` for infinity, NaN or a function.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Chunk, Context, Deferred, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
+import { Cause, Chunk, Context, Deferred, Duration, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ActorClass, allocateChild, buildChild, createSpawnFunction, restoreChild } from "../../src/Actor.js"
 import type * as ActorLogicModule from "../../src/ActorLogic.js"
@@ -61,24 +79,438 @@ import {
   makeMachineSnapshot,
   type MachineSnapshot,
   sendTo,
+  certified,
   setup,
   setupWithSchema,
+  fromAgent,
   type SnapshotType,
   spawnChild,
   stopChild,
+  type Unsettled,
+  type AgentSnapshot,
+  type AnyStateMachine,
+  waitFor,
 } from "../../src/index.js"
+import { fromEffect } from "../../src/actors/fromEffect.js"
+import type { TargetOf } from "../../src/settlement.js"
 import { and, not, or } from "../../src/guards/index.js"
+import * as Root from "../../src/index.js"
+import { markAgentLogic } from "../../src/internal/agentBrand.js"
 import type { ActorLogic as RootActorLogic, ActorRef as RootActorRef } from "../../src/index.js"
 import * as Persistence from "../../src/persistence.js"
 import { resolveReferencedActor } from "../../src/spawn.js"
 import * as StateNode from "../../src/StateNode.js"
 import * as StateUtils from "../../src/stateUtils.js"
 import * as StateValue from "../../src/StateValue.js"
-import { createInertActorScope } from "../../src/testing/getNextSnapshot.js"
+import { createInertActorScope, getNextSnapshot, initialTransition, transition } from "../../src/testing/getNextSnapshot.js"
 import * as Types from "../../src/Types.js"
 import { guardEvaluationFailed } from "./upstream-messages.js"
+import { checkWideConfigGate } from "./wide-config-gate.js"
 
 // ---------------------------------------------------------------- helpers
+
+/** Ordinary effect logic: spawnable everywhere. */
+const ordinaryLogic = fromEffect(() => Effect.succeed(1))
+
+/** Compile the acceptance fixtures instead of suppressing their expected errors. */
+describe("COV-1 compile-time wide config gate", () => {
+  it.effect("[COV-1] refuses unreadable configs and preserves contextual inline forms", () => Effect.sync(checkWideConfigGate))
+})
+
+/** Effect logic marked as agent logic, as `fromAgent` marks its own. */
+const agentLogic = markAgentLogic(fromEffect(() => Effect.succeed(1)))
+
+/** A setup with one agent actor, whose child id `types.children` declares, and one ordinary actor. */
+const agentSetup = setup({
+  types: {} as { context: { ref?: unknown }; children: { helper: "agent" } },
+  actors: { agent: agentLogic, worker: ordinaryLogic },
+})
+
+/** Ordinary logic spawns as before through the assigner's `spawn` and the setup's `spawnChild`. */
+export const spawnsOrdinary = agentSetup.createMachine({
+  // The settlement proof needs a state that reaches a final state in a setup with agent actors
+  context: {}, initial: "running", states: { running: { after: { 600000: "done" } }, done: { type: "final" } },
+  entry: [
+    agentSetup.assign(({ spawn }) => ({ ref: spawn(ordinaryLogic) })),
+    agentSetup.assign(({ spawn }) => ({ ref: spawn("worker") })),
+    agentSetup.spawnChild(ordinaryLogic),
+    agentSetup.spawnChild("worker"),
+  ],
+})
+
+export const refusesAgentSpawns = agentSetup.createMachine({
+  context: {}, initial: "done", states: { done: { type: "final" } },
+  entry: [
+    // @ts-expect-error agent logic given inline to an assigner's spawn is refused ([AgentBrand] is not never)
+    agentSetup.assign(({ spawn }) => ({ ref: spawn(agentLogic) })),
+    // @ts-expect-error the declared name of agent logic is not spawnable through an assigner's spawn
+    agentSetup.assign(({ spawn }) => ({ ref: spawn("agent", { id: "helper" }) })),
+    // @ts-expect-error agent logic given inline to the setup's spawnChild is refused
+    agentSetup.spawnChild(agentLogic),
+    // @ts-expect-error the declared name of agent logic is not spawnable through the setup's spawnChild
+    agentSetup.spawnChild("agent", { id: "helper" }),
+    // @ts-expect-error the id types.children gives an agent is not stoppable through the setup's stopChild
+    agentSetup.stopChild("helper"),
+  ],
+})
+
+/** A machine without setup: its assigner's `spawn` takes any logic, and refuses agent logic by type. */
+export const refusesWideSpawn = createMachine({
+  types: {} as { context: { ref?: unknown } },
+  context: {},
+  // @ts-expect-error agent logic given to the wide spawn of a machine without setup is refused
+  entry: assign(({ spawn }) => ({ ref: spawn(agentLogic) })),
+})
+
+/** Agent logic that settles at once with an `Unsettled` output. */
+const settlingAgent = markAgentLogic(fromEffect((): Effect.Effect<Unsettled> => Effect.succeed({ reason: "silent", attempts: 3 })))
+
+/** Agent logic that never settles, so only a state exit ends it. */
+const pendingAgent = markAgentLogic(fromEffect((): Effect.Effect<Unsettled> => Effect.never))
+
+/** A setup with two agent actors and one ordinary actor, and no declared events. */
+const settlementSetup = setup({
+  types: {} as { context: { settledBy: ReadonlyArray<string> } },
+  actors: { agent: settlingAgent, slow: pendingAgent, worker: ordinaryLogic },
+})
+
+/** Agent invocations whose `onDone` leaves the invoking state on every branch compile. */
+export const settlesAgents = settlementSetup.createMachine({
+  id: "root",
+  context: { settledBy: [] },
+  initial: "outer",
+  states: {
+    outer: {
+      id: "outer",
+      initial: "waiting",
+      states: {
+        waiting: {
+          invoke: [
+            {
+              src: "agent",
+              onDone: {
+                target: "stalled",
+                actions: ({ event }) => {
+                  typeHolds<Equals<typeof event.output, Option.Option<Unsettled>>>(true)
+                },
+              },
+              onSnapshot: { actions: () => undefined },
+            },
+            { src: "slow", onDone: [{ guard: () => true, target: "#outer" }, "#done"] },
+            { src: "worker" },
+          ],
+          // An agent state accepts at least one event (S21)
+          on: { PING: {} },
+        },
+        stalled: { invoke: { src: "agent", onDone: "#root.done" }, on: { PING: {} } },
+      },
+    },
+    done: { id: "done", type: "final" },
+  },
+})
+
+export const refusesUnsettledAgents = settlementSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "waiting",
+  states: {
+    waiting: {
+      initial: "inner",
+      // @ts-expect-error an agent invocation without onDone is refused (missing settlement handler)
+      invoke: { src: "agent" },
+      states: { inner: {} },
+    },
+    erroring: {
+      // @ts-expect-error agent logic fails with never, so its invocation takes no onError
+      invoke: { src: "agent", onDone: "done", onError: "done" },
+    },
+    done: { type: "final" },
+  },
+})
+
+/**
+ * The exit rules are checked over the config once its invocations type-check, so they live in
+ * a machine of their own: TypeScript reports the first failing part of the config's type.
+ */
+export const refusesStayingSettlements = settlementSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "targetless",
+  states: {
+    targetless: {
+      // @ts-expect-error an onDone with no target does not leave the state (SettlementMustExit)
+      invoke: { src: "agent", onDone: { actions: () => undefined } },
+    },
+    self: {
+      // @ts-expect-error an onDone that targets the invoking state does not leave it (SettlementMustExit)
+      invoke: { src: "agent", onDone: { target: "self", reenter: true } },
+    },
+    child: {
+      initial: "inner",
+      // @ts-expect-error an onDone that targets a child of the invoking state does not leave it (SettlementMustExit)
+      invoke: { src: "agent", onDone: ".inner" },
+      states: { inner: {} },
+    },
+    guarded: {
+      // @ts-expect-error a guarded onDone with no unguarded fallback may not leave the state (SettlementMustExit)
+      invoke: { src: "agent", onDone: [{ guard: () => true, target: "done" }] },
+    },
+    doneKey: {
+      invoke: { src: "agent", id: "helper", onDone: "done" },
+      // @ts-expect-error an agent's done event is handled only through its invocation's onDone
+      on: { "xstate.done.actor.helper": "done", PING: {} },
+    },
+    done: { type: "final" },
+  },
+})
+
+/** A setup with no agent actors: every setup machine's targets are typed (S6, S23). */
+const targetSetup = setup({})
+
+/** Every target form that names a state compiles: sibling, `.child`, `#id` paths, a region list, history. */
+export const typesTargets = targetSetup.createMachine({
+  id: "targets",
+  initial: "a",
+  on: { RESET: ".a" },
+  states: {
+    a: { on: { KEY: "b", CHILD: "b.inner", ID: "#deep.leaf", ROOT: "#targets.p", NONE: { actions: () => undefined } } },
+    b: { initial: "inner", states: { inner: { always: { guard: () => false, target: "#targets.a" } }, hist: { type: "history" } } },
+    deep: { id: "deep", initial: "leaf", states: { leaf: { after: { 10: "#targets.a" } } } },
+    p: { type: "parallel", on: { BOTH: { target: [".l.x", ".r.y"] } }, states: { l: { initial: "x", states: { x: {} } }, r: { initial: "y", states: { y: {} } } } },
+  },
+})
+
+/** Each target that names no state is refused with `UnknownTarget`, in every transition source. */
+export const refusesUnknownTargets = targetSetup.createMachine({
+  id: "unknown",
+  initial: "a",
+  // @ts-expect-error on the root a plain key names no state (UnknownTarget)
+  on: { ROOT: "a" },
+  states: {
+    a: {
+      // @ts-expect-error a sibling key that names no state (UnknownTarget)
+      on: { KEY: "nowhere" },
+      // @ts-expect-error an always target that names no state (UnknownTarget)
+      always: { target: "#unknown.nowhere" },
+    },
+  },
+})
+
+/** Two nodes with one id are refused: a `#twin` target could name either (DuplicateStateId). */
+export const refusesDuplicateIds = targetSetup.createMachine({
+  initial: "a",
+  states: {
+    // @ts-expect-error the id twin is also b's (DuplicateStateId)
+    a: { id: "twin" },
+    // @ts-expect-error the id twin is also a's (DuplicateStateId)
+    b: { id: "twin" },
+  },
+})
+
+/** A history state with no default target is refused in a setup with agent actors (HistoryDefault). */
+export const refusesHistoryWithoutDefault = settlementSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "work",
+  states: {
+    // @ts-expect-error a history state needs a default target with agent actors (HistoryDefault)
+    work: { initial: "one", states: { one: {}, hist: { type: "history" } } },
+  },
+})
+
+/** `TargetOf` resolves a target the way the engine does, and gives `never` for one that names no state. */
+type TargetConfig = { id: "m"; states: { a: { states: { b: {} } }; c: { id: "c" } } }
+export const resolvesTargets: [
+  TargetOf<TargetConfig, "a", "c">,
+  TargetOf<TargetConfig, "a", ".b">,
+  TargetOf<TargetConfig, "a.b", "#m.c">,
+  [TargetOf<TargetConfig, "a", "d">] extends [never] ? "none" : "found",
+  [TargetOf<TargetConfig, "", "a">] extends [never] ? "none" : "found",
+] = ["c", "a.b", "c", "none", "none"]
+
+/** Ordinary logic still invokes inline, in a setup machine and in a machine without setup (COMPAT-1). */
+export const invokesOrdinaryInline = [
+  settlementSetup.createMachine({
+    context: { settledBy: [] },
+    invoke: { src: ordinaryLogic, onDone: { actions: () => undefined } },
+    // The settlement proof needs a state that reaches a final state in a setup with agent actors
+    initial: "done",
+    states: { done: { type: "final" } },
+  }),
+  createMachine({ invoke: { src: ordinaryLogic, id: "worker", onDone: { actions: () => undefined } } }),
+]
+
+export const refusesInlineAgent = settlementSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "waiting",
+  states: {
+    waiting: {
+      // @ts-expect-error agent logic given inline as an invocation's src is refused (NEG-1)
+      invoke: { src: settlingAgent, onDone: "done" },
+    },
+    done: { type: "final" },
+  },
+})
+
+export const refusesSetupLessAgent = createMachine({
+  initial: "waiting",
+  states: {
+    waiting: {
+      // @ts-expect-error agent logic is not an invocation's src in a machine without setup (NEG-2)
+      invoke: { src: settlingAgent, onDone: "done" },
+    },
+    done: { type: "final" },
+  },
+})
+
+export const refusesDeclaredSetupLessAgent = createMachine({
+  types: {} as {
+    actors: { src: "agent"; logic: typeof settlingAgent } | { src: "worker"; logic: typeof ordinaryLogic }
+  },
+  initial: "waiting",
+  states: {
+    waiting: {
+      invoke: [
+        { src: "worker" },
+        // @ts-expect-error the declared name of agent logic is not invocable without setup (NEG-2)
+        { src: "agent", onDone: "done" },
+      ],
+    },
+    done: { type: "final" },
+  },
+})
+
+/** The event schema of the agent tool `GO`. */
+const GoTool = Schema.Struct({ type: Schema.Literal("GO") })
+
+/** The event schema of a tool named like a built-in event. */
+const BuiltInTool = Schema.Struct({ type: Schema.Literal("xstate.custom") })
+
+/** Agent logic whose one tool is `GO`, and agent logic whose one tool has an `xstate.` name. */
+const menuSetup = setup({
+  types: {} as { context: { settledBy: ReadonlyArray<string> } },
+  actors: {
+    agent: fromAgent({ budget: 1, deadline: 10, tools: { GO: GoTool }, turn: () => Effect.void }),
+    builtIn: fromAgent({ budget: 1, deadline: 10, tools: { "xstate.custom": BuiltInTool }, turn: () => Effect.void }),
+  },
+})
+
+/**
+ * The tool `GO` is on the menu of each agent state below (S21): the state's own targetless
+ * `GO`, an ancestor's `GO` that exits, a sibling region's `GO`, and a concrete `GO` beside a
+ * wildcard.
+ */
+export const offersMenuTools = menuSetup.createMachine({
+  id: "menu",
+  context: { settledBy: [] },
+  type: "parallel",
+  states: {
+    own: {
+      initial: "asking",
+      states: { asking: { invoke: { src: "agent", onDone: "done" }, on: { GO: { actions: () => undefined } } }, done: { type: "final" } },
+    },
+    ancestor: {
+      initial: "asking",
+      on: { GO: ".done" },
+      states: { asking: { invoke: { src: "agent", onDone: "done" } }, done: { type: "final" } },
+    },
+    sibling: { initial: "asking", states: { asking: { invoke: { src: "agent", onDone: "done" } }, done: { type: "final" } } },
+    // `other` handles `GO` anywhere in its region; its timed close is its progress guarantee (settlement proof)
+    other: {
+      on: { GO: { actions: () => undefined } },
+      initial: "open",
+      states: { open: { after: { 600000: "closed" } }, closed: { type: "final" } },
+    },
+    wildcard: {
+      initial: "asking",
+      states: { asking: { invoke: { src: "agent", onDone: "done" }, on: { "*": "done", GO: "done" } }, done: { type: "final" } },
+    },
+  },
+})
+
+/** A tool whose event the invoking state does not accept is refused (AgentToolNotAccepted, S21). */
+export const refusesUnacceptedTool = menuSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "asking",
+  states: {
+    asking: {
+      // @ts-expect-error the state accepts STOP but not the agent's tool GO (AgentToolNotAccepted)
+      invoke: { src: "agent", onDone: "done" },
+      on: { STOP: "done" },
+    },
+    done: { type: "final" },
+  },
+})
+
+/** A state that accepts no event cannot invoke an agent (AgentStateAcceptsNoEvents, S21). */
+export const refusesEmptyMenu = menuSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "asking",
+  states: {
+    // @ts-expect-error asking accepts no event, so it cannot invoke an agent (AgentStateAcceptsNoEvents)
+    asking: { invoke: { src: "agent", onDone: "done" } },
+    done: { type: "final" },
+  },
+})
+
+/** A wildcard is no tool: a state whose only key is `*` accepts no concrete event. */
+export const refusesWildcardOnlyMenu = menuSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "asking",
+  states: {
+    // @ts-expect-error a wildcard is no tool, so asking accepts no event (AgentStateAcceptsNoEvents)
+    asking: { invoke: { src: "agent", onDone: "done" }, on: { "*": "done" } },
+    done: { type: "final" },
+  },
+})
+
+/** An ancestor's targetless `GO` does not exit the agent state, so `GO` is no tool there. */
+export const refusesTargetlessAncestorTool = menuSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "outer",
+  states: {
+    outer: {
+      initial: "asking",
+      on: { GO: { actions: () => undefined }, STOP: "done" },
+      states: {
+        // @ts-expect-error the ancestor's GO has no target, so it is no tool of asking (AgentToolNotAccepted)
+        asking: { invoke: { src: "agent", onDone: "#done" } },
+      },
+    },
+    done: { id: "done", type: "final" },
+  },
+})
+
+/** `GO: undefined` on the agent state removes the ancestor's exiting `GO` from the menu. */
+export const refusesForbiddenTool = menuSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "outer",
+  states: {
+    outer: {
+      initial: "asking",
+      on: { GO: "#done", STOP: "#done" },
+      states: {
+        asking: {
+          // @ts-expect-error GO: undefined forbids the inherited GO (AgentToolNotAccepted)
+          invoke: { src: "agent", onDone: "#done" },
+          on: { GO: undefined },
+        },
+      },
+    },
+    done: { id: "done", type: "final" },
+  },
+})
+
+/** An `xstate.` event is never a tool, even when the state has a key for it. */
+export const refusesBuiltInTool = menuSetup.createMachine({
+  context: { settledBy: [] },
+  initial: "asking",
+  states: {
+    asking: {
+      // @ts-expect-error an xstate. event is never a tool (AgentToolNotAccepted)
+      invoke: { src: "builtIn", onDone: "done" },
+      on: { "xstate.custom": "done", STOP: "done" },
+    },
+    done: { type: "final" },
+  },
+})
 
 /** Compiles only for `true`. */
 const typeHolds = <T extends true>(holds: T): T => holds
@@ -370,6 +802,39 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
     })
   )
 
+  it.effect("[COV-1] the actor runtime passes ordinary logic no capability on transition, start, restoreSnapshot and getPersistedSnapshot", () =>
+    Effect.gen(function* () {
+      // Ordinary logic must never hold the value: logic given to `createActor` could pass it to an agent's own methods
+      const received = new Map<string, ReadonlyArray<unknown>>()
+      const logic = makeActorLogic<CountSnapshot, Inc, unknown>({
+        ...counterMembers,
+        transition: (snapshot, event, ...capability: ReadonlyArray<unknown>) => {
+          received.set("transition", capability)
+          return counterMembers.transition(snapshot, event)
+        },
+        start: (_snapshot, ...capability: ReadonlyArray<unknown>) => {
+          received.set("start", capability)
+          return Effect.void
+        },
+        restoreSnapshot: (persisted, ...capability: ReadonlyArray<unknown>) => {
+          received.set("restoreSnapshot", capability)
+          return Effect.succeed({ ...active(), count: persistedCount(persisted) })
+        },
+        getPersistedSnapshot: (snapshot, ...capability: ReadonlyArray<unknown>) => {
+          received.set("getPersistedSnapshot", capability)
+          return counterMembers.getPersistedSnapshot(snapshot)
+        },
+      })
+
+      const actor = yield* createActor(logic, { snapshot: { count: 5 } })
+      yield* actor.start
+      yield* actor.send({ type: "INC" })
+      yield* actor.getPersistedSnapshot
+      assert.deepStrictEqual([...received.keys()].sort(), ["getPersistedSnapshot", "restoreSnapshot", "start", "transition"])
+      for (const capability of received.values()) assert.deepStrictEqual(capability, [])
+    })
+  )
+
   it.effect("[COV-1] an actor of a logic without restoreSnapshot takes the persisted snapshot as it is, as upstream", () =>
     Effect.gen(function* () {
       const logic = makeActorLogic<CountSnapshot, Inc, unknown>(counterMembers)
@@ -512,6 +977,92 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
       assert.isTrue(yield* eventually(Effect.map(host.getSnapshot, (snapshot) => snapshot.context.synced >= 1)))
       yield* settle
       assert.strictEqual((yield* host.getSnapshot).context.plain, 0)
+    })
+  )
+
+  it.effect("[COV-1] an assigner's spawn by a name of agent logic fails with AgentSpawnError before its input function runs", () =>
+    Effect.gen(function* () {
+      const runs = { input: 0, agent: 0 }
+      const agent = markAgentLogic(fromEffect(() => Effect.sync(() => runs.agent++))) as unknown as ActorLogicModule.AnyActorLogic
+      const machine = createMachine({
+        id: "spawner",
+        types: {} as { context: { ref?: unknown } },
+        context: {},
+        entry: assign(({ spawn }) => ({ ref: spawn("helper", { input: () => runs.input++ }) })),
+      }).provide({ actors: { helper: agent } })
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      assert.instanceOf(Option.getOrUndefined((yield* actor.getSnapshot).error), Errors.AgentSpawnError)
+      assert.deepStrictEqual(runs, { input: 0, agent: 0 })
+    })
+  )
+
+  it.effect("[COV-1] createSpawnFunction of agent logic whose brand a cast hid dies with AgentSpawnError and no turn runs; a spread copy too", () =>
+    Effect.gen(function* () {
+      const host = yield* createActor(createMachine({ id: "cov1-agent-host" }))
+      yield* host.start
+      const runs = { count: 0 }
+      const hidden = countedAgent(runs) as unknown as ActorLogicModule.AnyActorLogic
+      const spawn = createSpawnFunction(host.system, host)
+      for (const logic of [hidden, { ...hidden }]) {
+        const exit = yield* Effect.exit(spawn(logic, { id: "agent" }))
+        assert.isTrue(Exit.isFailure(exit))
+        const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+        assert.instanceOf(error, Errors.AgentSpawnError)
+        assert.strictEqual(error.src, "inline logic")
+        assert.strictEqual(error.machineId, host.id)
+      }
+      yield* settle
+      assert.strictEqual(runs.count, 0)
+      assert.deepStrictEqual((yield* host.getSnapshot).children, {})
+    })
+  )
+
+  it.effect("[COV-1] the Actor statics buildChild and restoreChild refuse agent logic with AgentSpawnError", () =>
+    Effect.gen(function* () {
+      const host = yield* createActor(createMachine({ id: "cov1-static-host" }))
+      const runs = { count: 0 }
+      const hidden = countedAgent(runs) as unknown as ActorLogicModule.AnyActorLogic
+      const spawnRequest = { logic: hidden, src: "named", id: Option.none(), systemId: Option.none(), input: 1, syncSnapshot: false }
+      const restoreRequest = { logic: hidden, src: hidden, id: "agent", systemId: Option.none(), syncSnapshot: false, snapshot: Option.none() }
+      for (const run of [buildChild(allocateChild(), spawnRequest, host), restoreChild(restoreRequest, host)]) {
+        const exit = yield* Effect.exit(run)
+        assert.instanceOf(Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined, Errors.AgentSpawnError)
+      }
+      assert.strictEqual(runs.count, 0)
+    })
+  )
+
+  it.effect("[COV-1] a logic that reads ActorScope cannot start agent logic through spawnChild or restoreChild: it errors, and no turn runs", () =>
+    Effect.gen(function* () {
+      const runs = { count: 0 }
+      const hidden = countedAgent(runs) as unknown as ActorLogicModule.AnyActorLogic
+      const starting = (attempt: (scope: ActorLogicModule.ActorScopeService) => Effect.Effect<unknown>) => ({
+        ...fromEffect(() => Effect.void),
+        start: () => Effect.flatMap(ActorScope, attempt),
+      })
+      const attempts = [
+        starting((scope) =>
+          scope.spawnChild(scope.allocateChild(), {
+            logic: hidden, src: hidden, id: Option.none(), systemId: Option.none(), input: 1, syncSnapshot: false,
+          })
+        ),
+        starting((scope) =>
+          Effect.flatMap(
+            scope.restoreChild({ logic: hidden, src: hidden, id: "agent", systemId: Option.none(), syncSnapshot: false, snapshot: Option.none() }),
+            scope.startChild
+          )
+        ),
+      ]
+      for (const logic of attempts) {
+        const actor = yield* createActor(logic as unknown as ActorLogicModule.AnyActorLogic)
+        yield* actor.start
+        const snapshot = yield* actor.getSnapshotUntyped
+        assert.strictEqual(snapshot.status, "error")
+        assert.instanceOf(Option.getOrUndefined(snapshot.error), Errors.AgentSpawnError)
+      }
+      yield* settle
+      assert.strictEqual(runs.count, 0)
     })
   )
 
@@ -1409,6 +1960,379 @@ describe("COV-1 src root modules: runtime, engine, persistence", () => {
       yield* actor.start
       yield* actor.send({ type: "ADD" })
       assert.strictEqual((yield* actor.getSnapshot).context, 1)
+    })
+  )
+
+  it.effect("[COV-1] an assigner's spawn of agent logic whose brand a cast hid fails with AgentSpawnError before the agent runs", () =>
+    Effect.gen(function* () {
+      let runs = 0
+      const hidden = markAgentLogic(fromEffect(() => Effect.sync(() => runs++))) as unknown as ActorLogicModule.AnyActorLogic
+      const machine = createMachine({
+        id: "parent",
+        types: {} as { context: { ref?: unknown } },
+        context: {},
+        entry: assign(({ spawn }) => ({ ref: spawn(hidden) })),
+      })
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      const snapshot = yield* actor.getSnapshot
+      assert.strictEqual(snapshot.status, "error")
+      const error = Option.getOrUndefined(snapshot.error)
+      assert.instanceOf(error, Errors.AgentSpawnError)
+      assert.strictEqual(error.machineId, "parent")
+      assert.strictEqual(error._tag, "AgentSpawnError")
+      assert.include(error.message, "settlement")
+      assert.strictEqual(runs, 0)
+    })
+  )
+
+  it.effect("[COV-1] an assigner's spawn by a name that provide gave agent logic fails with AgentSpawnError naming that src", () =>
+    Effect.gen(function* () {
+      const hidden = agentLogic as unknown as ActorLogicModule.AnyActorLogic
+      const machine = createMachine({
+        types: {} as { context: { ref?: unknown } },
+        context: {},
+        entry: assign(({ spawn }) => ({ ref: spawn("helper") })),
+      }).provide({ actors: { helper: hidden } })
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      const error = Option.getOrUndefined((yield* actor.getSnapshot).error)
+      assert.instanceOf(error, Errors.AgentSpawnError)
+      assert.strictEqual(error.src, "helper")
+    })
+  )
+
+  it.effect("[COV-1] when one of two agents in a state settles, the other stops and its onDone never runs", () =>
+    Effect.gen(function* () {
+      const machine = settlementSetup.createMachine({
+        context: { settledBy: [] },
+        initial: "waiting",
+        states: {
+          waiting: {
+            invoke: [
+              {
+                src: "agent",
+                onDone: { target: "stalled", actions: settlementSetup.assign(({ context }) => ({ settledBy: [...context.settledBy, "agent"] })) },
+              },
+              {
+                src: "slow",
+                onDone: { target: "stalled", actions: settlementSetup.assign(({ context }) => ({ settledBy: [...context.settledBy, "slow"] })) },
+              },
+            ],
+            on: { PING: {} },
+          },
+          stalled: { type: "final" },
+        },
+      })
+      const actor = yield* createActor(machine)
+      yield* actor.start
+      const snapshot = yield* waitFor(actor, (current) => current.status === "done")
+      assert.strictEqual(snapshot.value, "stalled")
+      assert.deepStrictEqual(snapshot.context.settledBy, ["agent"])
+      assert.deepStrictEqual(Object.keys(snapshot.children), [])
+    })
+  )
+
+  it.effect("[COV-1] ordinary logic still spawns through an assigner's spawn and a setup's spawnChild", () =>
+    Effect.gen(function* () {
+      const actor = yield* createActor(spawnsOrdinary)
+      yield* actor.start
+      const snapshot = yield* actor.getSnapshot
+      assert.strictEqual(snapshot.status, "active")
+      // Two spawns under their session ids; the two spawnChild actions without an id share the key "undefined"
+      assert.strictEqual(Object.keys(snapshot.children).length, 3)
+      assert.isDefined(snapshot.children["undefined"])
+    })
+  )
+})
+
+// ---------------------------------------------------------------- agent runs and provide (NEG-4, NEG-7, NEG-10)
+
+/** Real agent logic, whose one tool is `GO`, and whose silent turn counts its runs in `runs`. */
+const countedAgent = (runs: { count: number }) =>
+  fromAgent({ budget: 1, deadline: 1000, tools: { GO: GoTool }, turn: (_input: number) => Effect.sync(() => runs.count++) })
+
+/** The agent logic the type cases below refuse. */
+const runAgent = countedAgent({ count: 0 })
+
+/** Each standalone run entry point refuses agent logic by type (NEG-4); never called. */
+export const refusesAgentRuns = (snapshot: AgentSnapshot<number>, spawn: ReturnType<typeof createSpawnFunction>) => [
+  // @ts-expect-error createSpawnFunction refuses agent logic ([AgentBrand] is not never)
+  spawn(runAgent, { input: 1 }),
+  // @ts-expect-error agent logic is no root actor ([AgentBrand] is not never)
+  createActor(runAgent, { input: 1 }),
+  // @ts-expect-error nor through the Actor statics
+  ActorClass.make(runAgent, { input: 1 }),
+  // @ts-expect-error the pure transition helper refuses agent logic
+  transition(runAgent, snapshot, { type: "GO" }),
+  // @ts-expect-error the initial transition helper refuses agent logic
+  initialTransition(runAgent, 1),
+  // @ts-expect-error the initial snapshot helper refuses agent logic
+  getInitialSnapshot(runAgent, 1),
+  // @ts-expect-error the next snapshot helper refuses agent logic
+  getNextSnapshot(runAgent, snapshot, { type: "GO" }),
+]
+
+/** A setup with the ordinary actor `work` and the agent actor `agent`, each invoked by one state. */
+const workSetup = setup({ actors: { work: fromEffect((_: { input: number }) => Effect.succeed(1)), agent: runAgent } })
+
+/** `working` invokes `work` at start; `THINK` moves to the agent's state. */
+const workMachine = workSetup.createMachine({
+  id: "work",
+  initial: "working",
+  states: {
+    // The timed exit is the progress guarantee; the ordinary invocation alone is none (settlement proof)
+    working: { invoke: { src: "work", input: 1 }, on: { THINK: "thinking" }, after: { 600000: "thinking" } },
+    thinking: { invoke: { src: "agent", input: 1, onDone: "stalled" }, on: { GO: "stalled" } },
+    stalled: { type: "final" },
+  },
+})
+
+/** A machine with agent logic whose progress exit is the timed transition `patience`; `nudge` is targetless. */
+const timedMachine = setup({ actors: { agent: runAgent }, delays: { patience: 5000, nudge: 100 } }).createMachine({
+  id: "timed",
+  initial: "thinking",
+  states: {
+    thinking: {
+      invoke: { src: "agent", input: 1, onDone: "stalled" },
+      on: { GO: "stalled" },
+      after: { patience: "timedOut", nudge: { actions: () => undefined } },
+      initial: "inner",
+      states: { inner: { after: { patience: "#timed.thinking.other" } }, other: {} },
+    },
+    timedOut: { type: "final" },
+    stalled: { type: "final" },
+  },
+})
+
+/**
+ * The NEG-7 machine without setup: `work` is ordinary logic, and its `provide` takes any logic by type, as a cast
+ * would, so a hidden agent reaches the run-time check.
+ */
+const plainWorkMachine = createMachine(
+  { id: "work", initial: "working", states: { working: { invoke: { src: "work", input: 1 } } } },
+  { actors: { work: ordinaryLogic } }
+)
+
+/**
+ * The NEG-10 machine without setup: it invokes hidden agent logic, so a progress delay its `provide` takes by type
+ * reaches the run-time check.
+ */
+const plainTimedMachine = (agent: ActorLogicModule.AnyActorLogic) =>
+  createMachine(
+    {
+      id: "timed",
+      initial: "thinking",
+      states: {
+        thinking: {
+          invoke: { src: "agent", input: 1, onDone: "stalled" },
+          after: { patience: "timedOut", nudge: { actions: () => undefined } },
+        },
+        timedOut: { type: "final" },
+        stalled: { type: "final" },
+      },
+    },
+    { actors: { agent }, delays: { patience: 5000, nudge: 100 } }
+  )
+
+/** A child machine with a certificate, so a setup can declare it; it holds an agent no parent sees by type. */
+const certifiedHolder = certified(
+  setup({ actors: { agent: runAgent } }).createMachine({
+    initial: "asking",
+    states: { asking: { invoke: { src: "agent", input: 1, onDone: "finished" }, on: { GO: "finished" } }, finished: { type: "final" } },
+  }),
+  { states: ["asking", "finished"], edges: ["asking: invoke.0.onDone -> finished", "asking: on GO -> finished"], explored: 2, hash: "x", verdict: "proved" }
+)
+
+/** A setup machine that holds agents only through a certified child, with the progress exit `patience`. */
+const holderOnlyMachine = setup({ actors: { child: certifiedHolder }, delays: { patience: 5000 } }).createMachine({
+  id: "holder",
+  initial: "waiting",
+  states: {
+    waiting: { invoke: { src: "child", onDone: "finished" }, after: { patience: "finished" } },
+    finished: { type: "final" },
+  },
+})
+
+/** A holder of agents takes a progress delay as an agent machine does; never called. */
+export const refusesHolderDelays = (wide: number) => [
+  // @ts-expect-error infinity for the progress delay of a machine that holds only a certified child (NEG-10)
+  holderOnlyMachine.provide({ delays: { patience: Infinity } }),
+  // @ts-expect-error a wide number for it
+  holderOnlyMachine.provide({ delays: { patience: wide } }),
+  // @ts-expect-error a function for it
+  holderOnlyMachine.provide({ delays: { patience: () => 10 } }),
+  holderOnlyMachine.provide({ delays: { patience: 10 } }),
+]
+
+/** A machine of no known types that takes any implementations, as a cast past `provide` would. */
+type AnyProvidable = AnyStateMachine & { readonly provide: (implementations: object) => AnyProvidable }
+
+/** A plain machine with the progress exit `patience`; `invoke` is what it invokes there. */
+const plainDelayMachine = (invoke: object, implementations?: object) =>
+  createMachine(
+    {
+      id: "plain",
+      initial: "a",
+      states: { a: { invoke, after: { patience: "b" } }, b: { type: "final" } },
+    } as never,
+    implementations as never
+  ) as unknown as AnyProvidable
+
+/** `provide` refuses agent logic for an ordinary actor, and a progress delay that is no positive integer literal; never called. */
+export const refusesAgentProvide = (wide: number) => [
+  // @ts-expect-error agent logic in place of the ordinary actor work (NEG-7)
+  workMachine.provide({ actors: { work: runAgent } }),
+  // @ts-expect-error a machine without setup takes no agent logic either
+  createMachine({ invoke: { src: "work" } }).provide({ actors: { work: runAgent } }),
+  // @ts-expect-error infinity for the progress delay patience (NEG-10)
+  timedMachine.provide({ delays: { patience: Infinity } }),
+  // @ts-expect-error a wide number for it
+  timedMachine.provide({ delays: { patience: wide } }),
+  // @ts-expect-error a function for it
+  timedMachine.provide({ delays: { patience: () => 10 } }),
+  // A positive integer literal for it, and a function for the targetless nudge, compile
+  timedMachine.provide({ delays: { patience: 10, nudge: () => 10 } }),
+  workMachine.provide({ actors: { agent: countedAgent({ count: 0 }) } }),
+]
+
+describe("COV-1 agent logic runs only as an invocation, and provide keeps it so (NEG-4, NEG-7, NEG-10)", () => {
+  it("[COV-1] the root entry point gives no way to write or read the agent brand", () => {
+    for (const name of ["markAgentLogic", "AgentBrand", "hasAgentBrand"]) {
+      assert.notProperty(Root, name)
+    }
+  })
+
+  it.effect("[COV-1] createActor and Actor.make of a cast agent die with AgentRunError before its first turn", () =>
+    Effect.gen(function* () {
+      const runs = { count: 0 }
+      const hidden = countedAgent(runs) as unknown as ActorLogicModule.AnyActorLogic
+      for (const create of [createActor, ActorClass.make]) {
+        const exit = yield* Effect.exit(create(hidden, { input: 1 }))
+        assert.isTrue(Exit.isFailure(exit))
+        const defect = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+        assert.instanceOf(defect, Errors.AgentRunError)
+      }
+      assert.strictEqual(runs.count, 0)
+    })
+  )
+
+  it.effect("[COV-1] a cast agent provided for an ordinary actor errors the actor with AgentProvideError, through every later machine", () =>
+    Effect.gen(function* () {
+      const runs = { count: 0 }
+      const hidden = countedAgent(runs) as unknown as ActorLogicModule.AnyActorLogic
+      const refused = plainWorkMachine.provide({ actors: { work: hidden } })
+      for (const machine of [refused, refused.provide({}), refused.withContext({}), refused.withId("again")]) {
+        const actor = yield* createActor(machine)
+        yield* actor.start
+        const snapshot = yield* actor.getSnapshot
+        assert.strictEqual(snapshot.status, "error")
+        const error = Option.getOrUndefined(snapshot.error)
+        assert.instanceOf(error, Errors.AgentProvideError)
+        assert.strictEqual(error.actor, "work")
+        assert.strictEqual(error.machineId, "work")
+      }
+      const restored = yield* createActor(refused, { snapshot: yield* plainWorkMachine.resolveState({ value: "working" }) })
+      assert.instanceOf(Option.getOrUndefined((yield* restored.getSnapshot).error), Errors.AgentProvideError)
+      assert.strictEqual(runs.count, 0)
+    })
+  )
+
+  it.effect("[COV-1] agent logic for an agent actor, or for a name with no implementation, is not refused by provide", () =>
+    Effect.gen(function* () {
+      const replaced = yield* createActor(workMachine.provide({ actors: { agent: countedAgent({ count: 0 }) } }))
+      yield* replaced.start
+      assert.strictEqual((yield* replaced.getSnapshot).status, "active")
+      const hidden = runAgent as unknown as ActorLogicModule.AnyActorLogic
+      const added = yield* createActor(createMachine({ id: "added" }).provide({ actors: { helper: hidden } }))
+      yield* added.start
+      assert.strictEqual((yield* added.getSnapshot).status, "active")
+    })
+  )
+
+  it.effect("[COV-1] infinity, NaN, a function or an infinite Duration for a progress delay errors the actor with ProgressDelayError", () =>
+    Effect.gen(function* () {
+      const hidden = runAgent as unknown as ActorLogicModule.AnyActorLogic
+      for (const delay of [Infinity, NaN, () => 10, Duration.infinity]) {
+        const actor = yield* createActor(plainTimedMachine(hidden).provide({ delays: { patience: delay } }))
+        yield* actor.start
+        const error = Option.getOrUndefined((yield* actor.getSnapshot).error)
+        assert.instanceOf(error, Errors.ProgressDelayError)
+        assert.strictEqual(error.delay, "patience")
+        assert.strictEqual(error.machineId, "timed")
+      }
+    })
+  )
+
+  it.effect("[COV-1] a never-firing progress delay is refused by every route to the merged implementations (NEG-10)", () =>
+    Effect.gen(function* () {
+      const hidden = runAgent as unknown as ActorLogicModule.AnyActorLogic
+      const child = certifiedHolder as unknown as ActorLogicModule.AnyActorLogic
+      const named = { src: "agent", input: 1, onDone: "b" }
+      const holder = { src: "child", onDone: "b" }
+      const inline = { src: hidden, input: 1, onDone: "b" }
+      const machines: ReadonlyArray<readonly [string, AnyStateMachine]> = [
+        // The delay first, the agent after: no one call sees both
+        ["delay, then agent", plainDelayMachine(named).provide({ delays: { patience: Infinity } }).provide({ actors: { agent: hidden } })],
+        ["agent, then delay", plainDelayMachine(named).provide({ actors: { agent: hidden } }).provide({ delays: { patience: Infinity } })],
+        // No provide at all
+        ["createMachine's second argument", plainDelayMachine(named, { actors: { agent: hidden }, delays: { patience: Infinity } })],
+        ["setup", setup({ actors: { agent: hidden }, delays: { patience: Infinity } }).createMachine({
+          id: "plain", initial: "a", states: { a: { invoke: named, after: { patience: "b" } } as never, b: { type: "final" } },
+        }) as unknown as AnyStateMachine],
+        // A cast agent invoked inline is in no implementation record
+        ["inline invocation, provide", plainDelayMachine(inline).provide({ delays: { patience: Infinity } })],
+        ["inline invocation, second argument", plainDelayMachine(inline, { delays: { patience: () => 10 } })],
+        // A machine holds agents only through a child
+        ["certified child", holderOnlyMachine.provide({ delays: { patience: Infinity as 10 } })],
+        ["child by name, without setup", plainDelayMachine(holder, { actors: { child } }).provide({ delays: { patience: NaN } })],
+        ["child inline", plainDelayMachine({ src: child, onDone: "b" }, { delays: { patience: Infinity } })],
+        ["grandchild", plainDelayMachine(holder, {
+          actors: { child: plainDelayMachine({ src: child, onDone: "b" }, { delays: { patience: 10 } }) },
+          delays: { patience: Infinity },
+        })],
+      ]
+      for (const [route, machine] of machines) {
+        const actor = yield* createActor(machine)
+        yield* actor.start
+        const error = Option.getOrUndefined((yield* actor.getSnapshot).error)
+        assert.instanceOf(error, Errors.ProgressDelayError, route)
+        assert.strictEqual(error.delay, "patience", route)
+      }
+    })
+  )
+
+  it.effect("[COV-1] a later provide of a finite delay cures a refused progress delay, and a held agent makes no other delay matter", () =>
+    Effect.gen(function* () {
+      const hidden = runAgent as unknown as ActorLogicModule.AnyActorLogic
+      const refused = plainTimedMachine(hidden).provide({ delays: { patience: Infinity } })
+      const machines: ReadonlyArray<AnyStateMachine> = [
+        refused.provide({ delays: { patience: 10 } }),
+        plainDelayMachine({ src: fromEffect(() => Effect.never), onDone: "b" }, { delays: { patience: Infinity } }),
+      ]
+      for (const machine of machines) {
+        const actor = yield* createActor(machine)
+        yield* actor.start
+        assert.strictEqual((yield* actor.getSnapshot).status, "active")
+      }
+    })
+  )
+
+  it.effect("[COV-1] a finite progress delay, a function for a targetless delay, and a machine without agents still run", () =>
+    Effect.gen(function* () {
+      const plain = createMachine({ initial: "a", states: { a: { after: { patience: "b" } }, b: {} } })
+      const hidden = runAgent as unknown as ActorLogicModule.AnyActorLogic
+      const machines: ReadonlyArray<AnyStateMachine> = [
+        timedMachine.provide({ delays: { patience: 10 } }),
+        plainTimedMachine(hidden).provide({ delays: { patience: Duration.seconds(5) } }),
+        plainTimedMachine(hidden).provide({ delays: { nudge: () => 10 } }),
+        plain.provide({ delays: { patience: () => Infinity } }),
+      ]
+      for (const machine of machines) {
+        const actor = yield* createActor(machine)
+        yield* actor.start
+        assert.strictEqual((yield* actor.getSnapshot).status, "active")
+      }
     })
   )
 })

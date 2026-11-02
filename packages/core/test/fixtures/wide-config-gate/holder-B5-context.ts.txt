@@ -1,0 +1,4 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { holderSetup as s } from "./support.js"
+/** This declaration supplies the holder-B5-context acceptance case. */
+export const machine=s.createMachine({context: ({ input }) => ({ input }),initial:"x",states:{x:{on:{GO:"done"}},done:{type:"final"}}});

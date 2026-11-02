@@ -1,0 +1,6 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { agentSetup as s } from "./support.js"
+/** This declaration supplies the agent-A7-after acceptance case. */
+const target:string="done";
+/** This declaration supplies the agent-A7-after acceptance case. */
+export const machine=s.createMachine({initial:"x",states:{x:{after:{1:target}},done:{type:"final"}}});

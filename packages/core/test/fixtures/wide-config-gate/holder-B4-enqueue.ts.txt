@@ -1,0 +1,4 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { holderSetup as s } from "./support.js"
+/** This declaration supplies the holder-B4-enqueue acceptance case. */
+export const machine=s.createMachine({entry: enqueueActions(({ enqueue }) => void enqueue),initial:"x",states:{x:{after:{1:"x"}},done:{type:"final"}}});

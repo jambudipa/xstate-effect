@@ -7,6 +7,8 @@ comments cite them by ID:
 - **D1–D20** — the approved decisions of the port's plan ([Approved decisions](#approved-decisions-d1d20)).
 - **SD-1–SD-28** — the spec decisions that settle the forks the research surfaced, with their
   dated amendments ([Spec decisions](#spec-decisions-sd-1sd-28)).
+- **SD-29–SD-52** — the decisions of agent settlement, added in 0.4.0
+  ([Agent settlement decisions](#agent-settlement-decisions-sd-29sd-52)).
 
 The text is copied from the port's planning documents. Internal file paths and the wording of
 the agent tooling that ran the port are left out; the meaning of each decision is unchanged.
@@ -14,7 +16,7 @@ Some decisions cite the port's input plan (section, row and phase IDs such as F1
 Phase 2), its research notes and its acceptance criteria (AC n). Those documents are not
 published. The gap rows (S1–S27, A1–A23, C1–C22, P1–P14) and every deviation are in the
 ledger. A scenario ID (CONF-8, DELIVERY-1, HARNESS-2, …) names the evidence file
-`test/verify/verify-xstate-5-33-2-port-<ID>.spec.ts`. "eque2" is a separate, private Effect-based
+`test/verify/verify-xstate-5-33-2-port-<ID>.spec.ts`, except in the agent settlement decisions. "eque2" is a separate, private Effect-based
 state-machine port that served as a reference.
 
 ## Approved decisions (D1–D20)
@@ -598,6 +600,94 @@ amendment changes its decision from that date on.
   where upstream fires them after the callback returns. The `SimulatedClock` class already
   resets its flag in `Effect.ensuring`: the throw is a defect of its Effect, and a call made
   inside a callback keeps upstream's deferral. Ledger row DEV-75.
+
+## Agent settlement decisions (SD-29–SD-52)
+
+These decisions shape agent logic and the settlement proof of 0.4.0. Source comments cite SD-29 to
+SD-50 as "decision n" of the agent-settlement spec: SD-(n + 28) is decision n, so "decision 10" is
+SD-38. That spec is not published. Scenario IDs in those comments (S17, NEG-5, AUDIT-3, …) name
+agent-settlement scenarios, not the gap rows of the port. Decisions SD-47, SD-48 and part of SD-39
+bind the first application that uses agent logic, and the library only supplies their mechanism.
+
+- **SD-29 The turn loop lives in the library (decision 1).** `fromAgent` runs the attempts, turns a
+  defect into `crashed`, applies the deadline as `overdue`, gives each attempt the outcome before
+  it, and outputs `Unsettled { reason, attempts }` when the budget is spent. A move is a machine
+  event: the state exit stops the agent.
+- **SD-30 Budgets are positive integer literals (decision 2).** Wide `number`, zero, a negative, a
+  fraction and a union fail to compile. The deadline follows the same rule. A value that passes the types through a
+  cast or plain JavaScript dies with `AgentRunError` before any turn runs: `fromAgent` is sync, so
+  each Effect that gives the loop a snapshot, and `start`, carry the run-time half.
+- **SD-31 The invoke type requires settlement (decision 3).** The brand makes `onDone` required.
+  The error channel is `never`, so `onError` is never needed. Each way to start an actor outside
+  a declared invoke refuses branded logic.
+- **SD-32 The type proof fails closed (decision 4).** `SettlementProof` checks that targets resolve,
+  that each non-final atomic state has a progress guarantee, and that each state reaches a final
+  state. A machine past the bound gets a named error or the part-by-part proof (SD-46).
+- **SD-33 The explorer proves guarded reachability (decision 5).** The type level cannot evaluate a
+  guard, so `explore` runs the real machine. It has no state limit, and a timeout fails closed.
+- **SD-34 Certificates bind the analysis to compilation (decision 6).** `Certified` reads the config
+  type, never the wide machine type. A change to guard or action code is caught by the check, not
+  by the compiler.
+- **SD-35 Type tests match exact diagnostics (decision 7).** A bare `@ts-expect-error` can pass for
+  the wrong reason. The code, the line and a message fragment are matched.
+- **SD-36 What counts as progress (decision 8).** An agent invoke with total settlement, a targeted
+  finite `after` exit, and an exiting `always` set with an unguarded fallback. A non-agent invoke
+  counts only beside a targeted finite `after`, as no type proves that an effect ends.
+- **SD-37 Liveness under fairness (decision 9).** A cycle that re-enters an agent state passes a
+  falling counter or an event from a person (`SettlementTransitionMeta`). The explorer checks the
+  counter.
+- **SD-38 Child machines compose, and the brand does not spread (decision 10).** A machine that
+  holds agents carries `HoldsAgents`. A parent needs its certificate, and a handler for its
+  settlement in each state where it lives.
+- **SD-39 Every definition is proved (decision 11).** A consumer proves each admitted definition,
+  not only fixtures, and a proof timeout refuses the definition.
+- **SD-40 The abstraction is derived (decision 12).** A Proxy records the fields that the machine
+  reads. A read that the environment does not map stops the run, and no field can be exempted.
+  The congruence check is the second line of defence. It runs once per set of differing values,
+  not per set of differing field names, as a third value can hold the fact a second one lacks.
+- **SD-41 The menu comes from the state (decision 13).** A tool must be an event that the state
+  accepts. A payload decodes through the event's Schema. Only an observed state exit is a move.
+- **SD-42 Attempts are durable (decision 14).** The persisted snapshot carries the attempts, and an
+  attempt that a process left unfinished counts as `crashed`.
+- **SD-43 `provide` refuses agent logic (decision 15).** By type and at run time.
+  `proveSettlement` reads the run-time brand, so a cast cannot hide agent logic.
+  Only logic that `fromAgent` built counts as progress. No entry point exports the brand, and a
+  hand-written one buys nothing, as the proof reads a record private to the library.
+- **SD-44 The check derives again (decision 16).** `certify --check` never trusts the file. The hash
+  covers the module closure, the provided implementations and the library version. It reads a
+  `Map`, a `Set`, a `Date`, a `RegExp` and symbol keys by their content, in an order that
+  insertion does not change, and it refuses a value it cannot read (`CertificateUnreadableValue`).
+  A real import that names no file fails the verdict, as the hash cannot cover that file. A name
+  in a comment, a string or a type-only import only adds an input to the hash (`mentioned:`). The
+  scan is a lexer and a whole-text pattern, not a parser, as `effect` is the only dependency.
+- **SD-45 Edge rules (decision 17).** The last outcome is the unsettled reason. An accepted event
+  that does not exit is `illegal`. Each agent in an `invoke` array needs its own exiting `onDone`.
+  `stopChild` of an invoked agent is refused. A progress delay is finite and positive.
+- **SD-46 Large machines are proved part by part (decision 18).** Each part gets the same checks at
+  full strength. No weaker check replaces them.
+- **SD-47 Model calls need `AgentTurn` (decision 19).** Only `fromAgent` provides the service, and
+  only to `turn`. A consumer requires it at its model entry point.
+- **SD-48 No state waits for ever (decision 20).** A consumer ends each wait for a person at a
+  deadline, so the machine reaches a final state with no human input.
+- **SD-49 The library gates itself (decision 21).** `pnpm check`, `prepublishOnly` and CI run the
+  settlement type tests, the structural proof and `certify --check` over the library's fixtures.
+  `xstate-effect-certify-gate` is a public bin, so a consumer's CI reads the report the same way.
+  Its report holds a per-run nonce, which the bin reads before it loads a config, so a report a
+  config prints fails. A config shares the process, so the gate is no sandbox: a config that
+  patches the runtime can still pass. A config target's `layer` provides a machine's services;
+  each machine builds its own, so no service state crosses between runs.
+- **SD-50 The type-test harness runs two compilers (decision 22).** `tsgo` and `tsc` compile the same
+  fixtures, and the expected diagnostics are data.
+- **SD-51 The wide-config gate is a partial fix, with a lint rule (2026-11-02).** The owner required
+  that nothing bypass the type system. The merged signature adds a second inference path, and it
+  refuses a config that TypeScript did not infer. A spread into `states` with an explicit key still
+  compiles. The owner accepted that limit: an ESLint rule bans the form, and `proveSettlement`
+  refuses the machine. The record is `docs/wide-config-gate-investigation.md` at the repository
+  root. The limits are in [setup](./reference/setup.md#limits-of-the-compile-time-proof).
+- **SD-52 `AnyActorLogic` refuses agent logic (2026-11-02).** A widened agent had callable methods,
+  so widening bypassed the capability refusal. The capability is optional on `ActorLogic` and
+  `AnyActorLogic` and required on agent logic. The library's generics read `AnyLogicSlot` and
+  `LogicTypes`. A deliberate cast still compiles, and the run-time check stops it.
 
 ## Task-phase plan (SD-2)
 

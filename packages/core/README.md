@@ -164,8 +164,13 @@ the gate, the hook and where a new test goes.
 - [`docs/`](./docs/index.md) — tutorials, how-to guides, reference and explanation pages. Every
   code sample there compiles and lints; `pnpm check-docs` checks them.
 - [`test/upstream/CONFORMANCE.md`](./test/upstream/CONFORMANCE.md) — the conformance ledger.
-- [`docs/decisions.md`](./docs/decisions.md) — the decisions D1–D20 and SD-1–SD-28.
+- [`docs/decisions.md`](./docs/decisions.md) — the decisions D1–D20 and SD-1–SD-52.
 - [`llms.txt`](./llms.txt) — a short summary of the package for language models.
+
+The compile-time settlement proof of `setup(...).createMachine` has known limits, one of which
+lets an unsafe machine compile. Read
+[Limits of the compile-time proof](./docs/reference/setup.md#limits-of-the-compile-time-proof)
+before you rely on a green compile.
 
 ## Development
 
@@ -178,6 +183,7 @@ git clone https://github.com/jambudipa/xstate-effect.git
 cd xstate-effect/packages/core
 pnpm install
 
+pnpm check                                   # lint, type check, build, the settlement gate
 pnpm lint                                    # ESLint over src/ and test/
 pnpm typecheck                               # src/, then src/ and test/ together
 pnpm exec tsc -p tsconfig.test.json --noEmit # the type check of the tests that CI runs
@@ -185,6 +191,8 @@ pnpm test                                    # the whole suite, upstream rewrite
 pnpm test:coverage                           # the suite with the coverage gate
 pnpm build                                   # dist/
 ```
+
+`pnpm check` is also the gate of a publish, through `prepublishOnly`.
 
 CI runs these commands on Node 22 and 24 for every push and pull request to `main`, with
 `pnpm test:coverage` in place of `pnpm test`.
@@ -216,8 +224,9 @@ every change:
 - **Conventions.** Public exports carry JSDoc with `@since` and `@category`; an intentionally
   unused binding starts with `_`; generic types carry variance markers; runtime type checks use
   `TypeId` symbols.
-- **Gates.** `pnpm lint`, `pnpm typecheck`, the test type check, `pnpm test:coverage`,
-  `pnpm build` and `pnpm run docs:audit` all pass before a merge; CI runs them.
+- **Gates.** `pnpm check`, the test type check, `pnpm test:coverage` and `pnpm run docs:audit`
+  all pass before a merge; CI runs them. `pnpm check` holds the lint, the type check, the build
+  and the settlement gate, whose fixtures are in `test/settlement/`.
 
 <!-- docs-audit:maintenance -->
 

@@ -6,7 +6,8 @@
  */
 import { Effect, Option } from "effect"
 import type { EventObject } from "../Event.js"
-import type { ActorLogic, AnyActorLogic } from "../ActorLogic.js"
+import type { AnyLogicSlot, LogicTypes } from "../ActorLogic.js"
+import type { NotInlineChild, SpawnableActor } from "../internal/agentBrand.js"
 import type { DeclaredActorId, RequiredSpawnKeys, SpawnInput } from "../spawn.js"
 import type {
   ActionDefinition,
@@ -27,7 +28,7 @@ import * as Types from "../Types.js"
 export interface SpawnChildOptions<
   TContext,
   TEvent extends EventObject,
-  TLogic extends AnyActorLogic
+  TLogic extends AnyLogicSlot
 > {
   /** ID for the spawned actor, or a function of the action arguments; defaults to its session id */
   readonly id?: string | ((ctx: ActionContext<TContext, TEvent>) => string)
@@ -65,7 +66,7 @@ export interface UntypedSpawnChildOptions<TContext, TEvent extends EventObject> 
 
 /**
  * The input of a spawnChild's options for `TLogic`: that logic's input type, or any value for
- * `AnyActorLogic`, which matches no `ActorLogic<...>`. `spawnChild` and `enqueue.spawnChild`
+ * `AnyLogicSlot`, which matches no `ActorLogic<...>`. `spawnChild` and `enqueue.spawnChild`
  * pass `AnyActorLogic` for a logic given inline beside declared actors: upstream
  * `SpawnArguments` gives that logic `InputFrom<ProvidedActor["logic"]>`, which is `any`, and
  * its input function the action context of the declared actors' options. Any value is written
@@ -73,7 +74,7 @@ export interface UntypedSpawnChildOptions<TContext, TEvent extends EventObject> 
  * it in a union keeps its action context type (`unknown` would absorb the union).
  */
 type SpawnedInputOf<TLogic> =
-  TLogic extends ActorLogic<infer _S, infer _E, infer I, infer _Em, infer _R> ? I : NonNullable<unknown> | null | undefined
+  TLogic extends LogicTypes<infer _S, infer _E, infer I, infer _Em, infer _R> ? I : NonNullable<unknown> | null | undefined
 
 /**
  * The options of a spawnChild of the declared actor `TActor` (upstream `SpawnActionOptions`):
@@ -109,7 +110,7 @@ interface DeclaredSpawnChildOptions<TContext, TEvent extends EventObject, TActor
 }
 
 /** The input of a declared actor's logic (upstream `InputFrom`); any value when it declares none. */
-type DeclaredSpawnInput<TLogic extends AnyActorLogic> = unknown extends SpawnInput<TLogic> ? NonNullable<unknown> | null | undefined
+type DeclaredSpawnInput<TLogic extends AnyLogicSlot> = unknown extends SpawnInput<TLogic> ? NonNullable<unknown> | null | undefined
   : SpawnInput<TLogic>
 
 /**
@@ -137,15 +138,22 @@ type DeclaredSpawnChildArguments<TContext, TEvent extends EventObject, TActor ex
  * type (upstream `DistributeActors` of no actor leaves it an `any` input). As upstream, the
  * input of a logic given inline is not checked against that logic's input.
  *
+ * No form takes agent logic (NEG-3, a port addition): a logic given inline carries no agent
+ * brand and holds no agents (`NotInlineChild`), and a declared src names no agent logic and no
+ * machine that holds agents unless it is certified with a declared id (`SpawnableActor`), as
+ * agent logic settles only through an invocation's `onDone`, and a child's settlement needs a
+ * handler that can name it (S17).
+ *
  * @since 0.1.0
  * @category Actions
  */
-export type SpawnChildArguments<TContext, TEvent extends EventObject, TLogic extends AnyActorLogic, TNames extends ImplementationNames> =
-  string extends TNames["actors"] ? [src: TNames["actors"] | TLogic, options?: UntypedSpawnChildOptions<TContext, TEvent>]
-    : [TNames["providedActor"]] extends [never] ? [src: TLogic, options?: UntypedSpawnChildOptions<TContext, TEvent> & { readonly id?: never }]
+export type SpawnChildArguments<TContext, TEvent extends EventObject, TLogic extends AnyLogicSlot, TNames extends ImplementationNames> =
+  string extends TNames["actors"] ? [src: TNames["actors"] | (TLogic & NotInlineChild), options?: UntypedSpawnChildOptions<TContext, TEvent>]
+    : [TNames["providedActor"]] extends [never]
+      ? [src: TLogic & NotInlineChild, options?: UntypedSpawnChildOptions<TContext, TEvent> & { readonly id?: never }]
     :
-      | DeclaredSpawnChildArguments<TContext, TEvent, TNames["providedActor"]>
-      | [src: TLogic, options?: SpawnChildOptions<TContext, TEvent, AnyActorLogic> & { readonly id?: never }]
+      | DeclaredSpawnChildArguments<TContext, TEvent, SpawnableActor<TNames["providedActor"]>>
+      | [src: TLogic & NotInlineChild, options?: SpawnChildOptions<TContext, TEvent, AnyLogicSlot> & { readonly id?: never }]
 
 /** The value of an option that may be a function of the action context. */
 const resolveOption = <TContext, TEvent extends EventObject, A>(
@@ -168,7 +176,8 @@ const resolveOption = <TContext, TEvent extends EventObject, A>(
  * Where the machine declares its actors (`types.actors`, a setup's actors), a src is one of
  * their names, with one of the ids that actor declares (required then) and the input of its
  * logic (required when the input type does not take `undefined`); an inline logic takes no id
- * there (upstream `SpawnArguments`).
+ * there (upstream `SpawnArguments`). Agent logic, inline or by a declared name, fails type
+ * checking; one a cast hid fails the action at run time with `AgentSpawnError` (NEG-3).
  *
  * @example
  * ```ts
@@ -191,7 +200,7 @@ const resolveOption = <TContext, TEvent extends EventObject, A>(
 export const spawnChild: SpawnChild = (<
   TContext,
   TEvent extends EventObject,
-  TLogic extends AnyActorLogic,
+  TLogic extends AnyLogicSlot,
   TNames extends ImplementationNames = ImplementationNames
 >(
   src: NoInfer<TNames>["actors"] | TLogic,
@@ -228,7 +237,7 @@ export interface SpawnChild {
   <
     TContext,
     TEvent extends EventObject,
-    TLogic extends AnyActorLogic,
+    TLogic extends AnyLogicSlot,
     TNames extends ImplementationNames = ImplementationNames
   >(
     ...args: SpawnChildArguments<TContext, TEvent, TLogic, NoInfer<TNames>>
@@ -239,7 +248,9 @@ export interface SpawnChild {
 /**
  * Creates a spawnChild action that resolves actor logic from the given implementations (a
  * port extra; `spawnChild` with a string src reads the machine's own implementations). A
- * name the implementations lack warns and spawns nothing.
+ * name the implementations lack warns and spawns nothing. The name is a plain string, so no type
+ * refuses agent logic here: a name whose logic is agent logic fails the action at run time with
+ * `AgentSpawnError`, before the agent runs (NEG-3.1).
  *
  * @since 0.1.0
  * @category Actions
@@ -250,7 +261,7 @@ export const spawnChildFromRegistry = <
 >(
   srcName: string,
   implementations: MachineImplementations<TContext, TEvent>,
-  options?: Omit<SpawnChildOptions<TContext, TEvent, AnyActorLogic>, "input"> & {
+  options?: Omit<SpawnChildOptions<TContext, TEvent, AnyLogicSlot>, "input"> & {
     readonly input?: unknown | ((ctx: ActionContext<TContext, TEvent>) => unknown)
   }
 ): ActionDefinition<TContext, TEvent> => ({
@@ -266,6 +277,7 @@ export const spawnChildFromRegistry = <
 
       return Types.ActionResult.SpawnChild({
         src: logicOption.value,
+        registryName: srcName,
         id: resolveOption(options?.id, ctx),
         systemId: Option.fromUndefinedOr(options?.systemId),
         input: Option.getOrUndefined(resolveOption<TContext, TEvent, unknown>(options?.input, ctx)),

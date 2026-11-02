@@ -9,7 +9,7 @@ import type { Scope } from "effect"
 import type { Snapshot } from "./Snapshot.js"
 import type { EventObject } from "./Event.js"
 import type { AnyEventObject, UpstreamAny } from "./internal/anyEventObject.js"
-import type { AnyActorLogic, ActorSystemService } from "./ActorLogic.js"
+import type { AnyLogicSlot, ActorSystemService } from "./ActorLogic.js"
 import type { SerializationError } from "./Errors.js"
 import type { PersistedActorRef } from "./persistence.js"
 import type { Variance } from "./Types.js"
@@ -59,7 +59,7 @@ export interface ActorRefBase extends Pipeable.Pipeable, Inspectable.Inspectable
   readonly sessionId: string
 
   /** Source logic or string reference */
-  readonly src: string | AnyActorLogic
+  readonly src: string | AnyLogicSlot
 
   /**
    * Sends an event to this actor (untyped version for cross-actor communication).

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "./scripts",
+    "outDir": "./dist/scripts",
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["scripts/certify.ts", "scripts/certify-core.ts", "scripts/gate.ts", "scripts/gate-core.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

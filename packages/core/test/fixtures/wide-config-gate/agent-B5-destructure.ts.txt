@@ -1,0 +1,4 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { agentSetup as s } from "./support.js"
+/** This declaration supplies the agent-B5-destructure acceptance case. */
+export const machine=s.createMachine({entry: ({ event }) => void event,initial:"x",states:{x:{on:{GO:"done"}},done:{type:"final"}}});

@@ -6,11 +6,13 @@
  */
 import { Effect, Option, Chunk, Duration, Data, Types as EffectTypes } from "effect"
 import type { DoneActorEvent, DoneStateEvent, ErrorActorEvent, EventDescriptor, EventObject, ExtractEvent, SnapshotEvent } from "./Event.js"
+import type { HoldsAgents, InlineLogic, InvocableActor, IsAgentLogic, PlainActor } from "./internal/agentBrand.js"
+import type { LogicCapability } from "./internal/logicCapability.js"
 import type { AnyEventObject, UpstreamAny } from "./internal/anyEventObject.js"
 import type { GuardError } from "./Errors.js"
 import type { ActorRef, ActorRefBase, AnyActorRef } from "./ActorRef.js"
 import type { AnyActor } from "./Actor.js"
-import type { ActorLogic, AnyActorLogic } from "./ActorLogic.js"
+import type { ActorLogic, AnyLogicSlot, LogicTypes } from "./ActorLogic.js"
 import type { PromiseActorLogic } from "./actors/fromPromise.js"
 import type { MachineSnapshot, Snapshot } from "./Snapshot.js"
 import type { AnyStateMachine, StateMachine } from "./StateMachine.js"
@@ -541,7 +543,7 @@ export interface TypedActorContext<
  * @since 0.1.0
  * @category Typed Context
  */
-export interface SpawnOptions<TLogic extends AnyActorLogic> {
+export interface SpawnOptions<TLogic extends AnyLogicSlot> {
   /** The child's id; defaults to its session id. */
   readonly id?: string
   /**
@@ -603,7 +605,7 @@ type NamedActors<TNames extends ImplementationNames> = string extends TNames["ac
  * gives the reference of what it returns, a `Promise<T>` the reference of a
  * `PromiseActorLogic<T>`, and any other type `never`. A state machine is the actor logic of
  * its `MachineSnapshot`, so the logic case also gives upstream's state machine case. The
- * supertypes `AnyActorLogic` and `AnyStateMachine` (whose types are unknown) give
+ * supertypes `AnyLogicSlot` and `AnyStateMachine` (whose types are unknown) give
  * {@link AnyActorRef}, which every reference fits (upstream: a reference of `any` types).
  *
  * @example
@@ -618,9 +620,9 @@ export type ActorRefFrom<T> =
   (T extends (...args: never) => infer TReturn ? TReturn : T) extends infer TLogic
     ? TLogic extends Promise<infer TOutput>
       ? ActorRefFrom<PromiseActorLogic<TOutput>>
-      : TLogic extends ActorLogic<infer TSnapshot, infer TEvent, infer _TInput, infer TEmitted, infer _R>
+      : TLogic extends LogicTypes<infer TSnapshot, infer TEvent, infer _TInput, infer TEmitted, infer _R>
         ? ActorRef<TSnapshot, TEvent, TEmitted>
-        : TLogic extends AnyActorLogic
+        : TLogic extends AnyLogicSlot
           ? AnyActorRef
           : never
     : never
@@ -640,7 +642,7 @@ export type ActorRefFrom<T> =
  * @since 0.1.0
  * @category Typed Context
  */
-export type ActorRefFromLogic<T extends AnyActorLogic> = ActorRef<
+export type ActorRefFromLogic<T extends AnyLogicSlot> = ActorRef<
   ActorLogic.SnapshotOf<T>,
   ActorLogic.EventOf<T>,
   ActorLogic.EmittedOf<T>
@@ -667,7 +669,7 @@ export type SnapshotFrom<T> =
   (T extends (...args: never) => infer TReturn ? TReturn : T) extends infer TValue
     ? TValue extends ActorRef<infer TSnapshot, infer _TEvent, infer _TEmitted>
       ? TSnapshot
-      : TValue extends ActorLogic<infer TSnapshot, infer _TEvent, infer _TInput, infer _TEmitted, infer _R>
+      : TValue extends LogicTypes<infer TSnapshot, infer _TEvent, infer _TInput, infer _TEmitted, infer _R>
         ? TSnapshot
         : never
     : never
@@ -687,7 +689,7 @@ export type SnapshotFrom<T> =
  * @since 0.1.0
  * @category Typed Context
  */
-export type InputFrom<T> = T extends ActorLogic<infer _TSnapshot, infer _TEvent, infer TInput, infer _TEmitted, infer _R>
+export type InputFrom<T> = T extends LogicTypes<infer _TSnapshot, infer _TEvent, infer TInput, infer _TEmitted, infer _R>
   ? TInput
   : never
 
@@ -708,7 +710,7 @@ export type InputFrom<T> = T extends ActorLogic<infer _TSnapshot, infer _TEvent,
  * @since 0.1.0
  * @category Typed Context
  */
-export type OutputFrom<T> = T extends ActorLogic<infer TSnapshot, infer _TEvent, infer _TInput, infer _TEmitted, infer _R>
+export type OutputFrom<T> = T extends LogicTypes<infer TSnapshot, infer _TEvent, infer _TInput, infer _TEmitted, infer _R>
   ? Snapshot.Output<TSnapshot>
   : T extends ActorRef<infer TSnapshot, infer _TEvent, infer _TEmitted> ? Snapshot.Output<TSnapshot>
   : never
@@ -728,8 +730,8 @@ export type OutputFrom<T> = T extends ActorLogic<infer TSnapshot, infer _TEvent,
  * @since 0.1.0
  * @category Typed Context
  */
-export type EmittedFrom<TLogic extends AnyActorLogic> = TLogic extends
-  ActorLogic<infer _TSnapshot, infer _TEvent, infer _TInput, infer TEmitted, infer _R> ? TEmitted
+export type EmittedFrom<TLogic extends AnyLogicSlot> = TLogic extends
+  LogicTypes<infer _TSnapshot, infer _TEvent, infer _TInput, infer TEmitted, infer _R> ? TEmitted
   : never
 
 /**
@@ -1263,19 +1265,27 @@ export class ContextUpdate extends Data.TaggedClass("ContextUpdate")<{
  * without it gives the resolved id there. `input` is the child's input (none when absent).
  * `resolveInput`, which the built-in `spawnChild` sets in place of `input`, gives the input:
  * the engine calls it only once the src resolves to a logic (upstream `resolveSpawn` calls an
- * input function only then).
+ * input function only then). `registryName`, which `spawnChildFromRegistry` sets, is the name
+ * it looked the logic up by, which an `AgentSpawnError` names in place of the logic.
  *
  * @since 0.1.0
  * @category Types
  */
 export class SpawnChild extends Data.TaggedClass("SpawnChild")<{
-  readonly src: string | AnyActorLogic
+  readonly src: string | AnyLogicSlot
+  readonly registryName?: string
   readonly id: Option.Option<string>
   readonly givenId?: unknown
   readonly systemId: Option.Option<string>
   readonly input?: unknown
   readonly resolveInput?: () => unknown
   readonly syncSnapshot: boolean
+  /**
+   * The runtime's capability, only on the spawn that starts a state's invocation. Only an
+   * invocation may start agent logic, as only its `onDone` settles it; every other spawn of
+   * agent logic fails. It is the capability and no flag, so a custom action cannot claim it.
+   */
+  readonly invocation?: LogicCapability
 }> {}
 
 /**
@@ -1433,13 +1443,15 @@ export const ActionResult = {
   NoOp: (): ActionResult => new NoOp(),
   ContextUpdate: (context: unknown): ActionResult => new ContextUpdate({ context }),
   SpawnChild: (request: {
-    readonly src: string | AnyActorLogic
+    readonly src: string | AnyLogicSlot
+    readonly registryName?: string
     readonly id: Option.Option<string>
     readonly givenId?: unknown
     readonly systemId: Option.Option<string>
     readonly input?: unknown
     readonly resolveInput?: () => unknown
     readonly syncSnapshot: boolean
+    readonly invocation?: LogicCapability
   }): ActionResult => new SpawnChild(request),
   StopChild: (target: string | ActorRefBase): ActionResult => new StopChild({ target }),
   SendEvent: (
@@ -1752,7 +1764,8 @@ export interface GuardScope<TContext, TEvent extends EventObject> {
 /**
  * Invoke configuration in state config. A string `src` names one of the actors `TNames`
  * holds (see {@link ImplementationNames}; any name by default); otherwise `src` is any
- * actor logic, whatever its types, a state machine included (upstream `AnyActorLogic`).
+ * actor logic, whatever its types, a state machine included (upstream `AnyActorLogic`), but
+ * agent logic: that is invoked only by a name a setup declares (NEG-1, NEG-2).
  * The `id` is the invoked actor's id, `<index>.<node id>` when none is given (XState: a
  * string); its done, error and snapshot events are `xstate.done.actor.<id>`,
  * `xstate.error.actor.<id>` and `xstate.snapshot.<id>`. Where the actors are declared (a
@@ -1790,21 +1803,23 @@ export type InvokeConfig<
     SnapshotEvent<UpstreamAny>
   > & {
     /**
-     * One of the machine's actor names, or inline actor logic. An unknown name warns `Actor type
-     * '<src>' not found in machine '<id>'.` on entry and starts nothing.
+     * One of the machine's actor names, or inline actor logic that is not agent logic (NEG-2: a
+     * machine without setup has no settlement check). An unknown name warns `Actor type '<src>'
+     * not found in machine '<id>'.` on entry and starts nothing.
      */
-    readonly src: TNames["actors"] | AnyActorLogic
+    readonly src: TNames["actors"] | InlineLogic
     /** The invoked actor's id; `<index>.<node id>` when none is given. */
     readonly id?: string
   }
   :
-    | DeclaredInvokeConfig<TContext, TEvent, TMeta, TNames, TNames["providedActor"]>
+    | DeclaredInvokeConfig<TContext, TEvent, TMeta, TNames, InvocableActor<TNames["providedActor"]>>
     | InlineInvokeConfig<TContext, TEvent, TMeta, TNames>
 
 /**
  * The invocation of one declared actor (upstream `DistributeActors`, distributed over
- * `TNames["providedActor"]`): its `src`, the result events and `input` of its logic, and its
- * `id` (see {@link InvokedIdConfig}).
+ * `TNames["providedActor"]`): its `src`, the result events and `input` of its logic, its
+ * `id` (see {@link InvokedIdConfig}), and, for agent logic, its required `onDone` (see
+ * {@link InvokedDoneConfig}).
  */
 type DeclaredInvokeConfig<
   TContext,
@@ -1823,12 +1838,79 @@ type DeclaredInvokeConfig<
         ErrorActorEvent,
         SnapshotEvent<InvokedSnapshot<TActor["logic"]>>
       >,
-      "input"
+      "input" | InvokedDoneKeys<TActor["logic"]>
     >
     & InvokedInputConfig<TContext, TEvent, InvokedInput<TActor["logic"]>>
+    & InvokedDoneConfig<TContext, TEvent, TMeta, TNames, TActor["logic"]>
     & InvokedIdConfig<TActor>
     & { readonly src: TActor["src"] }
   : never
+
+/**
+ * The members {@link InvokedDoneConfig} replaces: `onDone` and `onError` for agent logic,
+ * `onDone` for a machine that holds agents, none for any other logic. The brand check reads
+ * the logic whole (TS-115).
+ */
+type InvokedDoneKeys<TLogic> = IsAgentLogic<TLogic> extends true ? "onDone" | "onError"
+  : TLogic extends HoldsAgents ? "onDone"
+  : never
+
+/**
+ * The settlement of an invocation of agent logic (a port addition, S1): `onDone` is required,
+ * and its event's `output` is the logic's output (`Unsettled` for `fromAgent`, an `Option`,
+ * D8). Agent logic fails with `never`, so `onError` takes nothing. `onSnapshot` stays optional
+ * and never settles the agent. The machine's config check (`SettlementCheck`) refuses an
+ * `onDone` that may stay in the invoking state (S15). A machine that holds agents gets
+ * {@link ChildSettlementHandler} (S17). Any other logic gets nothing here and keeps the optional
+ * members of {@link InvokeConfigMembers}.
+ */
+type InvokedDoneConfig<
+  TContext,
+  TEvent extends EventObject,
+  TMeta,
+  TNames extends ImplementationNames,
+  TLogic
+> = IsAgentLogic<TLogic> extends true ? AgentSettlementHandler<TContext, TEvent, TMeta, TNames, TLogic>
+  : TLogic extends HoldsAgents ? ChildSettlementHandler<TContext, TEvent, TMeta, TNames, TLogic>
+  : unknown
+
+/**
+ * The members an invocation of agent logic must have (see {@link InvokedDoneConfig}). A named
+ * interface, so a missing `onDone` is reported as missing from the settlement handler.
+ *
+ * @since 0.4.0
+ * @category Types
+ */
+export interface AgentSettlementHandler<
+  TContext,
+  TEvent extends EventObject,
+  TMeta,
+  TNames extends ImplementationNames,
+  TLogic
+> {
+  /** The transitions the agent's `Unsettled` output takes; each branch must leave the state. */
+  readonly onDone: InvokeTransitionsConfig<TContext, DoneActorEvent<InvokedOutput<TLogic>>, TMeta, TNames, NoInfer<TEvent>>
+  /** Agent logic never fails: its error channel is `never`. */
+  readonly onError?: never
+}
+
+/**
+ * The member an invocation of a machine that holds agents must have (S17). A machine may fail,
+ * unlike agent logic, so `onError` stays optional.
+ *
+ * @since 0.4.0
+ * @category Types
+ */
+export interface ChildSettlementHandler<
+  TContext,
+  TEvent extends EventObject,
+  TMeta,
+  TNames extends ImplementationNames,
+  TLogic
+> {
+  /** The transitions the child's completion takes; each branch must leave the state. */
+  readonly onDone: InvokeTransitionsConfig<TContext, DoneActorEvent<InvokedOutput<TLogic>>, TMeta, TNames, NoInfer<TEvent>>
+}
 
 /**
  * The `id` of an invocation of a declared actor (upstream `id?: TSpecificActor['id']` with
@@ -1842,8 +1924,9 @@ type InvokedIdConfig<TActor> = TActor extends { readonly id?: infer TId }
   : { readonly id?: string }
 
 /**
- * The inline-logic member of a setup machine's {@link InvokeConfig}: any actor logic as
- * `src`, no `id`. A setup that declares no actors gets none (upstream `DistributeActors`
+ * The inline-logic member of a setup machine's {@link InvokeConfig}: any actor logic but agent
+ * logic as `src` (NEG-1: agent logic is invoked only by a declared name, so its settlement is
+ * checked), no `id`. A setup that declares no actors gets none (upstream `DistributeActors`
  * over no actors is `never`), so its machine takes no invocation at all and TypeScript
  * reports an invoke object's `src` as an excess property, as upstream.
  */
@@ -1854,17 +1937,17 @@ type InlineInvokeConfig<
   TNames extends ImplementationNames
 > = [TNames["actors"]] extends [never] ? never
   : InvokeConfigMembers<TContext, TEvent, TMeta, TNames, DoneActorEvent, ErrorActorEvent, SnapshotEvent<Snapshot>> & {
-    readonly src: AnyActorLogic
+    readonly src: InlineLogic
     readonly id?: never
   }
 
 /** The output type of an invoked logic (XState `OutputFrom`); unknown for any other logic. */
-type InvokedOutput<TLogic> = TLogic extends ActorLogic<infer S, infer _E, infer _I, infer _Em, infer _R>
+type InvokedOutput<TLogic> = TLogic extends LogicTypes<infer S, infer _E, infer _I, infer _Em, infer _R>
   ? S extends Snapshot<infer O> ? O : unknown
   : unknown
 
 /** The input type of an invoked logic (XState `InputFrom`); unknown for any other logic. */
-type InvokedInput<TLogic> = TLogic extends ActorLogic<infer _S, infer _E, infer I, infer _Em, infer _R> ? I : unknown
+type InvokedInput<TLogic> = TLogic extends LogicTypes<infer _S, infer _E, infer I, infer _Em, infer _R> ? I : unknown
 
 /**
  * The `input` of an invocation of a declared actor whose input type is `TInput`: any input
@@ -1891,7 +1974,7 @@ type TypedInvokeInput<TContext, TEvent extends EventObject, TInput> =
   }) => TInput)
 
 /** The snapshot type of an invoked logic (XState `SnapshotFrom`); any snapshot for any other logic. */
-type InvokedSnapshot<TLogic> = TLogic extends ActorLogic<infer S, infer _E, infer _I, infer _Em, infer _R> ? S : Snapshot
+type InvokedSnapshot<TLogic> = TLogic extends LogicTypes<infer S, infer _E, infer _I, infer _Em, infer _R> ? S : Snapshot
 
 /**
  * The members of an {@link InvokeConfig} besides `src` and `id`. `TDoneEvent`,
@@ -1985,7 +2068,7 @@ export interface InvokeDefinition<TContext, TEvent extends EventObject, TMeta = 
    * The config's src: an actor name, or inline logic, which the JSON form names
    * `xstate.invoke.<index>.<node id>`.
    */
-  readonly src: string | AnyActorLogic
+  readonly src: string | AnyLogicSlot
   /**
    * The invoked actor's id: the config's, or `<index>.<node id>` (upstream `createInvokeId`). The
    * node's result transitions are listed under the event types built from it.
@@ -2175,7 +2258,7 @@ export interface MachineImplementations<TContext, TEvent extends EventObject> {
    */
   readonly guards?: Record<string, GuardImplementation<TContext, TEvent>>
   /** The actor logic a string src names in `spawn`, `spawnChild` and `invoke`. */
-  readonly actors?: Record<string, AnyActorLogic>
+  readonly actors?: Record<string, AnyLogicSlot>
   /** The delays a name resolves to in `raise`, `sendTo` and an `after` key. */
   readonly delays?: Record<string, DelayConfig<TContext, TEvent>>
 }
@@ -2925,7 +3008,7 @@ export interface ProvidedActor {
    * The actor logic that the name stands for; it types the input and the result events of an
    * invocation or a spawn of it.
    */
-  readonly logic: AnyActorLogic
+  readonly logic: AnyLogicSlot
   /**
    * The child id the actor declares. An id whose type excludes `undefined` is required in an
    * invocation or a spawn of the actor; a literal id gives the child its own key in the snapshot's
@@ -3033,7 +3116,7 @@ export interface ImplementationNames {
    * The logic of each actor name (XState `ProvidedActor['logic']`), which types the events an
    * invocation of that name takes: any logic by default.
    */
-  readonly actorLogic: Readonly<Record<string, AnyActorLogic>>
+  readonly actorLogic: Readonly<Record<string, AnyLogicSlot>>
   /**
    * The events an `emit` or `enqueue.emit` written in the config may emit (XState
    * `TEmitted`): any event object by default.
@@ -3054,7 +3137,9 @@ export interface ImplementationNames {
  * its `types` member declares (XState `MachineConfig<..., TActor, TAction, TGuard, TDelay,
  * TTag, ..., TEmitted>`): the declared actions and guards with their params, the declared
  * delay names, the src of each declared actor with its logic, and the declared emitted
- * events. A kind the `types` member does not declare takes any name, as before.
+ * events. A kind the `types` member does not declare takes any name, as before. A declared
+ * actor whose logic is agent logic is no name here: such a machine has no settlement check, so
+ * only a setup machine invokes agent logic (NEG-2).
  *
  * @since 0.1.0
  * @category Types
@@ -3073,11 +3158,14 @@ export interface MachineTypesNames<
   readonly guards: KnownOr<TGuard, ParameterizedObject>
   /** The delay names `types.delays` declares, or any string while none are known. */
   readonly delays: KnownOr<TDelay, string>
-  /** The src names of the actors `types.actors` declares, or any string while none are known. */
-  readonly actors: KnownOr<TActor, ProvidedActor>["src"]
+  /**
+   * The src names of the actors `types.actors` declares, but those of agent logic and of machines
+   * that hold agents, or any string while none are known.
+   */
+  readonly actors: PlainActor<KnownOr<TActor, ProvidedActor>>["src"]
   /** The declared logic of each actor name. */
   readonly actorLogic: {
-    readonly [K in KnownOr<TActor, ProvidedActor>["src"]]: Extract<KnownOr<TActor, ProvidedActor>, { readonly src: K }>["logic"]
+    readonly [K in PlainActor<KnownOr<TActor, ProvidedActor>>["src"]]: Extract<KnownOr<TActor, ProvidedActor>, { readonly src: K }>["logic"]
   }
   /**
    * The events `types.emitted` declares; any event object while it declares none or only
@@ -3086,8 +3174,11 @@ export interface MachineTypesNames<
   readonly emitted: EventObject extends KnownOr<TEmitted, EventObject> ? AnyEventObject : TEmitted
   /** The tags `types.tags` declares, or any string while none are known. */
   readonly tags: KnownOr<TTag, string>
-  /** The declared actors as one `ProvidedActor` union, or any actor while none are known. */
-  readonly providedActor: KnownOr<TActor, ProvidedActor>
+  /**
+   * The declared actors but agent logic and machines that hold agents as one `ProvidedActor`
+   * union, or any actor while none are known.
+   */
+  readonly providedActor: PlainActor<KnownOr<TActor, ProvidedActor>>
 }
 
 /**
@@ -3180,7 +3271,7 @@ export interface MachineTypes<
  * @since 0.1.0
  * @category Types
  */
-export interface ActorOptions<TLogic extends AnyActorLogic> {
+export interface ActorOptions<TLogic extends AnyLogicSlot> {
   /** The actor's id; defaults to its session id. */
   readonly id?: string
   /**
@@ -3194,7 +3285,7 @@ export interface ActorOptions<TLogic extends AnyActorLogic> {
    */
   readonly syncSnapshot?: boolean
   /** The src the actor reports as `actor.src`: the name its parent spawned it by; defaults to the logic. */
-  readonly src?: string | AnyActorLogic
+  readonly src?: string | AnyLogicSlot
   /** The input that the logic's initial snapshot receives. */
   readonly input?: ActorLogic.InputOf<TLogic>
   /** The id under which the system registers the actor. */
@@ -3285,7 +3376,7 @@ export type DevToolsAdapter = (service: AnyActor) => Effect.Effect<void, unknown
  * @since 0.1.0
  * @category Types
  */
-export type RequiredActorOptionsKeys<TLogic extends AnyActorLogic> = undefined extends ActorLogic.InputOf<TLogic>
+export type RequiredActorOptionsKeys<TLogic extends AnyLogicSlot> = undefined extends ActorLogic.InputOf<TLogic>
   ? never
   : "input"
 
@@ -3298,7 +3389,7 @@ export type RequiredActorOptionsKeys<TLogic extends AnyActorLogic> = undefined e
  * @since 0.1.0
  * @category Types
  */
-export type ActorOptionsArgs<TLogic extends AnyActorLogic> = [RequiredActorOptionsKeys<TLogic>] extends [never]
+export type ActorOptionsArgs<TLogic extends AnyLogicSlot> = [RequiredActorOptionsKeys<TLogic>] extends [never]
   ? [options?: ActorOptions<TLogic>]
   : [options: ActorOptions<TLogic> & { readonly [K in RequiredActorOptionsKeys<TLogic>]: unknown }]
 
@@ -3959,7 +4050,7 @@ export type ActorLogicFrom<T> = (T extends (...args: never) => infer TReturn ? T
  * @since 0.1.0
  * @category Typed Context
  */
-export type EventFromLogic<TLogic extends AnyActorLogic> = ActorLogic.EventOf<TLogic>
+export type EventFromLogic<TLogic extends AnyLogicSlot> = ActorLogic.EventOf<TLogic>
 
 /**
  * The `createActor` option a logic requires: `"input"` when its input may not be
@@ -3968,7 +4059,7 @@ export type EventFromLogic<TLogic extends AnyActorLogic> = ActorLogic.EventOf<TL
  * @since 0.1.0
  * @category Types
  */
-export type RequiredLogicInput<TLogic extends AnyActorLogic> = RequiredActorOptionsKeys<TLogic>
+export type RequiredLogicInput<TLogic extends AnyLogicSlot> = RequiredActorOptionsKeys<TLogic>
 
 /**
  * The spawn options a provided actor requires: `"id"` when it declares one, `"input"` when

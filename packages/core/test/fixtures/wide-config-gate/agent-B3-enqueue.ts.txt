@@ -1,0 +1,4 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { agentSetup as s } from "./support.js"
+/** This declaration supplies the agent-B3-enqueue acceptance case. */
+export const machine=s.createMachine({entry: enqueueActions(({ enqueue }) => void enqueue),initial:"x",states:{x:{on:{PING:{}},invoke:{src:"agent",input:1,onDone:{actions:[]}}},done:{type:"final"}}});

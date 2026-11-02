@@ -30,7 +30,7 @@
  * active, at the end of the macrostep (upstream `stopChildren`).
  */
 import { Cause, Chunk, Context, Deferred, Effect, Exit, HashMap, HashSet, MutableHashMap, MutableHashSet, Option, Predicate, Result } from "effect"
-import type { ActorLogic, ActorScopeService, AnyActorLogic, CustomActionExecution } from "./ActorLogic.js"
+import type { ActorLogic, ActorScopeService, AnyLogicSlot, CustomActionExecution } from "./ActorLogic.js"
 import { createActionArgs, createActionContext, createActionInfo, resolveAction } from "./ActorLogic.js"
 import type { ActorRefBase } from "./ActorRef.js"
 import type { EventObject } from "./Event.js"
@@ -38,6 +38,7 @@ import { DoneStateEvent, ErrorActorEvent, isErrorActorEvent, isWildcardType, mat
 import { ActorError, GuardError, MachineDefinitionError, TransitionError } from "./Errors.js"
 import type { UpstreamAny } from "./internal/anyEventObject.js"
 import { resolveDelay } from "./internal/delay.js"
+import { logicCapability } from "./internal/logicCapability.js"
 import { isStopEvent } from "./internal/stopEvent.js"
 import type { MachineSnapshot } from "./Snapshot.js"
 import * as Snapshot from "./Snapshot.js"
@@ -376,7 +377,7 @@ export const createInvokeId = (stateNodeId: string, index: number): string => `$
  * @since 0.1.0
  * @category Configuration
  */
-export const invokeSourceName = (stateNodeId: string, index: number, src: string | AnyActorLogic): string =>
+export const invokeSourceName = (stateNodeId: string, index: number, src: string | AnyLogicSlot): string =>
   typeof src === "string" ? src : `xstate.invoke.${createInvokeId(stateNodeId, index)}`
 
 /** The children of a node that are not history nodes, in document order. */
@@ -1455,19 +1456,27 @@ const completionOfFinal = <TContext, TEvent extends EventObject>(
  * `systemId`, with its input, and syncing the child's snapshots to the parent when the
  * invocation has `onSnapshot`. The child's done, error and snapshot events reach the node's own transitions
  * through the normal selection (the invocation's `onDone`, `onError` and `onSnapshot` are
- * among them), so nothing else routes them.
+ * among them), so nothing else routes them. Each spawn is marked as an invocation, the only
+ * spawn that may start agent logic.
  */
 const spawnInvocations = <TContext, TEvent extends EventObject>(
   stateNode: StateNode<TContext, TEvent>
 ): ReadonlyArray<ActionLike<TContext, TEvent>> =>
-  stateNode.invoke.map((invokeDef, index) =>
-    spawnChild<TContext, TEvent, ActorLogic.Any>(invokeSourceName(stateNode.id, index, invokeDef.src), {
+  stateNode.invoke.map((invokeDef, index) => {
+    const spawn = spawnChild<TContext, TEvent, ActorLogic.Any>(invokeSourceName(stateNode.id, index, invokeDef.src), {
       id: invokeDef.id,
       systemId: Option.getOrUndefined(invokeDef.systemId),
       input: Option.getOrUndefined(invokeDef.input),
       syncSnapshot: Boolean(invokeDef.onSnapshot),
     })
-  )
+    return {
+      ...spawn,
+      exec: (ctx, params) =>
+        Effect.map(spawn.exec(ctx, params), (result) =>
+          result._tag === "SpawnChild" ? new Types.SpawnChild({ ...result, invocation: logicCapability }) : result
+        ),
+    }
+  })
 
 /**
  * The actions that stop the invocations of an exited node (upstream `exitStates`:

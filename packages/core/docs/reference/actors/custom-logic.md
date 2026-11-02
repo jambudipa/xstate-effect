@@ -25,7 +25,8 @@ namespace `ActorLogic`, so `ActorLogic.make` is `makeActorLogic`.
 | [`ActorLogic`](#actorlogic) | interface | The contract of an actor's logic. |
 | [`makeActorLogic`](#makeactorlogic) | function | Builds an `ActorLogic` from its functions. |
 | [Type helpers](#type-helpers) | types | `SnapshotOf`, `EventOf`, `InputOf`, `EmittedOf`, `RequirementsOf` and `Any`. |
-| [`AnyActorLogic`](#anyactorlogic) | interface | Any logic, whatever its types. |
+| [`AnyActorLogic`](#anyactorlogic) | interface | Any logic, whatever its types, except agent logic. |
+| [`AnyLogicSlot`](#anylogicslot) | interface | Any logic, agent logic included; none of its methods can be called. |
 | [`isActorLogic`](#isactorlogic) | function | Whether a value is actor logic. |
 | [`ActorLogicTypeId`](#actorlogictypeid) | symbol | The marker that every logic carries. |
 | [`ActorScope`](#actorscope) | service tag | The actor that runs the logic, its system, and its engine hooks. |
@@ -257,6 +258,25 @@ import { createMachine, fromEffect, type AnyActorLogic } from "@jambudipa/xstate
 import { Effect } from "effect"
 
 export const logics: ReadonlyArray<AnyActorLogic> = [fromEffect(() => Effect.succeed(1)), createMachine({})]
+```
+
+Agent logic does not fit `AnyActorLogic` or `ActorLogic`: the capability is optional on them, so a
+widened agent's methods could be called from anywhere.
+
+## AnyLogicSlot
+
+`AnyLogicSlot` accepts every `AnyActorLogic` and agent logic. The library's generics read it. Each
+method that can run a logic requires the runtime's capability, so a value of this type can be
+stored and passed, but not called. It does not fit `AnyActorLogic`. `LogicTypes` reads the types a
+logic carries from its marker, for code that infers them from either kind of logic.
+
+### Example
+
+```ts
+import { fromEffect, type AnyLogicSlot } from "@jambudipa/xstate-effect"
+import { Effect } from "effect"
+
+export const slots: ReadonlyArray<AnyLogicSlot> = [fromEffect(() => Effect.succeed(1))]
 ```
 
 ## isActorLogic

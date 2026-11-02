@@ -3,7 +3,11 @@
 The actor logic creators of the `./actors` entry point: upstream's `fromPromise`,
 `fromCallback`, `fromObservable`, `fromEventObservable` and `fromTransition`, the port's
 `fromEffect`, `fromEffectBackground`, `fromEffectRetry` and `fromStream`, and
-`createEmptyActor`.
+`createEmptyActor`. `unsettled.ts` holds `Unsettled`, the one output of agent logic, which an
+agent invocation's required `onDone` receives (a port addition). `fromAgent.ts` holds
+`fromAgent`, agent logic: a literal-bounded turn loop that classifies each attempt, prompts
+again with feedback, and outputs `Unsettled` when the budget is spent, and `AgentTurn`, the
+capability only its `turn` receives.
 
 ## What belongs here
 
@@ -36,3 +40,7 @@ plainest example of the pattern that the other creators follow.
 - State that a creator keeps per actor (listeners, outboxes) lives in a `WeakMap` keyed by the
   actor itself, never by session id, because two systems can give the same session id.
 - The order of the generic parameters follows upstream (SD-12).
+- `fromAgent` detects a move only by the state exit it observes: its delivery to the invoking
+  machine waits for the macrostep, from a fiber whose `ProcessingActors` marker is cleared
+  (`src/internal/processingActors.ts`), and a move stops the agent before the delivery returns.
+  Its loop writes the attempt count ahead of each turn through its own actor.

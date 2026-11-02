@@ -13,13 +13,14 @@ import type {
   ActorLogic,
   ActorScopeService,
   ActorSystemService,
-  AnyActorLogic,
+  AnyLogicSlot,
   CustomActionExecution,
 } from "../ActorLogic.js"
 import { ActorScope } from "../ActorLogic.js"
 import type { AnyActorRef } from "../ActorRef.js"
 import { allocateChild, buildChild, restoreChild } from "../Actor.js"
 import { GuardError, TransitionError } from "../Errors.js"
+import type { NotAgentLogic, OrdinaryLogic } from "../internal/agentBrand.js"
 import type { InitializationError } from "../Errors.js"
 import { ACTOR_REF_TYPE, type PersistedActorRef } from "../persistence.js"
 import type { AnyStateMachine, StateMachine, StateMachineTypeId } from "../StateMachine.js"
@@ -150,6 +151,8 @@ const failOnGuardError = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effec
  * `InitializationError` of a definition error (SD-3, amended 2026-10-08) or of an `initial`
  * key that names no child.
  *
+ * Agent logic is refused by type (NEG-4): it runs only as a machine's invocation.
+ *
  * @example
  * ```ts
  * const initialSnapshot = yield* getInitialSnapshot(
@@ -168,7 +171,7 @@ export const getInitialSnapshot = <
   TEmitted extends EventObject,
   R
 >(
-  logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>,
+  logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & NotAgentLogic,
   ...[input]: undefined extends TInput ? [input?: TInput] : [input: TInput]
 ): Effect.Effect<TSnapshot, InitializationError, Exclude<R, Scope.Scope>> =>
   Effect.gen(function* () {
@@ -222,7 +225,7 @@ interface OwnTransition<TLogic> {
  * Runs the logic's own `transition` for `snapshot` and `event` with `actorScope`; a throwing
  * guard fails it with the guard-evaluation error.
  */
-const runTransition = <TLogic extends AnyActorLogic>(
+const runTransition = <TLogic extends AnyLogicSlot>(
   logic: TLogic,
   snapshot: TransitionTypes<TLogic>[0],
   event: TransitionTypes<TLogic>[1],
@@ -232,7 +235,7 @@ const runTransition = <TLogic extends AnyActorLogic>(
   TransitionTypes<TLogic>[3] | GuardError,
   Exclude<TransitionTypes<TLogic>[2], ActorScope>
 > =>
-  // `AnyActorLogic` types `transition` with `never` arguments; the logic's own `transition`
+  // `AnyLogicSlot` types `transition` with `never` arguments; the logic's own `transition`
   // has the types `TransitionTypes` reads from it
   (logic as unknown as OwnTransition<TLogic>)
     .transition(snapshot, event)
@@ -251,6 +254,8 @@ const runTransition = <TLogic extends AnyActorLogic>(
  * error (a macrostep past `maxIterations`), and the guard-evaluation `GuardError` of a guard
  * that throws.
  *
+ * Agent logic is refused by type (NEG-4): it runs only as a machine's invocation.
+ *
  * @example
  * ```ts
  * const nextSnapshot = yield* getNextSnapshot(
@@ -265,7 +270,7 @@ const runTransition = <TLogic extends AnyActorLogic>(
  * @since 0.1.0
  * @category Testing
  */
-export const getNextSnapshot = <TLogic extends AnyActorLogic>(
+export const getNextSnapshot = <TLogic extends OrdinaryLogic>(
   logic: TLogic,
   snapshot: TransitionTypes<TLogic>[0],
   event: TransitionTypes<TLogic>[1]
@@ -357,7 +362,7 @@ export interface ExecutableSpawnAction extends CustomActionExecution {
   readonly params: {
     readonly id: string
     readonly actorRef: AnyActorRef | undefined
-    readonly src: string | AnyActorLogic
+    readonly src: string | AnyLogicSlot
     readonly systemId: string | undefined
     readonly input: unknown
   }
@@ -446,6 +451,8 @@ export interface ToExecutableAction<T extends ParameterizedObject> extends Omit<
  * actions that do work: raise, sendTo, cancel, emit, log, spawnChild, stopChild). `assign`
  * still gives the context. Fails as {@link getNextSnapshot} fails.
  *
+ * Agent logic is refused by type (NEG-4): it runs only as a machine's invocation.
+ *
  * @example
  * ```ts
  * const [initial] = yield* initialTransition(toggleMachine)
@@ -458,7 +465,7 @@ export interface ToExecutableAction<T extends ParameterizedObject> extends Omit<
  * @since 0.1.0
  * @category Testing
  */
-export const transition = <TLogic extends AnyActorLogic>(
+export const transition = <TLogic extends OrdinaryLogic>(
   logic: TLogic,
   snapshot: TransitionTypes<TLogic>[0],
   event: TransitionTypes<TLogic>[1]
@@ -483,6 +490,8 @@ export const transition = <TLogic extends AnyActorLogic>(
  * gives an error snapshot for what its initialization throws, as upstream, and fails with the
  * `InitializationError` of a definition error (SD-3, amended 2026-10-08).
  *
+ * Agent logic is refused by type (NEG-4): it runs only as a machine's invocation.
+ *
  * @since 0.1.0
  * @category Testing
  */
@@ -495,7 +504,7 @@ export const initialTransition = <
   // The logic as given, for the actions it names
   TLogic = unknown
 >(
-  logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & TLogic,
+  logic: ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R> & NotAgentLogic & TLogic,
   ...[input]: undefined extends TInput ? [input?: TInput] : [input: TInput]
 ): Effect.Effect<
   readonly [nextSnapshot: TSnapshot, actions: Array<ExecutableActionsOf<TSnapshot> | NamedExecutableActions<TLogic>>],

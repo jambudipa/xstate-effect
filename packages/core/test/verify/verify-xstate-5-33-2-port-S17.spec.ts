@@ -62,16 +62,10 @@ const errorMessageOf = (snapshot: SnapshotType): Option.Option<string> =>
   Option.flatMap(snapshot.error, (error) => (error instanceof Error ? Option.some(error.message) : Option.none()))
 
 /** A machine whose state `start` maps each descriptor in `on` to the state of that name. */
-const routing = (id: string, on: Readonly<Record<string, string>>) =>
-  createMachine<object, EventObject>({
-    id,
-    initial: "start",
-    context: {},
-    states: {
-      start: { on },
-      ...Object.fromEntries(Object.values(on).map((target) => [target, {}])),
-    },
-  })
+const routing = (id: string, on: Readonly<Record<string, string>>) => {
+  const states = { start: { on }, ...Object.fromEntries(Object.values(on).map((target) => [target, {}])) }
+  return createMachine<object, EventObject>({ id, initial: "start", context: {}, states })
+}
 
 /** Starts an actor of `machine`, sends `event`, and gives the snapshot after it and the warnings logged. */
 const afterSending = (machine: ReturnType<typeof routing>, event: EventObject) =>

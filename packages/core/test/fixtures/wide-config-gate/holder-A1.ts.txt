@@ -1,0 +1,6 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { holderSetup as s } from "./support.js"
+/** This declaration supplies the holder-A1 acceptance case. */
+const wide: { readonly initial:string; readonly states:Readonly<Record<string,object>> } = {initial:"asking",states:{asking:{invoke:{src:"agent",input:1},on:{GO:"nowhere"}}}};
+/** This declaration supplies the holder-A1 acceptance case. */
+export const machine=s.createMachine(wide);

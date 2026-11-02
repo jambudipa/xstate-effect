@@ -1,0 +1,4 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { agentSetup as s } from "./support.js"
+/** This declaration supplies the agent-B1-context acceptance case. */
+export const machine=s.createMachine({context: ({ input }) => ({ input }),initial:"x",states:{x:{after:{1:"nowhere"}},done:{type:"final"}}});

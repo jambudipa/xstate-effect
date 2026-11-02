@@ -1,0 +1,6 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { agentSetup as s } from "./support.js"
+/** The wide value exercises this fixture without diagnostic suppression. */
+const wide: { readonly initial:string; readonly states:Readonly<Record<string,object>> } = {initial:"asking",states:{asking:{invoke:{src:"agent",input:1},on:{GO:"nowhere"}}}};
+/** The machine value exercises this fixture without diagnostic suppression. */
+export const machine=s.createMachine(wide);

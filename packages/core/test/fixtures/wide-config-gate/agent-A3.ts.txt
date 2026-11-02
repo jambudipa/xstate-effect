@@ -1,0 +1,6 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { agentSetup as s } from "./support.js"
+/** This declaration supplies the agent-A3 acceptance case. */
+const states: Record<string, object> = Object.fromEntries([["done", {type:"final"}]]);
+/** This declaration supplies the agent-A3 acceptance case. */
+export const machine=s.createMachine({initial:"done",states});

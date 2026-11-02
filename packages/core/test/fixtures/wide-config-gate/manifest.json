@@ -1,0 +1,1122 @@
+[
+  {
+    "file": "agent-A1.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A2.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A3.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A4.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A5.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A6.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A8.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A9.ts",
+    "diagnostics": [
+      {
+        "code": 2554,
+        "line": 4,
+        "message": "Expected 2 arguments, but got 1"
+      }
+    ]
+  },
+  {
+    "file": "agent-A10.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A7-on.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A7-after.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A7-always.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A7-onDone.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "agent-A7-array.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-C1-assign.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-B1-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "UnknownTarget"
+      }
+    ]
+  },
+  {
+    "file": "agent-B2-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "AgentSettlementHandler"
+      }
+    ]
+  },
+  {
+    "file": "agent-B3-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "agent-B4-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "agent-B5-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "NoProgressGuarantee"
+      }
+    ]
+  },
+  {
+    "file": "agent-C1-destructure.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-B1-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "UnknownTarget"
+      }
+    ]
+  },
+  {
+    "file": "agent-B2-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "AgentSettlementHandler"
+      }
+    ]
+  },
+  {
+    "file": "agent-B3-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "agent-B4-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "agent-B5-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "NoProgressGuarantee"
+      }
+    ]
+  },
+  {
+    "file": "agent-C1-context.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-B1-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "UnknownTarget"
+      }
+    ]
+  },
+  {
+    "file": "agent-B2-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "AgentSettlementHandler"
+      }
+    ]
+  },
+  {
+    "file": "agent-B3-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "agent-B4-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "agent-B5-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "NoProgressGuarantee"
+      }
+    ]
+  },
+  {
+    "file": "agent-C1-enqueue.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-B1-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "UnknownTarget"
+      }
+    ]
+  },
+  {
+    "file": "agent-B2-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "AgentSettlementHandler"
+      }
+    ]
+  },
+  {
+    "file": "agent-B3-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "agent-B4-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "agent-B5-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "NoProgressGuarantee"
+      }
+    ]
+  },
+  {
+    "file": "agent-C3-combined.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-C4-const.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-A1.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A2.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A3.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A4.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A5.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A6.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A8.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A9.ts",
+    "diagnostics": [
+      {
+        "code": 2554,
+        "line": 4,
+        "message": "Expected 2 arguments, but got 1"
+      }
+    ]
+  },
+  {
+    "file": "holder-A10.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A7-on.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A7-after.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A7-always.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A7-onDone.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "holder-A7-array.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 6,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-C1-assign.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-B1-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "UnknownTarget"
+      }
+    ]
+  },
+  {
+    "file": "holder-B2-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "AgentSettlementHandler"
+      }
+    ]
+  },
+  {
+    "file": "holder-B3-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "holder-B4-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "holder-B5-assign.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "NoProgressGuarantee"
+      }
+    ]
+  },
+  {
+    "file": "holder-C1-destructure.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-B1-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "UnknownTarget"
+      }
+    ]
+  },
+  {
+    "file": "holder-B2-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "AgentSettlementHandler"
+      }
+    ]
+  },
+  {
+    "file": "holder-B3-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "holder-B4-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "holder-B5-destructure.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "NoProgressGuarantee"
+      }
+    ]
+  },
+  {
+    "file": "holder-C1-context.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-B1-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "UnknownTarget"
+      }
+    ]
+  },
+  {
+    "file": "holder-B2-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "AgentSettlementHandler"
+      }
+    ]
+  },
+  {
+    "file": "holder-B3-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "holder-B4-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "holder-B5-context.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "NoProgressGuarantee"
+      }
+    ]
+  },
+  {
+    "file": "holder-C1-enqueue.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-B1-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "UnknownTarget"
+      }
+    ]
+  },
+  {
+    "file": "holder-B2-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "AgentSettlementHandler"
+      }
+    ]
+  },
+  {
+    "file": "holder-B3-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "holder-B4-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "holder-B5-enqueue.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 4,
+        "message": "NoProgressGuarantee"
+      }
+    ]
+  },
+  {
+    "file": "holder-C3-combined.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-C4-const.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-C5-context.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-C6-return.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-C5-context.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-C6-return.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-A9-invoke-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A9-src-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A9-state-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-A9-target-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-C3-collisions.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-C3-opaque-any.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-C5-invoke-array.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "agent-extra-after-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-always-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-config-union.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-done-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-done-target-any.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 5,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-guard-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-initial-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-named-actions.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-on-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-spread-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-states-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-states-union.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 5,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "agent-extra-target-array-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "certification-E2-unions.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-A9-invoke-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A9-src-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A9-state-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-A9-target-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-C3-collisions.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-C3-opaque-any.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-C5-invoke-array.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "holder-extra-after-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-always-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-config-union.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-done-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-done-target-any.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 5,
+        "message": "SettlementMustExit"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-guard-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-initial-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-named-actions.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-on-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-spread-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-states-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-states-union.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 5,
+        "message": "CannotReachFinal"
+      }
+    ]
+  },
+  {
+    "file": "holder-extra-target-array-any.ts",
+    "diagnostics": [
+      {
+        "code": 2345,
+        "line": 5,
+        "message": "ConfigNotLiteral"
+      }
+    ]
+  },
+  {
+    "file": "plain-D1-forms.ts",
+    "diagnostics": []
+  },
+  {
+    "file": "plain-D1-wide.ts",
+    "diagnostics": []
+  }
+]

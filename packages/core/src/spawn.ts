@@ -15,9 +15,11 @@
  * next action runs.
  */
 import { Chunk, Effect, HashMap, Option, Result } from "effect"
-import type { ActorLogic, ActorScopeService, AnyActorLogic, SpawnRequest } from "./ActorLogic.js"
+import type { ActorLogic, ActorScopeService, AnyLogicSlot, SpawnRequest } from "./ActorLogic.js"
 import type { ActorRefBase, AnyActorRef } from "./ActorRef.js"
-import { ActorError } from "./Errors.js"
+import { ActorError, AgentSpawnError } from "./Errors.js"
+import { hasAgentBrand, type InlineLogic, type SpawnableActor } from "./internal/agentBrand.js"
+import { isLogicCapability } from "./internal/logicCapability.js"
 import type { EventObject } from "./Event.js"
 import type {
   ActorRefFromLogic,
@@ -59,14 +61,14 @@ type SpawnArgs<TOptions, TRequired extends string> = [TRequired] extends [never]
  * @since 0.1.0
  * @category Spawning
  */
-export type SpawnInput<TLogic extends AnyActorLogic> = [ActorLogic.InputOf<TLogic>] extends [never] ? unknown
+export type SpawnInput<TLogic extends AnyLogicSlot> = [ActorLogic.InputOf<TLogic>] extends [never] ? unknown
   : ActorLogic.InputOf<TLogic>
 
 /**
  * The option keys a spawn of `TLogic` requires (upstream `RequiredLogicInput`): `"input"` when
  * the logic's input type does not take `undefined`, none for a logic that declares no input.
  */
-type RequiredSpawnInput<TLogic extends AnyActorLogic> = [ActorLogic.InputOf<TLogic>] extends [never] ? never
+type RequiredSpawnInput<TLogic extends AnyLogicSlot> = [ActorLogic.InputOf<TLogic>] extends [never] ? never
   : RequiredActorOptionsKeys<TLogic>
 
 /**
@@ -100,7 +102,7 @@ type DeclaredSpawnArgs<TActor extends ProvidedActor, TSrc extends string> = TAct
 /** The logic of the declared actor named `TSrc` (upstream `GetConcreteByKey<TActor, 'src', TSrc>['logic']`). */
 type DeclaredLogic<TActor extends ProvidedActor, TSrc extends string> = TActor extends {
   readonly src: TSrc
-  readonly logic: infer TLogic extends AnyActorLogic
+  readonly logic: infer TLogic extends AnyLogicSlot
 }
   ? TLogic
   : never
@@ -111,7 +113,7 @@ type DeclaredLogic<TActor extends ProvidedActor, TSrc extends string> = TActor e
  * not take `undefined`, or any string src with any options.
  */
 interface AnySpawner {
-  <TLogic extends AnyActorLogic>(
+  <TLogic extends InlineLogic>(
     logic: TLogic,
     ...[options]: SpawnArgs<SpawnerOptions<SpawnInput<TLogic>, string>, RequiredSpawnInput<TLogic>>
   ): ActorRefFromLogic<TLogic>
@@ -134,6 +136,11 @@ interface AnySpawner {
  * name is typed by its logic. The context factory and the assigners of `createMachine`
  * receive `Spawner<ProvidedActor>`; those of a setup machine receive the `Spawner` of the
  * setup's actors.
+ *
+ * Neither form takes agent logic (NEG-3): a logic that carries the agent brand, or the name of
+ * a declared actor whose logic does, fails type checking, as agent logic settles only through an
+ * invocation's `onDone`. A string src that resolves to agent logic at run time fails the action
+ * with `AgentSpawnError` before the agent runs.
  *
  * @example
  * ```ts
@@ -158,11 +165,11 @@ export type Spawner<TActor extends ProvidedActor> = string extends TActor["src"]
   // machine whose context factory or assigner receives `spawn` can be emitted (TS4023 names an
   // interface that the module does not export).
   : {
-    <TSrc extends TActor["src"]>(
+    <TSrc extends SpawnableActor<TActor>["src"]>(
       src: TSrc,
       ...[options]: DeclaredSpawnArgs<TActor, TSrc>
     ): ActorRefFromLogic<DeclaredLogic<TActor, TSrc>>
-    <TLogic extends AnyActorLogic>(
+    <TLogic extends InlineLogic>(
       logic: TLogic,
       ...[options]: SpawnArgs<SpawnerOptions<SpawnInput<TLogic>, never>, RequiredSpawnInput<TLogic>>
     ): ActorRefFromLogic<TLogic>
@@ -181,9 +188,9 @@ export interface SpawningMachine {
   /** The machine's id, which the error for an unknown src names. */
   readonly id: string
   /** The machine's implementations; only `actors` is read, and only its own properties. */
-  readonly implementations: { readonly actors?: Readonly<Record<string, AnyActorLogic>> }
+  readonly implementations: { readonly actors?: Readonly<Record<string, AnyLogicSlot>> }
   /** The state nodes by node id, with their invoke definitions in config order. */
-  readonly idMap: HashMap.HashMap<string, { readonly invoke: ReadonlyArray<{ readonly src: string | AnyActorLogic }> }>
+  readonly idMap: HashMap.HashMap<string, { readonly invoke: ReadonlyArray<{ readonly src: string | AnyLogicSlot }> }>
 }
 
 /** The source name of an invocation's inline logic (upstream `xstate.invoke.<index>.<node id>`). */
@@ -198,7 +205,7 @@ const invokedLogic = (
   machine: SpawningMachine,
   index: string,
   stateNodeId: string
-): Option.Option<AnyActorLogic> =>
+): Option.Option<AnyLogicSlot> =>
   Option.flatMap(HashMap.get(machine.idMap, stateNodeId), (stateNode) =>
     Option.flatMap(Option.fromNullishOr(stateNode.invoke[Number(index)]), (invokeDef) =>
       typeof invokeDef.src === "string" ? Option.none() : Option.some(invokeDef.src)
@@ -214,7 +221,7 @@ const invokedLogic = (
  * @since 0.1.0
  * @category Spawning
  */
-export const resolveReferencedActor = (machine: SpawningMachine, src: string): Option.Option<AnyActorLogic> =>
+export const resolveReferencedActor = (machine: SpawningMachine, src: string): Option.Option<AnyLogicSlot> =>
   Option.match(Option.fromNullishOr(invokeSourceNamePattern.exec(src)), {
     onNone: () =>
       Option.flatMap(Option.fromNullishOr(machine.implementations.actors), (actors) =>
@@ -224,18 +231,31 @@ export const resolveReferencedActor = (machine: SpawningMachine, src: string): O
     onSome: ([, index = "", stateNodeId = ""]) => invokedLogic(machine, index, stateNodeId),
   })
 
+/**
+ * The refusal of a spawn of agent logic (NEG-3, NEG-3.1): the types refuse it, so only a src
+ * they cannot see gets here (a cast, a name that `provide` or a registry fills in).
+ */
+const agentSpawnRefused = (machine: SpawningMachine, src: string | AnyLogicSlot): AgentSpawnError => {
+  const name = typeof src === "string" ? src : "inline logic"
+  return new AgentSpawnError({
+    message: `Agent logic '${name}' cannot be spawned in machine '${machine.id}': agent logic settles only through an invocation's onDone, so invoke it with a settlement handler instead`,
+    src: name,
+    machineId: machine.id,
+  })
+}
+
 /** One call of a spawn function: the object it handed out, and the child to build into it or why not. */
 interface PendingSpawn {
   /** The unbuilt object `spawn` returned to the user function; `flush` builds the child into it. */
   readonly child: AnyActorRef
-  /** The child to build, or the unknown-src error that `flush` turns into a defect. */
-  readonly request: Result.Result<SpawnRequest, ActorError>
+  /** The child to build, or the unknown-src or agent-spawn error that `flush` turns into a defect. */
+  readonly request: Result.Result<SpawnRequest, ActorError | AgentSpawnError>
 }
 
 /** The spawn request for `logic`, named `src`, with the options of the call and the input as resolved. */
 const requestOf = (
-  logic: AnyActorLogic,
-  src: string | AnyActorLogic,
+  logic: AnyLogicSlot,
+  src: string | AnyLogicSlot,
   options: NamedSpawnOptions | undefined,
   input: unknown
 ): SpawnRequest => ({
@@ -286,9 +306,9 @@ export const createSpawner = (
 ): SpawnSession => {
   let pending = Chunk.empty<PendingSpawn>()
 
-  const spawnOne = (src: string | AnyActorLogic, options?: NamedSpawnOptions): AnyActorRef => {
+  const spawnOne = (src: string | AnyLogicSlot, options?: NamedSpawnOptions): AnyActorRef => {
     const child = actorScope.allocateChild()
-    const request: Result.Result<SpawnRequest, ActorError> =
+    const logic: Result.Result<AnyLogicSlot, ActorError | AgentSpawnError> =
       typeof src === "string"
         ? Option.match(resolveReferencedActor(machine, src), {
             onNone: () =>
@@ -298,23 +318,28 @@ export const createSpawner = (
                   actorId: actorScope.id,
                 })
               ),
-            onSome: (logic) =>
-              Result.succeed(
-                requestOf(
-                  logic,
-                  src,
-                  options,
-                  typeof options?.input === "function"
-                    ? (options.input as (args: { context: unknown; event: EventObject; self: ActorRefBase }) => unknown)({
-                        context,
-                        event,
-                        self: actorScope.self,
-                      })
-                    : options?.input
-                )
-              ),
+            onSome: Result.succeed,
           })
-        : Result.succeed(requestOf(src, src, options, options?.input))
+        : Result.succeed(src)
+    // Agent logic is refused before its input function runs (NEG-3)
+    const request = Result.flatMap(logic, (found) =>
+      hasAgentBrand(found)
+        ? Result.fail(agentSpawnRefused(machine, src))
+        : Result.succeed(
+            requestOf(
+              found,
+              src,
+              options,
+              typeof src === "string" && typeof options?.input === "function"
+                ? (options.input as (args: { context: unknown; event: EventObject; self: ActorRefBase }) => unknown)({
+                    context,
+                    event,
+                    self: actorScope.self,
+                  })
+                : options?.input
+            )
+          )
+    )
     pending = Chunk.append(pending, { child, request })
     return child
   }
@@ -345,7 +370,10 @@ export const createSpawner = (
  * its input function never runs. Otherwise the input resolves (a throw of the input
  * function is a defect, the actor's error), and the child is built in the actor's scope and
  * given back with that input, to join `snapshot.children` under the id option (the key
- * "undefined" without one, as upstream); it starts after the macrostep.
+ * "undefined" without one, as upstream); it starts after the macrostep. A src that is or
+ * names agent logic fails with `AgentSpawnError` as a defect before its input resolves, and the
+ * agent never runs (NEG-3.1), unless the request starts a state's invocation, whose `onDone`
+ * settles the agent.
  *
  * @since 0.1.0
  * @category Spawning
@@ -362,7 +390,7 @@ export const spawnRequested = (
         Option.none()
       ),
     onSome: (logic) =>
-      Effect.suspend(() => {
+      hasAgentBrand(logic) && !isLogicCapability(request.invocation) ? Effect.die(agentSpawnRefused(machine, request.registryName ?? request.src)) : Effect.suspend(() => {
         const input = request.resolveInput === undefined ? request.input : request.resolveInput()
         const child = actorScope.allocateChild()
         return Effect.as(
@@ -373,6 +401,7 @@ export const spawnRequested = (
             systemId: request.systemId,
             input,
             syncSnapshot: request.syncSnapshot,
+            ...(request.invocation === undefined ? {} : { invocation: request.invocation }),
           }),
           Option.some({ child, input })
         )

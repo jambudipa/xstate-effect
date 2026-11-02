@@ -16,6 +16,8 @@ export * from "./fromCallback.js"
 export * from "./fromTransition.js"
 export * from "./fromObservable.js"
 export * from "./fromEffect.js"
+export * from "./unsettled.js"
+export * from "./fromAgent.js"
 
 /**
  * The logic of every empty actor (upstream `fromTransition((_) => undefined, undefined)`): each

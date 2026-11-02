@@ -19,10 +19,18 @@ You describe a machine with `setup({ types, actions, guards, actors, delays })` 
 reference for [`setup`](./reference/setup.md), [`createMachine`](./reference/create-machine.md)
 and [`createActor`](./reference/create-actor.md) describes every option.
 
+## Agent logic
+
+[`fromAgent`](./reference/actors/from-agent.md) runs a model call that must move its state. A
+machine with agent logic gets a [settlement proof](./reference/settlement.md) at compile time and
+at run time. Read the
+[limits of the compile-time proof](./reference/setup.md#limits-of-the-compile-time-proof) before
+you rely on a green compile.
+
 ## Start here
 
-[Tutorials](./tutorials/index.md) — six lessons that take you from a first machine to context,
-guards, side effects, child actors and tests, with one running example.
+[Tutorials](./tutorials/index.md) — seven lessons that take you from a first machine to context,
+guards, side effects, child actors, tests and agents, with one running example.
 
 ## Get a task done
 

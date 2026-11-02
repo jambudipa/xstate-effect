@@ -361,7 +361,7 @@ new implementations are `{ ...old, ...provided }`. The original machine does not
 
 ### Signature
 
-`provide<const TGiven extends TProvided>(implementations: TGiven): StateMachine.StateMachine<Id, TContext, TEvent, TInput, TOutput, TEmitted, R | Types.ImplementationsRequirementsOf<TGiven>, TStateMeta, TTransitionMeta, TStateSchema, TProvided, TStateValue, TChildren, TTag>`
+`provide<const TGiven extends ProvidedActorsCheck<TProvided> & TProvided>(implementations: TGiven & ProvidedDelayCheck<TGiven, TProvided>): StateMachine.StateMachine<Id, TContext, TEvent, TInput, TOutput, TEmitted, R | Types.ImplementationsRequirementsOf<TGiven>, TStateMeta, TTransitionMeta, TStateSchema, TProvided, TStateValue, TChildren, TTag>`
 
 
 ### Parameters
@@ -378,6 +378,34 @@ of each given action requires (for an action definition, the Effect of its `exec
 requirements of each given actor logic. This holds for a machine from `createMachine` and for a
 setup machine. A machine of `setupWithSchema` keeps its
 [run-time checks](./setup.md#run-time-checks).
+
+### Agent logic and progress delays
+
+Two rules keep a machine with [agent logic](./actors/from-agent.md) settled:
+
+- Agent logic in place of an actor whose declared logic is not agent logic fails to type-check
+  at the `provide` call (`ProvidedActorsCheck`, the error names `[AgentBrand]`). A machine from
+  `createMachine` without declared actors takes no agent logic under any name. Agent logic may
+  replace agent logic.
+- In a setup machine with agent actors, a progress delay is a named `after` key whose transition
+  targets a state outside the state that holds it. `provide` takes such a delay only as a
+  positive integer literal (`ProvidedDelayCheck`): a wide number, `Infinity`, `NaN` or a
+  function fails with `PositiveIntegerLiteral<"progress delay <name>">`. A `#id` target counts as
+  leaving its state. Other delays keep the rules above.
+
+A cast that hides either is refused at run time. The new machine gives each actor status `error`,
+with [`AgentProvideError`](./errors.md#agent-settlement-errors) or
+[`ProgressDelayError`](./errors.md#agent-settlement-errors), before any child starts. Every
+machine built from it with `provide`, `withContext` or `withId` keeps an `AgentProvideError`.
+
+The run-time delay rule reads the merged delays of each machine that holds agent logic: in its
+actors, inline in an invocation, or through a child machine at any depth. It refuses infinity,
+NaN, an infinite `Duration` and a function. It also covers delays that `setup` or the second
+argument of `createMachine` gives, which have no type check, and a machine that gets the delay and
+the agent from separate `provide` calls. A later `provide` of a finite delay cures the refusal.
+
+Agent logic for a name with no current implementation is
+not refused by `provide`; the spawn and the invocation checks handle it.
 
 ### Example
 

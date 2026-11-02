@@ -9,7 +9,7 @@ sources: [packages/core/src/testing/]
 > **TL;DR:** You write Vitest tests for the turnstile and the station of the two previous
 > tutorials. You check transitions without an actor with `getInitialSnapshot` and
 > `getNextSnapshot`, move time yourself with a `SimulatedClock`, and wait for asynchronous work
-> with `waitFor`. This is the last tutorial.
+> with `waitFor`.
 
 ## What you will build
 
@@ -474,7 +474,8 @@ Run the tests again with `npx vitest run`.
 
 ## Next steps
 
-You have finished the tutorials. To go further:
+To add agent logic to the station, go to
+[Add an agent that must settle](./08-agent-that-must-settle.md). To go further:
 
 - [How to test a machine without running an actor](../how-to/test-machines-without-actors.md)
   and [How to test delayed transitions](../how-to/test-delayed-transitions.md) cover more testing

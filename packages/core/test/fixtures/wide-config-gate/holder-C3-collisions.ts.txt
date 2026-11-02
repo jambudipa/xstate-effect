@@ -1,0 +1,60 @@
+import { setup, assign, enqueueActions } from "../../../src/index.js"
+import { agent, child } from "./support.js"
+
+/** Detect contextual types erased to any. */
+type IsAny<T> = 0 extends (1 & T) ? true : false
+/** Require exact contextual types rather than assignability. */
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
+/** Turn each type expectation into a compiler obligation. */
+const exact = <T extends true>(): void => undefined
+/** The setup's declared context. */
+type Context = { count: number }
+/** Event names can equal config member names. */
+type Event = { type: "actions" } | { type: "input" }
+/** The setup checks structural dictionary keys independently of callback members. */
+const s = setup({ types: {} as { context: Context; input: { start: number }; events: Event }, actors: { agent, child } })
+
+/** State and event names remain structural even when they name callback members. */
+export const collisions = s.createMachine({
+  context: ({ input }) => ({ count: input.start }),
+  initial: "input",
+  entry: [assign({ count: ({ context }) => context.count }), ({ event }) => void event, enqueueActions(({ enqueue }) => void enqueue)],
+  states: {
+    input: {
+      entry: [
+        ({ context, event }) => {
+          exact<Equal<IsAny<typeof context>, false>>()
+          exact<Equal<IsAny<typeof event>, false>>()
+          exact<Equal<typeof context, Context>>()
+          exact<Equal<typeof event, Event>>()
+        },
+        assign({ count: ({ context }) => context.count }),
+        enqueueActions(({ enqueue }) => enqueue.assign({ count: 1 }))
+      ],
+      on: {
+        actions: {
+          guard: ({ event, context }) => {
+            exact<Equal<IsAny<typeof event>, false>>()
+            exact<Equal<typeof event, { type: "actions" }>>()
+            exact<Equal<typeof context, Context>>()
+            return true
+          },
+          target: "done",
+          actions: ({ event }) => { exact<Equal<typeof event, { type: "actions" }>>() }
+        },
+        input: { target: "done", actions: assign({ count: ({ context }) => context.count }) }
+      },
+      after: { 1: "actions" }
+    },
+    actions: { after: { 1: "guard" } },
+    guard: { after: { 1: "context" } },
+    context: { after: { 1: "entry" } },
+    entry: { after: { 1: "exit" } },
+    exit: { after: { 1: "output" } },
+    output: { after: { 1: "done" } },
+    done: { type: "final" }
+  }
+})
+
+/** An explicitly undefined guard is an unguarded progress transition. */
+export const undefinedGuard = s.createMachine({ context: { count: 0 }, initial: "x", states: { x: { always: { guard: undefined, target: "done" } }, done: { type: "final" } } })

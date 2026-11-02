@@ -10,7 +10,9 @@ import type { Snapshot } from "./Snapshot.js"
 import type { EventObject } from "./Event.js"
 import type { ActorError, TransitionError, InitializationError, SerializationError, RestoreError, StartError } from "./Errors.js"
 import type { ActorRefBase, AnyActorRef } from "./ActorRef.js"
+import type { AgentBrand } from "./internal/agentBrand.js"
 import type { UpstreamAny } from "./internal/anyEventObject.js"
+import type { LogicCapability } from "./internal/logicCapability.js"
 import type {
   Action,
   ActionArgs,
@@ -151,9 +153,9 @@ export interface ActorScopeService {
  */
 export interface RestoreChildRequest {
   /** The logic the persisted `src` resolves to; it restores the child's snapshot. */
-  readonly logic: AnyActorLogic
+  readonly logic: AnyLogicSlot
   /** The src as persisted: an implementation name, or the logic itself. The child keeps it. */
-  readonly src: string | AnyActorLogic
+  readonly src: string | AnyLogicSlot
   /** The child's id as persisted: the key it has in its parent's `children`. */
   readonly id: string
   /** The systemId to register while the child's snapshot is active; `None` registers none. */
@@ -162,6 +164,8 @@ export interface RestoreChildRequest {
   readonly syncSnapshot: boolean
   /** The persisted snapshot as stored, before `restoreSnapshot` decodes it. */
   readonly snapshot: Option.Option<unknown>
+  /** The runtime's capability, only on the restore of a machine's own children: see {@link SpawnRequest.invocation}. */
+  readonly invocation?: LogicCapability
 }
 
 /**
@@ -174,9 +178,9 @@ export interface RestoreChildRequest {
  */
 export interface SpawnRequest {
   /** The logic to run, already resolved from `src`. */
-  readonly logic: AnyActorLogic
+  readonly logic: AnyLogicSlot
   /** The src as the spawn named it: an implementation name, or the logic itself. The child keeps it. */
-  readonly src: string | AnyActorLogic
+  readonly src: string | AnyLogicSlot
   /** The child's id; `None` gives the session id the system books for it. */
   readonly id: Option.Option<string>
   /** The systemId to register; one already in use is a defect that errors the parent (SD-4). */
@@ -185,6 +189,12 @@ export interface SpawnRequest {
   readonly input: unknown
   /** Whether the child relays its snapshots to its parent as `xstate.snapshot.<id>` events. */
   readonly syncSnapshot: boolean
+  /**
+   * The runtime's capability, only on the spawn that starts a state's invocation: without it,
+   * agent logic is refused (NEG-3). The engine alone holds the value, so a logic that reads
+   * `ActorScope` cannot claim to be an invocation.
+   */
+  readonly invocation?: LogicCapability
 }
 
 /**
@@ -470,6 +480,12 @@ export class ActorScope extends Context.Service<
  * - Persists and restores its state
  * - Starts up
  *
+ * A method that takes a {@link LogicCapability} takes it as a rest parameter, which is how the
+ * capability is optional here and `AgentActorLogic` can still require it: a required parameter of
+ * type `C` fits `...capability: ReadonlyArray<C>` but not `capability?: C`, whose `undefined` it
+ * refuses. A method signature with `capability?: C` would fit too, but it infers `TEvent` from its
+ * parameters both ways and changes what the graph functions infer.
+ *
  * @since 0.1.0
  * @category Actor Logic
  */
@@ -480,6 +496,12 @@ export interface ActorLogic<
   out TEmitted extends EventObject = EventObject,
   out R = never
 > {
+  /**
+   * Refuses agent logic, which carries this key: `ActorLogic` keeps the capability optional, so
+   * agent logic in this type would be callable by anyone (NEG-4). See {@link AnyLogicSlot}.
+   */
+  readonly [AgentBrand]?: never
+
   /** The type-level variance markers; at run time only its presence marks the object as logic. */
   readonly [ActorLogicTypeId]: Variance.ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>
 
@@ -496,7 +518,8 @@ export interface ActorLogic<
    */
   readonly transition: (
     snapshot: TSnapshot,
-    event: TEvent
+    event: TEvent,
+    ...capability: ReadonlyArray<LogicCapability>
   ) => Effect.Effect<TSnapshot, TransitionError, ActorScope | R>
 
   /**
@@ -516,7 +539,8 @@ export interface ActorLogic<
    * options.snapshot`), so the persisted form must already be a valid snapshot.
    */
   readonly restoreSnapshot?: (
-    persisted: unknown
+    persisted: unknown,
+    ...capability: ReadonlyArray<LogicCapability>
   ) => Effect.Effect<TSnapshot, RestoreError, ActorScope | R>
 
   /**
@@ -527,7 +551,8 @@ export interface ActorLogic<
    * until the actor stops, is done or errors.
    */
   readonly start?: (
-    snapshot: TSnapshot
+    snapshot: TSnapshot,
+    ...capability: ReadonlyArray<LogicCapability>
   ) => Effect.Effect<void, StartError, ActorScope | Scope.Scope | R>
 
   /**
@@ -536,7 +561,8 @@ export interface ActorLogic<
    * The returned value should be JSON-serializable.
    */
   readonly getPersistedSnapshot: (
-    snapshot: TSnapshot
+    snapshot: TSnapshot,
+    ...capability: ReadonlyArray<LogicCapability>
   ) => Effect.Effect<unknown, SerializationError>
 }
 
@@ -564,35 +590,35 @@ export declare namespace ActorLogic {
    *
    * @since 0.1.0
    */
-  export type SnapshotOf<T> = T extends ActorLogic<infer S, infer _E, infer _I, infer _Em, infer _R> ? S : never
+  export type SnapshotOf<T> = T extends LogicTypes<infer S, infer _E, infer _I, infer _Em, infer _R> ? S : never
 
   /**
    * Extract the Event type from an ActorLogic.
    *
    * @since 0.1.0
    */
-  export type EventOf<T> = T extends ActorLogic<infer _S, infer E, infer _I, infer _Em, infer _R> ? E : never
+  export type EventOf<T> = T extends LogicTypes<infer _S, infer E, infer _I, infer _Em, infer _R> ? E : never
 
   /**
    * Extract the Input type from an ActorLogic.
    *
    * @since 0.1.0
    */
-  export type InputOf<T> = T extends ActorLogic<infer _S, infer _E, infer I, infer _Em, infer _R> ? I : never
+  export type InputOf<T> = T extends LogicTypes<infer _S, infer _E, infer I, infer _Em, infer _R> ? I : never
 
   /**
    * Extract the Emitted type from an ActorLogic.
    *
    * @since 0.1.0
    */
-  export type EmittedOf<T> = T extends ActorLogic<infer _S, infer _E, infer _I, infer Em, infer _R> ? Em : never
+  export type EmittedOf<T> = T extends LogicTypes<infer _S, infer _E, infer _I, infer Em, infer _R> ? Em : never
 
   /**
    * Extract the Requirements type from an ActorLogic.
    *
    * @since 0.1.0
    */
-  export type RequirementsOf<T> = T extends ActorLogic<infer _S, infer _E, infer _I, infer _Em, infer R> ? R : never
+  export type RequirementsOf<T> = T extends LogicTypes<infer _S, infer _E, infer _I, infer _Em, infer R> ? R : never
 
   /**
    * Any ActorLogic type.
@@ -647,6 +673,9 @@ export type EmittedOf<T> = ActorLogic.EmittedOf<T>
  */
 export type RequirementsOf<T> = ActorLogic.RequirementsOf<T>
 
+/** The type-only key that tells {@link AnyLogicSlot} from {@link AnyActorLogic}; no value has it. */
+declare const LogicSlotKey: unique symbol
+
 /**
  * Any actor logic, whatever its snapshot, event, input, emitted and requirement types
  * (upstream `AnyActorLogic`). `ActorLogic.Any` fixes those types, and the snapshot and event
@@ -660,27 +689,82 @@ export type RequirementsOf<T> = ActorLogic.RequirementsOf<T>
  * logic still fits. It gives a snapshot with the `value` and `context` of a machine's as
  * optional `unknown` (`AnyActorRef`'s snapshot), so a logic that wraps any logic passes the
  * snapshot it receives to the wrapped `transition` and reads what it gives (upstream
- * `actorLogic.test.ts`, "composable actor logic").
+ * `actorLogic.test.ts`, "composable actor logic"). Agent logic does not fit it: such a wrapper
+ * could run an agent's methods (NEG-4).
  *
  * @since 0.1.0
  * @category Actor Logic
  */
 export interface AnyActorLogic {
+  /** Refuses agent logic, as on {@link ActorLogic}; {@link AnyLogicSlot} is the type that takes it. */
+  readonly [AgentBrand]?: never
+  /** Refuses an {@link AnyLogicSlot}, which may hold agent logic. */
+  readonly [LogicSlotKey]?: never
   /** The marker every logic carries; its variance is not checked here. */
   readonly [ActorLogicTypeId]: unknown
   /** {@link ActorLogic}'s `transition`, with any snapshot and any event. */
   transition(
     snapshot: Snapshot,
-    event: UpstreamAny
+    event: UpstreamAny,
+    ...capability: ReadonlyArray<LogicCapability>
   ): Effect.Effect<Snapshot & { readonly value?: unknown; readonly context?: unknown }, unknown, unknown>
   /** {@link ActorLogic}'s `getInitialSnapshot`, with any input. */
   readonly getInitialSnapshot: (input: UpstreamAny) => Effect.Effect<Snapshot, unknown, unknown>
   /** {@link ActorLogic}'s `getPersistedSnapshot`; `never` admits every logic's snapshot type. */
-  readonly getPersistedSnapshot: (snapshot: never) => Effect.Effect<unknown, unknown>
+  readonly getPersistedSnapshot: (snapshot: never, ...capability: ReadonlyArray<LogicCapability>) => Effect.Effect<unknown, unknown>
   /** {@link ActorLogic}'s optional `restoreSnapshot`; absent when the logic cannot restore. */
-  readonly restoreSnapshot?: (persisted: never) => Effect.Effect<Snapshot, unknown, unknown>
+  readonly restoreSnapshot?: (persisted: never, ...capability: ReadonlyArray<LogicCapability>) => Effect.Effect<Snapshot, unknown, unknown>
   /** {@link ActorLogic}'s optional `start`; absent when the logic needs no start step. */
-  readonly start?: (snapshot: never) => Effect.Effect<void, unknown, unknown>
+  readonly start?: (snapshot: never, ...capability: ReadonlyArray<LogicCapability>) => Effect.Effect<void, unknown, unknown>
+}
+
+/**
+ * What every constraint and infer site of this library reads: any logic, agent logic included.
+ * Unlike {@link AnyActorLogic} it takes agent logic, so `setup`, `createMachine` and the type
+ * helpers see it, and in exchange each method requires the runtime's capability, so no value
+ * typed `AnyLogicSlot` can call one (NEG-4). The actor runtime holds the capability, and agent
+ * logic refuses a call without it at run time.
+ *
+ * @since 0.4.0
+ * @category Actor Logic
+ */
+export interface AnyLogicSlot {
+  /** Keeps a slot out of {@link AnyActorLogic}, so two widenings are no way round the refusal. */
+  readonly [LogicSlotKey]?: true
+  /** The marker every logic carries; its variance is not checked here. */
+  readonly [ActorLogicTypeId]: unknown
+  /** {@link ActorLogic}'s `transition`, with any snapshot and any event. */
+  transition(
+    snapshot: Snapshot,
+    event: UpstreamAny,
+    capability: LogicCapability
+  ): Effect.Effect<Snapshot & { readonly value?: unknown; readonly context?: unknown }, unknown, unknown>
+  /** {@link ActorLogic}'s `getInitialSnapshot`, with any input. */
+  readonly getInitialSnapshot: (input: UpstreamAny) => Effect.Effect<Snapshot, unknown, unknown>
+  /** {@link ActorLogic}'s `getPersistedSnapshot`; `never` admits every logic's snapshot type. */
+  readonly getPersistedSnapshot: (snapshot: never, capability: LogicCapability) => Effect.Effect<unknown, unknown>
+  /** {@link ActorLogic}'s optional `restoreSnapshot`; absent when the logic cannot restore. */
+  readonly restoreSnapshot?: (persisted: never, capability: LogicCapability) => Effect.Effect<Snapshot, unknown, unknown>
+  /** {@link ActorLogic}'s optional `start`; absent when the logic needs no start step. */
+  readonly start?: (snapshot: never, capability: LogicCapability) => Effect.Effect<void, unknown, unknown>
+}
+
+/**
+ * The types a logic carries, read from its variance marker. Infer sites read this rather than
+ * {@link ActorLogic}, which agent logic does not fit (NEG-4).
+ *
+ * @since 0.4.0
+ * @category Actor Logic
+ */
+export interface LogicTypes<
+  TSnapshot extends Snapshot,
+  TEvent extends EventObject,
+  TInput,
+  TEmitted extends EventObject,
+  R
+> {
+  /** The marker every logic carries. */
+  readonly [ActorLogicTypeId]: Variance.ActorLogic<TSnapshot, TEvent, TInput, TEmitted, R>
 }
 
 // ============================================================
@@ -703,7 +787,7 @@ export interface AnyActorLogic {
  * @since 0.1.0
  * @category Context Construction
  */
-export type SpawnFunction = <TLogic extends AnyActorLogic>(
+export type SpawnFunction = <TLogic extends AnyLogicSlot>(
   logic: TLogic,
   options?: import("./Types.js").SpawnOptions<TLogic>
 ) => Effect.Effect<

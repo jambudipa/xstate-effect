@@ -1213,7 +1213,11 @@ describe("HARNESS-2 conformance harness configuration", () => {
       assert.strictEqual(importsRule[0], 2)
 
       const outside = yield* Effect.promise(() => eslint.calculateConfigForFile("test/machine.test.ts"))
-      assert.isUndefined(outside.rules["no-restricted-syntax"])
+      // Outside test/upstream the rule holds only the spread ban of machine states, no timer entry
+      assert.deepStrictEqual(
+        outside.rules["no-restricted-syntax"].slice(1).map((entry: { readonly message: string }) => entry.message.startsWith("TypeScript erases spread keys")),
+        [true]
+      )
       assert.isUndefined(outside.rules["no-restricted-imports"])
 
       const linter = new Linter({ cwd: pkgRoot })

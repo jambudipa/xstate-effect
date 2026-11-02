@@ -41,6 +41,8 @@ up while you work; the [how-to guides](../how-to/index.md) show how to use them 
 - [fromTransition and fromTransitionWithInput](./actors/from-transition.md) — actor logic from a reducer.
 - [fromObservable and fromEventObservable](./actors/from-observable.md) — actor logic from an Observable-like source.
 - [fromEffect, fromEffectBackground and fromEffectRetry](./actors/from-effect.md) — actor logic from an Effect.
+- [fromAgent and AgentTurn](./actors/from-agent.md) — agent logic: a literal-bounded model turn loop that must move its state.
+- [Settlement proof and certificates](./settlement.md) — `SettlementProof`, `proveSettlement`, `explore`, `certify`, `certified` and the `xstate-effect-certify` bin.
 - [fromStream](./actors/from-stream.md) — actor logic from an Effect `Stream`.
 - [Custom actor logic and createEmptyActor](./actors/custom-logic.md) — the `ActorLogic` contract and `makeActorLogic`.
 

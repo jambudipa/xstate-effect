@@ -1,5 +1,41 @@
 # @jambudipa/xstate-effect
 
+## 0.4.0
+
+### Minor Changes
+
+- Add agent logic and a settlement proof: `fromAgent` runs a model call that must move its state, and a machine that holds agent logic is proved at compile time and at run time.
+
+  Changes that can break code that works on 0.3.0:
+
+  - `setup(...).createMachine` has a new signature. Each transition target and `initial` must name a state, so a config with an unknown target now fails with `UnknownTarget` or `UnknownInitial`, in every setup. A setup with an agent actor or a certified child takes a second inference parameter, merges the wide config with the config as written, and must pass the settlement proof (`SettlementProof`, `SettlementCheck`, `MenuCheck`, `ChildSettlementCheck`). A config that the proof cannot read fails with `ConfigNotLiteral`, and an `any` config does not compile. Code that names the type arguments of `createMachine` can need a change.
+  - In such a setup, a misspelt key on an agent invocation gets the missing-`onDone` error, not the excess-property error.
+  - `AnyActorLogic` no longer takes agent logic. The root gains `AnyLogicSlot`, which takes every logic and whose methods need the runtime's capability, and `LogicTypes`, which reads the types a logic carries. The library's generics now read `AnyLogicSlot`, so a helper that passes a setup's `actors` to a parameter of type `AnyActorLogic` can need a change.
+  - `ActorLogic` methods take an optional capability argument. A custom logic needs no change.
+  - The certificate hash covers the library version, so each new version needs a new certificate.
+
+  Rules of the new API, for code written against a prerelease build:
+
+  - `fromAgent` requires `tools`. Each tool must be an event that the invoking state accepts.
+  - A state that invokes an agent must accept at least one concrete event. A wildcard and an `xstate.` event do not count; `AgentStateAcceptsNoEvents` names the state.
+  - Agent logic runs only as a declared `invoke`, with an `onDone` that leaves the state. `createActor`, a spawn and `provide` refuse it.
+
+  Known limits:
+
+  - The compiler does not refuse a spread into `states` with an explicit key: `states: { ...wideStates, done: { type: "final" } }` compiles with its hidden states unproved. Two other layers cover this form. An ESLint rule bans it in this repository, and `proveSettlement` refuses the machine with `AgentWithoutSettlement`. The rule does not ship with the package, so add the selector to your own config. The rule sees only the syntax of the call: it does not see a config or a `states` object built in a variable, a spread beside `states` that brings in `states`, an aliased `createMachine`, or a machine in a callback inside the `states` of another machine.
+  - A deliberate cast (`as unknown as`) compiles. Only the run-time checks stop it: `proveSettlement` finds agent logic by its run-time brand, and agent methods die with `AgentRunError` without the runtime's capability.
+  - Only `SettlementProof` refuses a wide config. `TargetCheck`, `SettlementCheck`, `MenuCheck` and `ChildSettlementCheck` each resolve to `unknown` on it when used directly.
+  - A setup with no agent actor and no certified child compiles a wide config, as 0.3.0 does, and does not prove settlement. A plain `createMachine` has no proof and no target check.
+  - The proof depends on the compiler. TypeScript 6.0.3 and tsgo 7.0.0-dev.20260707.2 pass the acceptance fixtures. tsgo 7.0.0-dev.20251207.1 refuses some valid machines. TypeScript 5.8.2 is not supported for this proof.
+  - The type cost of a 35-state machine in an agent setup rose 6.71%.
+  - Machine guards count as able to pass in the type proof and in `proveSettlement`. Only `explore` runs them, and a change to a guard body reaches a certificate only through its hash, so run `xstate-effect-certify-gate <config>` in CI.
+
+  Other changes:
+
+  - `./graph` adds `proveSettlement`, `explore`, `timerFirings`, `processRestart`, `certify`, `checkCertificate`, `moduleClosure` and `unresolvedImports`.
+  - The new `xstate-effect-certify` bin writes and checks certificate modules, and a config target's optional `layer` provides a machine's services. The new `xstate-effect-certify-gate` bin runs that check under a time limit and fails unless it reads one passing report of that run, so use it in CI. The new `certified` function marks a child machine.
+  - `pnpm check`, `prepublishOnly` and CI now run the settlement gate.
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,0 +1,6 @@
+import { assign, enqueueActions } from "../../../src/index.js"
+import { agentSetup as s } from "./support.js"
+/** This declaration supplies the agent-A10 acceptance case. */
+declare const config: Partial<{ initial:"x"; states:{x:{after:{1:"done"}},done:{type:"final"}} }>;
+/** This declaration supplies the agent-A10 acceptance case. */
+export const machine=s.createMachine(config);

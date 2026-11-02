@@ -1,14 +1,17 @@
 /**
- * The pure logic of the package's dev scripts: the cleanup CLI (`scripts/clean-core.ts`, for
- * `scripts/clean.ts`) and the docs-snippet check (`scripts/check-markdown-core.ts`, for
- * `scripts/check-markdown-code.ts`).
+ * The pure logic of the package's scripts: the cleanup CLI (`scripts/clean-core.ts`, for
+ * `scripts/clean.ts`), the docs-snippet check (`scripts/check-markdown-core.ts`, for
+ * `scripts/check-markdown-code.ts`) and the two bins (`scripts/certify-core.ts` and
+ * `scripts/gate-core.ts`, whose processes `scripts/bins.test.mjs` runs).
  *
  * Neither module starts a process or loads the Agent SDK, ESLint or the compiler, so these tests
  * run neither tool: they feed each function what the tool would give it. No test reaches
  * `clean.ts`, whose dynamic import of `clean.config.ts` CONF-8 allows only outside the tests.
  */
+import { Layer } from "effect"
 import { describe, expect, it } from "vitest"
 import * as path from "node:path"
+import { isConfigShape } from "../scripts/certify-core.js"
 import {
   agentOptions,
   createOutput,
@@ -33,6 +36,7 @@ import {
   markdownFilesOf,
   mergeFindings
 } from "../scripts/check-markdown-core.js"
+import { failed, judge, readArguments } from "../scripts/gate-core.js"
 
 /** A package root for the path checks; no file under it is read. */
 const ROOT = path.join(path.sep, "repo", "packages", "core")
@@ -409,5 +413,88 @@ describe("check-markdown-code.ts: the error collection", () => {
     expect(hasFailures({ blocksWithTypeErrors: 0, blocksWithLintErrors: 0, runErrors: ["tsc exited with status 127"] })).toBe(true)
     expect(hasFailures({ blocksWithTypeErrors: 0, blocksWithLintErrors: 0, runErrors: [] })).toBe(false)
     expect(hasFailures({ blocksWithTypeErrors: 1, blocksWithLintErrors: 0, runErrors: [] })).toBe(true)
+  })
+})
+
+describe("the certify bin's config", () => {
+  /** A target that holds what a config needs, with more fields. */
+  const target = (fields: object = {}) => ({ machine: { root: {} }, environment: { catalogue: [] }, ...fields })
+
+  it("takes a machine with no layer, and one with a Layer", () => {
+    expect(isConfigShape({ output: "c.ts", machines: { m: target() } })).toBe(true)
+    expect(isConfigShape({ output: "c.ts", machines: { m: target({ layer: Layer.empty }) } })).toBe(true)
+  })
+
+  it("refuses a layer that is no Layer, the key present and undefined included", () => {
+    for (const layer of [undefined, null, {}, 1, () => Layer.empty]) {
+      expect(isConfigShape({ output: "c.ts", machines: { m: target({ layer }) } })).toBe(false)
+    }
+  })
+
+  it("refuses a config with no machine, no output, or a name that is no export", () => {
+    for (const config of [
+      undefined,
+      {},
+      { output: "c.ts" },
+      { output: "c.ts", machines: {} },
+      { output: "", machines: { m: target() } },
+      { output: "c.ts", machines: { "not-a-name": target() } },
+      { output: "c.ts", machines: { m: { machine: {} } } },
+      { output: "c.ts", machines: { m: { machine: { root: {} }, environment: {} } } },
+    ]) {
+      expect(isConfigShape(config)).toBe(false)
+    }
+  })
+})
+
+describe("the gate's command line", () => {
+  const usage = failed("usage", "usage: xstate-effect-certify-gate <config> [--timeout-ms <ms>]")
+
+  it("reads a config and a limit", () => {
+    expect(readArguments(["c.mjs"])).toEqual({ config: "c.mjs", timeoutMs: 120_000 })
+    expect(readArguments(["--timeout-ms", "5", "c.mjs"])).toEqual({ config: "c.mjs", timeoutMs: 5 })
+  })
+
+  it("refuses all else", () => {
+    for (const argv of [[], ["a", "b"], ["--check"], ["c.mjs", "--timeout-ms"], ["c.mjs", "--timeout-ms", "0"], ["c.mjs", "--timeout-ms", "x"]]) {
+      expect(readArguments(argv)).toEqual(usage)
+    }
+  })
+})
+
+describe("the gate's judgement of a run", () => {
+  /** The nonce of a run. */
+  const nonce = "n"
+
+  /** The report text of a run. */
+  const text = (passed: boolean, failures: ReadonlyArray<object>, held: string = nonce) =>
+    `${JSON.stringify({ passed, failures, nonce: held })}\n`
+
+  /** The check of the one failure of a judgement. */
+  const check = (code: number | null, stdout: string) => judge(code, stdout, nonce).failures[0]?.check
+
+  it("passes one report of this run that agrees with exit 0, and prints no nonce", () => {
+    expect(judge(0, text(true, []), nonce)).toEqual({ passed: true, failures: [] })
+  })
+
+  it("keeps a failing report's failures", () => {
+    const failures = [{ check: "hash", machine: "m", detail: "d" }]
+    expect(judge(1, text(false, failures), nonce)).toEqual({ passed: false, failures })
+  })
+
+  it("refuses a report a config can print: no nonce, or the wrong one (F28)", () => {
+    expect(check(0, `{"passed":true,"failures":[]}\n`)).toBe("malformed-report")
+    expect(check(0, text(true, [], "other"))).toBe("forged-report")
+  })
+
+  it("refuses no report, more than one, and a report that disagrees with itself or its exit", () => {
+    expect(check(0, "")).toBe("no-report")
+    expect(check(null, "  \n")).toBe("no-report")
+    expect(check(0, `${text(true, [])}${text(true, [])}`)).toBe("malformed-report")
+    expect(check(0, `noise\n${text(true, [])}`)).toBe("malformed-report")
+    expect(check(1, text(true, []))).toBe("inconsistent-report")
+    expect(check(0, text(false, [{ check: "c", detail: "d" }]))).toBe("inconsistent-report")
+    expect(check(1, text(false, []))).toBe("inconsistent-report")
+    expect(check(0, text(true, [{ check: "c", detail: "d" }]))).toBe("inconsistent-report")
   })
 })

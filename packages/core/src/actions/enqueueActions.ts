@@ -8,7 +8,8 @@ import { Effect, Chunk } from "effect"
 import type { EventObject } from "../Event.js"
 import type { Action, ActionContext, ActionDefinition, Guard, ImplementationNames } from "../Types.js"
 import * as Types from "../Types.js"
-import type { AnyActorLogic } from "../ActorLogic.js"
+import type { AnyLogicSlot } from "../ActorLogic.js"
+import type { NotInlineChild } from "../internal/agentBrand.js"
 import type { ActorRefBase } from "../ActorRef.js"
 import { assign, type Assignment } from "./assign.js"
 import { raise, type RaiseEvent, type RaiseOptions } from "./raise.js"
@@ -22,7 +23,7 @@ import {
   type SendToTargetEvent
 } from "./sendTo.js"
 import { spawnChild, type SpawnChildArguments, type UntypedSpawnChildOptions } from "./spawnChild.js"
-import { stopChild, type StopChildTarget } from "./stopChild.js"
+import { type NotAgentChild, stopChild, type StopChildTarget } from "./stopChild.js"
 import { emit, type EmitEvent } from "./emit.js"
 import { cancel, type CancelId } from "./cancel.js"
 
@@ -87,10 +88,13 @@ export interface ActionEnqueuer<
    * actor's ids and input where the machine declares its actors, any input for a logic given
    * inline.
    */
-  readonly spawnChild: <TLogic extends AnyActorLogic>(...args: SpawnChildArguments<TContext, TEvent, TLogic, TNames>) => void
+  readonly spawnChild: <TLogic extends AnyLogicSlot>(...args: SpawnChildArguments<TContext, TEvent, TLogic, TNames>) => void
 
-  /** Enqueues `stopChild(child)`: a reference, an id, or a function giving one. */
-  readonly stopChild: (child: StopChildTarget<TContext, TEvent>) => void
+  /**
+   * Enqueues `stopChild(child)`: a reference, an id, or a function giving one. An id that
+   * `types.children` gives agent logic is refused (NEG-9).
+   */
+  readonly stopChild: <TChild extends StopChildTarget<TContext, TEvent>>(child: NotAgentChild<TChild, TNames["providedActor"]>) => void
 
   /**
    * Enqueues `emit(event)`. In a setup machine that declares `types.emitted`, the event is
@@ -260,7 +264,7 @@ export const enqueueActions: EnqueueActions = (<
               event: SendToEvent<TContext, TEvent, TSentEvent>,
               options?: SendToOptions<TContext, TEvent>
             ) => push(sendSelf<TContext, TEvent, TSentEvent>(event, options)),
-            spawnChild: <TLogic extends AnyActorLogic>(src: string | TLogic, options?: UntypedSpawnChildOptions<TContext, TEvent>) =>
+            spawnChild: <TLogic extends AnyLogicSlot>(src: string | (TLogic & NotInlineChild), options?: UntypedSpawnChildOptions<TContext, TEvent>) =>
               push(spawnChild<TContext, TEvent, TLogic>(src, options)),
             stopChild: (child: StopChildTarget<TContext, TEvent>) => push(stopChild<TContext, TEvent>(child)),
             emit: (event: EmitEvent<TContext, TEvent, TNames["emitted"]>) =>

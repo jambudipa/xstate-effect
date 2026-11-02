@@ -1,0 +1,111 @@
+import { setup, assign, enqueueActions } from "../../../src/index.js"
+import { agent, child } from "./support.js"
+import { Option } from "effect"
+
+/** Detect an erased contextual type. */
+type IsAny<T> = 0 extends (1 & T) ? true : false
+/** Require exact structural equality rather than assignability. */
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
+/** A compilation failure identifies each mismatched type assertion. */
+const exact = <T extends true>(): void => undefined
+/** The setup's declared context. */
+type Context = { count: number }
+/** The setup's declared input. */
+type Input = { start: number }
+/** The setup's declared events. */
+type Event = { type: "GO"; increment: number } | { type: "STOP" }
+/** The holder setup provides contextual types to every inline form. */
+const s = setup({ types: {} as { context: Context; input: Input; events: Event }, actors: { agent, child } })
+
+/** A context factory retains the exact input type. */
+export const factory = s.createMachine({
+  context: ({ input }) => {
+    exact<Equal<IsAny<typeof input>, false>>()
+    exact<Equal<typeof input, Input>>()
+    return { count: input.start }
+  },
+  initial: "x", states: { x: { after: { 1: "done" } }, done: { type: "final" } }
+})
+
+/** A destructured action retains the exact context and event types. */
+export const destructure = s.createMachine({
+  context: { count: 0 },
+  entry: ({ context, event }) => {
+    exact<Equal<IsAny<typeof context>, false>>()
+    exact<Equal<IsAny<typeof event>, false>>()
+    exact<Equal<typeof context, Context>>()
+    exact<Equal<typeof event, Event>>()
+  },
+  initial: "x", states: { x: { after: { 1: "done" } }, done: { type: "final" } }
+})
+
+/** An assignment callback retains the exact context and event types. */
+export const assigned = s.createMachine({
+  context: { count: 0 },
+  entry: assign({ count: ({ context, event }) => {
+    exact<Equal<IsAny<typeof context>, false>>()
+    exact<Equal<IsAny<typeof event>, false>>()
+    exact<Equal<typeof context, Context>>()
+    exact<Equal<typeof event, Event>>()
+    return context.count
+  } }),
+  initial: "x", states: { x: { after: { 1: "done" } }, done: { type: "final" } }
+})
+
+/** An enqueue callback retains the exact context and event types. */
+export const enqueued = s.createMachine({
+  context: { count: 0 },
+  entry: enqueueActions(({ context, event, enqueue }) => {
+    exact<Equal<IsAny<typeof context>, false>>()
+    exact<Equal<IsAny<typeof event>, false>>()
+    exact<Equal<typeof context, Context>>()
+    exact<Equal<typeof event, Event>>()
+    enqueue.assign({ count: context.count })
+  }),
+  initial: "x", states: { x: { after: { 1: "done" } }, done: { type: "final" } }
+})
+
+/** Nested callback arrays preserve types while all four forms occur together. */
+export const nested = s.createMachine({
+  context: ({ input }) => ({ count: input.start }),
+  initial: "x",
+  states: {
+    x: {
+      entry: [
+        ({ context, event }) => {
+          exact<Equal<IsAny<typeof context>, false>>()
+          exact<Equal<IsAny<typeof event>, false>>()
+          exact<Equal<typeof context, Context>>()
+          exact<Equal<typeof event, Event>>()
+        },
+        assign({ count: ({ context }) => context.count }),
+        enqueueActions(({ enqueue }) => enqueue.assign({ count: 1 }))
+      ],
+      after: { 1: "done" }
+    },
+    done: { type: "final" }
+  }
+})
+
+/** An invocation completion callback retains its actor's exact output type. */
+export const doneAssigned = s.createMachine({
+  context: { count: 0 }, initial: "x",
+  states: {
+    x: {
+      on: { GO: {} },
+      invoke: {
+        src: "agent", input: 1,
+        onDone: {
+          target: "done",
+          actions: assign({ count: ({ context, event }) => {
+            exact<Equal<IsAny<typeof event.output>, false>>()
+            exact<Equal<typeof event.output, Option.Option<number>>>()
+            exact<Equal<typeof context, Context>>()
+            return Option.getOrElse(event.output, () => context.count)
+          } })
+        }
+      }
+    },
+    done: { type: "final" }
+  }
+})

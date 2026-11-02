@@ -1,0 +1,17 @@
+import { setup, createMachine } from "../../../src/index.js"
+import { markAgentLogic } from "../../../src/internal/agentBrand.js"
+import { certified } from "../../../src/settlement.js"
+import { fromEffect } from "../../../src/actors/index.js"
+import { Effect } from "effect"
+/** The shared actor and machine setup for diagnostic fixtures. */
+export const agent = markAgentLogic(fromEffect((_: { input: number }) => Effect.succeed(1)))
+/** The shared actor and machine setup for diagnostic fixtures. */
+export const agentSetup = setup({ actors: { agent } })
+/** The shared actor and machine setup for diagnostic fixtures. */
+const childMachine = agentSetup.createMachine({ initial: "asking", states: { asking: { on:{PING:{}}, invoke: {src:"agent", input:1, onDone:"done"} }, done: {type:"final"} } })
+/** The shared actor and machine setup for diagnostic fixtures. */
+const certificate = { states:["asking", "done"], edges:["asking: on PING -> (none)", "asking: invoke.0.onDone -> done"], explored:2, hash:"fixture", verdict:"proved" } as const
+/** The shared actor and machine setup for diagnostic fixtures. */
+export const child = certified<typeof childMachine, typeof certificate>(childMachine, certificate)
+/** The shared actor and machine setup for diagnostic fixtures. */
+export const holderSetup = setup({ actors: {agent, child} })

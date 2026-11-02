@@ -44,9 +44,6 @@ jobs:
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
 
-    - name: Lint
-      run: pnpm lint
-
     # Every declaration carries JSDoc and every source folder a README (see packages/core/README.md)
     - name: Docs audit
       run: pnpm run docs:audit
@@ -54,14 +51,13 @@ jobs:
     - name: Test the docs audit
       run: node --test scripts/docs-audit.test.mjs
 
-    - name: Type check
-      run: pnpm typecheck
+    # Lint, type check, build, the settlement type tests, and the proof and certificate of the
+    # library fixtures, through a gate that passes only on a report that says so
+    - name: Check
+      run: pnpm check
 
     - name: Type check the tests
       run: pnpm exec tsc -p tsconfig.test.json --noEmit
-
-    - name: Build
-      run: pnpm build
 
     # The whole suite with the coverage thresholds of vitest.config.ts (docs/testing.md)
     - name: Test with coverage

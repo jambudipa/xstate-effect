@@ -20,6 +20,11 @@ import { raise } from "./actions/raise.js"
 import { and } from "./guards/and.js"
 import type { EventObject } from "./Event.js"
 import type { AnyEventObject, UpstreamAny } from "./internal/anyEventObject.js"
+import { hasAgentBrand, hasHoldsAgentsMark, markHoldsAgents } from "./internal/agentBrand.js"
+import { isFiniteDelay } from "./internal/delay.js"
+import { logicCapability } from "./internal/logicCapability.js"
+import { ContextReads, recordingContext } from "./internal/contextReads.js"
+import type { ProvidedActorsCheck, ProvidedDelayCheck } from "./internal/provideCheck.js"
 import { AfterEvent, InitEvent } from "./Event.js"
 import * as Persistence from "./persistence.js"
 import * as StateUtils from "./stateUtils.js"
@@ -329,9 +334,19 @@ export interface StateMachine<
    * The new machine requires this machine's services and the services the given
    * implementations need (`ImplementationsRequirementsOf`), so a replacement action whose
    * Effect reads a new service adds that service to `createActor`'s requirements.
+   *
+   * Agent settlement (port additions): agent logic in place of an actor whose declared logic is
+   * not agent logic fails to compile at the call (NEG-7), as the config gives that actor's
+   * invocations no settlement handler. In a setup machine with agent logic, a progress delay (a
+   * named `after` key whose transition leaves its state) takes only a positive integer literal
+   * (NEG-10). A cast that hides either is refused at run time: each initial or restored
+   * snapshot of the new machine dies with `AgentProvideError` or `ProgressDelayError`, which
+   * gives its actor status `error`. The first stays on every machine built from it. The second
+   * is read from the merged delays of each machine that holds agent logic, so it also covers
+   * delays from `setup` or `createMachine`, and a later finite delay cures it.
    */
-  provide<const TGiven extends TProvided>(
-    implementations: TGiven
+  provide<const TGiven extends ProvidedActorsCheck<TProvided> & TProvided>(
+    implementations: TGiven & ProvidedDelayCheck<TGiven, TProvided>
   ): StateMachine<
     Id,
     TContext,
@@ -512,7 +527,7 @@ export declare namespace StateMachine {
  *
  * Upstream writes it as a `StateMachine` of `any`s. The port has no `any`, and the parameters
  * of {@link StateMachine} are invariant, so no instantiation of it takes every machine.
- * `AnyStateMachine` is a structural supertype instead, as `AnyActorLogic` is: it keeps the
+ * `AnyStateMachine` is a structural supertype instead, as `AnyLogicSlot` is: it keeps the
  * members a helper reads from a machine of unknown types, and its members that take a
  * snapshot, an event or a config are method signatures, which TypeScript checks
  * bivariantly, so every machine has them. Its `root` is an `AnyStateNode`, the same kind of
@@ -1322,7 +1337,7 @@ interface RestorableChild {
    * `xstate.invoke.<index>.<node id>` name of an inline invocation), or a live child's logic
    * itself. A name that resolves to no logic leaves the child out of the restore.
    */
-  readonly src: string | AL.AnyActorLogic
+  readonly src: string | AL.AnyLogicSlot
   /** The systemId the restored child registers under; none registers nothing. */
   readonly systemId: Option.Option<string>
   /** Whether the restored child sends its snapshots to the parent; always `false` for a live child. */
@@ -1443,6 +1458,7 @@ const restoreChildren = (
               systemId: entry.systemId,
               syncSnapshot: entry.syncSnapshot,
               snapshot: entry.snapshot,
+              invocation: logicCapability,
             }),
             (child) => Option.some([childId, child] as const)
           ),
@@ -1511,7 +1527,8 @@ export const make = <
 >(
   config: MachineConfig<TContext, TEvent, TInput, TOutput, TStateMeta, TTransitionMeta>,
   implementations?: MachineImplementations<TContext, TEvent>,
-  schemaChecks?: SchemaChecks
+  schemaChecks?: SchemaChecks,
+  refused: Option.Option<ProvideRefusal> = Option.none()
 ): StateMachine<string, TContext, TEvent, TInput, TOutput, TEmitted, NoInfer<R>, TStateMeta, TTransitionMeta> => {
   // Every node links to the machine, so the machine object exists before the tree; it gets
   // its fields once the tree is built.
@@ -1547,6 +1564,18 @@ export const make = <
     Result.void
   )
   const definitionFailure: Effect.Effect<void, MachineDefinitionError> = Effect.fromResult(definition)
+  const nodes = built.map(({ node }) => node)
+  const holdsAgents = holdsAgentLogic(implementations?.actors, nodes)
+  // What this machine refuses: what a `provide` refused (NEG-7), then a progress delay read from
+  // the merged implementations, however they got here (NEG-10). Every initial or restored
+  // snapshot dies with it, so the actor errors before any child starts
+  const refusal: Effect.Effect<void> = Option.match(
+    Option.orElse(
+      refused,
+      () => (holdsAgents ? progressDelayRefusal(machineId, nodes, implementations?.delays ?? {}) : Option.none())
+    ),
+    { onNone: () => Effect.void, onSome: Effect.die }
+  )
   // The definition error as the failure of a transition from `snapshot` on `event`
   const asTransitionFailure = (snapshot: unknown, event: unknown): Effect.Effect<void, TransitionError> =>
     Effect.mapError(
@@ -1738,6 +1767,7 @@ export const make = <
             definitionFailure,
             (error) => new Errors.InitializationError({ message: error.message, input, cause: error })
           )
+          yield* refusal
           const actorScope = yield* AL.ActorScope
           const initEvent: EventObject = new InitEvent({ input })
 
@@ -1819,7 +1849,15 @@ export const make = <
                     Option.filter(Option.fromUndefinedOr(config.context as TContext | undefined), Boolean),
                     () => ({}) as TContext
                   )
-            return rootOnly(context, yield* spawner.flush)
+            // The explorer records the reads of the initial macrostep from this context on
+            const reads = Option.filter(yield* ContextReads, (recording) => recording.machine === self)
+            return rootOnly(
+              Option.match(reads, {
+                onNone: () => context,
+                onSome: (recording) => recordingContext(context, recording.record),
+              }),
+              yield* spawner.flush
+            )
           }).pipe(Effect.catchDefect((defect) => Effect.succeed(failed(rootOnly({} as TContext, {}), defect))))
           // A factory that failed ends the initialization: upstream returns from its catch
           if (preInitial.status === "error") {
@@ -1868,6 +1906,7 @@ export const make = <
         Effect.gen(function* () {
           // An invalid machine restores nothing (SD-3, amended 2026-10-08)
           yield* Effect.mapError(definitionFailure, (error) => new Errors.RestoreError({ message: error.message, cause: error }))
+          yield* refusal
           const actorScope = yield* AL.ActorScope
           const restorable = Snapshot.isMachineSnapshot(persisted)
             ? restorableOfLive(persisted)
@@ -1931,7 +1970,8 @@ export const make = <
               )
             }),
 
-      // Upstream `provide`: the same config, each record merged with the provided one over it
+      // Upstream `provide`: the same config, each record merged with the provided one over it.
+      // A refusal of agent logic (NEG-7) goes with the new machine; an earlier one stays
       provide: (newImplementations: MachineImplementations<TContext, TEvent>) => {
         const mergedImplementations: MachineImplementations<TContext, TEvent> = {
           actions: { ...implementations?.actions, ...newImplementations.actions },
@@ -1939,18 +1979,30 @@ export const make = <
           actors: { ...implementations?.actors, ...newImplementations.actors },
           delays: { ...implementations?.delays, ...newImplementations.delays },
         }
-        return make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>(config, mergedImplementations, schemaChecks)
+        const provided: ProvideRequest = {
+          machineId,
+          current: implementations?.actors ?? {},
+          given: newImplementations,
+        }
+        return make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>(
+          config,
+          mergedImplementations,
+          schemaChecks,
+          // A progress delay is read again from the merged record, so a later finite one cures it
+          Option.orElse(refused, () => provideRefusal(provided))
+        )
       },
 
       withContext: <TNewContext extends MachineContext>(newContext: TNewContext | ContextFactory<TNewContext, ProvidedActor, TInput, TEvent>) =>
         make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>(
           { ...config, context: newContext as unknown as TContext },
           implementations,
-          schemaChecks
+          schemaChecks,
+          refused
         ),
 
       withId: <TNewId extends string>(newId: TNewId) =>
-        make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>({ ...config, id: newId }, implementations, schemaChecks),
+        make<TContext, TEvent, TInput, TOutput, TEmitted, R, TStateMeta, TTransitionMeta>({ ...config, id: newId }, implementations, schemaChecks, refused),
 
       // Upstream `getStateNodeById`: an id, `#` optional, then a key path below that node
       getStateNodeById: (
@@ -1964,8 +2016,102 @@ export const make = <
     }
   )
 
-  return machine
+  return holdsAgents ? markHoldsAgents(machine) : machine
 }
+
+/** What a machine refuses at run time (NEG-7, NEG-10); the machine it was given to keeps it. */
+type ProvideRefusal = Errors.AgentProvideError | Errors.ProgressDelayError
+
+/** What {@link provideRefusal} reads of one `provide` call. */
+interface ProvideRequest {
+  /** The id of the machine `provide` was called on. */
+  readonly machineId: string
+  /** Its actor implementations before the call. */
+  readonly current: Readonly<Record<string, unknown>>
+  /** The implementations the call gave. */
+  readonly given: { readonly actors?: Readonly<Record<string, unknown>> }
+}
+
+/**
+ * What a `provide` call refuses, by the rule its types state for a value a cast hid: agent logic
+ * given for a name whose current implementation is not agent logic (NEG-7). A name with no
+ * implementation is not refused here, as the spawn and the structural proof check what runs
+ * under it.
+ */
+const provideRefusal = (request: ProvideRequest): Option.Option<ProvideRefusal> =>
+  Option.map(
+    Option.fromNullishOr(
+      Object.entries(request.given.actors ?? {}).find(
+        ([name, logic]) => hasAgentBrand(logic) && Object.hasOwn(request.current, name) && !hasAgentBrand(request.current[name])
+      )
+    ),
+    ([name]): ProvideRefusal =>
+      new Errors.AgentProvideError({
+        message: `Agent logic cannot be provided for "${name}", whose logic is not agent logic: its invocations have no settlement handler.`,
+        actor: name,
+        machineId: request.machineId,
+      })
+  )
+
+/**
+ * `true` when a machine of these actors and nodes holds agent logic: agent logic, or a machine
+ * that holds it, in its actor record or inline in an invocation, which no record shows.
+ */
+const holdsAgentLogic = (actors: Readonly<Record<string, unknown>> | undefined, nodes: ReadonlyArray<InvokingNode>): boolean =>
+  [...Object.values(actors ?? {}), ...nodes.flatMap((node) => node.invoke.map((invoke) => invoke.src))].some(
+    (logic) => hasAgentBrand(logic) || hasHoldsAgentsMark(logic)
+  )
+
+/** What {@link holdsAgentLogic} reads of a state node: the source of each invocation. */
+interface InvokingNode {
+  /** The node's invocations. */
+  readonly invoke: ReadonlyArray<{ readonly src: unknown }>
+}
+
+/**
+ * The first progress delay of a machine that holds agent logic whose merged value may never
+ * fire: infinity, NaN, an infinite `Duration` or a function (NEG-10). It reads the merged record,
+ * as the delay and the agent may arrive by different calls, or in `setup` or `createMachine`.
+ */
+const progressDelayRefusal = (
+  machineId: string,
+  nodes: ReadonlyArray<DelayedNode>,
+  delays: Readonly<Record<string, unknown>>
+): Option.Option<ProvideRefusal> => {
+  const progress = nodes.flatMap(progressDelaysOf)
+  return Option.map(
+    Option.fromNullishOr(Object.entries(delays).find(([name, delay]) => progress.includes(name) && !isFiniteDelay(delay))),
+    ([name]): ProvideRefusal =>
+      new Errors.ProgressDelayError({
+        message: `The progress delay "${name}" must be a finite number of milliseconds: infinity, NaN and functions may never fire.`,
+        delay: name,
+        machineId,
+      })
+  )
+}
+
+/** What {@link progressDelaysOf} reads of a state node: its path, and its delays and targets. */
+interface DelayedNode {
+  /** The keys from the root to the node. */
+  readonly path: ReadonlyArray<string>
+  /** The node's delayed transitions. */
+  readonly after: ReadonlyArray<{
+    readonly delay: number | string
+    readonly target: ReadonlyArray<{ readonly path: ReadonlyArray<string> }> | undefined
+  }>
+}
+
+/** The named delays of a node's `after` transitions that target a state outside the node. */
+const progressDelaysOf = (node: DelayedNode): ReadonlyArray<string> =>
+  node.after.flatMap((transition) =>
+    typeof transition.delay === "string" && (transition.target ?? []).some((target) => !isWithin(target.path, node.path))
+      ? [transition.delay]
+      : []
+  )
+
+/** `true` when `path` is `ancestor` or below it. */
+const isWithin = (path: ReadonlyArray<string>, ancestor: ReadonlyArray<string>): boolean =>
+  ancestor.every((key, index) => path[index] === key)
 
 /**
  * A state machine named by upstream's type parameters, in upstream's order (upstream
