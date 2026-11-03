@@ -57,7 +57,13 @@ does not belong here.
   logic; `ProgressDelayNames` walks a config for its progress delays (a named `after` key whose
   transition leaves its state), which a setup with agent actors marks on its `provide`
   (`ProgressDelayMarker`), and `ProvidedDelayCheck` then takes only a positive integer literal
-  for each. `StateMachine.ts` holds the run-time half. Type-only; no upstream source.
+  or a `finiteDelay` (its type-only brand) for each. `StateMachine.ts` holds the run-time half.
+  Type-only; no upstream source.
+- `delay.ts`: the delay of a `raise`, a `sendTo` and an `after` (`resolveDelay`, upstream
+  `resolveRaise` and `resolveSendTo`), and `isFiniteDelay`, the one test of "sure to fire" that
+  the progress delay refusal and the structural proof read. It also holds the `finiteDelay`
+  registry (0.4.1, SD-53): a `WeakMap` of the wrappers `../finiteDelay.ts` built, so a copy or a
+  cast has no entry, and `clampDelay`, which keeps a result in `[0, max]`.
 
 ## Constraints
 

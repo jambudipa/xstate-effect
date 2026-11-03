@@ -1,5 +1,17 @@
 # @jambudipa/xstate-effect
 
+## 0.4.1
+
+### Patch Changes
+
+- 0f5a0c8: Add `finiteDelay(fn, { max })`: a delay computed at each entry of its state that a machine holding agent logic accepts as a progress delay.
+
+  - The wrapper clamps the result of `fn` to `[0, max]`. A value above `max` and `Infinity` give `max`; a negative value, `-0` and `-Infinity` give `0`; `NaN` and a value that is no number and no `Duration` give `max`. A throw in `fn` is not caught: the actor ends with status `error`.
+  - `max` must be a positive integer literal, checked as an agent `budget` is: a wide `number`, `0`, `-1`, `1.5`, `Infinity`, a union, a branded or a generic number fail to compile at `max`.
+  - The run-time refusal (`ProgressDelayError`), the type check of `provide`, `proveSettlement` and `certify` accept a `finiteDelay`. A plain function stays refused, and so does a forged wrapper (a cast, a copied shape, a bound with a cast `max`).
+  - A restored actor waits only the time its pending timer has left.
+  - A certificate hashes the wrapped function and `max`. The `ProgressDelayError` message now names plain functions.
+
 ## 0.4.0
 
 ### Minor Changes

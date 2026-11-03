@@ -164,7 +164,7 @@ the gate, the hook and where a new test goes.
 - [`docs/`](./docs/index.md) — tutorials, how-to guides, reference and explanation pages. Every
   code sample there compiles and lints; `pnpm check-docs` checks them.
 - [`test/upstream/CONFORMANCE.md`](./test/upstream/CONFORMANCE.md) — the conformance ledger.
-- [`docs/decisions.md`](./docs/decisions.md) — the decisions D1–D20 and SD-1–SD-52.
+- [`docs/decisions.md`](./docs/decisions.md) — the decisions D1–D20 and SD-1–SD-53.
 - [`llms.txt`](./llms.txt) — a short summary of the package for language models.
 
 The compile-time settlement proof of `setup(...).createMachine` has known limits, one of which

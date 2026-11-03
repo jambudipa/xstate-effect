@@ -287,9 +287,11 @@ export class AgentProvideError extends Data.TaggedError("AgentProvideError")<{
  * A progress delay that `provide` replaced with one that may never fire (NEG-10; a port
  * addition). In a machine that holds agent logic, directly, inline or through a child, a named
  * delay that keys an `after` transition out of its state is that state's progress exit, so
- * `provide` takes for it only a positive integer literal by type. This error is the run-time half
- * for the merged delays, from `provide`, `setup` or `createMachine`: infinity, NaN, an infinite
- * `Duration` or a function (which can return either). A later `provide` of a finite delay cures it.
+ * `provide` takes for it only a positive integer literal or a `finiteDelay` by type. This error is
+ * the run-time half for the merged delays, from `provide`, `setup` or `createMachine`: infinity,
+ * NaN, an infinite `Duration` or a plain function (which can return either). A `finiteDelay`
+ * wrapper is sure to fire; a forged one, a cast included, is refused. A later `provide` of a
+ * finite delay cures it.
  *
  * @since 0.4.0
  * @category Errors

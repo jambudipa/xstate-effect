@@ -1,0 +1,19 @@
+import { Effect, Schema } from "effect"
+import { finiteDelay, fromAgent, setup } from "../../../src/index.js"
+/** The brief's agent: one tool `GO`, a turn that never moves the state. */
+const someAgent = fromAgent({ budget: 3, deadline: 30_000, tools: { GO: Schema.Struct({ type: Schema.Literal("GO") }) }, turn: (_input: number) => Effect.void })
+/** The brief's repro with finiteDelay: a timebox read from the typed context, proven to fire. */
+export const machine = setup({
+  types: {} as { context: { deadline: number } },
+  actors: { child: someAgent },
+  delays: { timebox: finiteDelay(({ context }) => context.deadline, { max: 14_400_000 }) },
+}).createMachine({
+  context: { deadline: 1_000 },
+  initial: "running",
+  states: {
+    running: { invoke: { src: "child", input: 1, onDone: "done" }, on: { GO: "done" }, after: { timebox: "done" } },
+    done: { type: "final" },
+  },
+})
+/** provide takes a finiteDelay for the progress delay timebox. */
+export const provided = machine.provide({ delays: { timebox: finiteDelay(() => 5, { max: 10 }) } })

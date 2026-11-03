@@ -53,7 +53,8 @@ certified child, each rule below gives a compile error at the line of the fault.
 These states have a progress guarantee:
 
 - a state with an agent invocation whose settlement is total and whose `onDone` exits the state;
-- a state with an `after` that has a target outside the state and a finite delay;
+- a state with an `after` that has a target outside the state and a finite delay, or a named
+  delay given as a [`finiteDelay`](./finite-delay.md);
 - a state with an `always` set that has an unguarded fallback, and that exits the state.
 
 A non-agent invocation alone gives no guarantee, as no type proves that an effect ends. A
@@ -61,7 +62,8 @@ targetless `after`, a self-target or `reenter` `after`, and a targetless `always
 guarantee. An `after` key of `Infinity`, `-Infinity` or `NaN` gives none. The compile-time proof
 cannot read the value of a named delay, as its type is `number`; `proveSettlement` resolves the
 name through the machine's delays, and refuses one with no implementation, an infinite one and a
-function. A machine past `SettlementProofBound` states is proved part by part: each part gets
+plain function. It takes a [`finiteDelay`](./finite-delay.md), whose result is clamped to a literal
+bound. A machine past `SettlementProofBound` states is proved part by part: each part gets
 the same checks, and the parent assumes the proved exits of each child.
 
 `TargetOf`, `TargetCheck`, `ChildSettlementCheck`, `HoldsAgentsFlag`, `SettlementReport` and
@@ -171,7 +173,7 @@ only when `proveSettlement` and the explorer both prove the machine. The output 
 byte-identical across runs of one runtime. A module closure with a real unresolved import gives
 `"failed"`, as the hash cannot cover that file. The hash covers the machine, its provided
 implementations, the module closure and the library version, so a new library version needs a new
-certificate.
+certificate. A `finiteDelay` counts by the source of the function it wraps and by its `max`.
 
 ## checkCertificate
 

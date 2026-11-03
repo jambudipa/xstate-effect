@@ -8,10 +8,12 @@
  * every post is dropped. `isolateCallback` reports what a callback fails or dies with once
  * through the logger and swallows it (SD-21), and keeps an interruption an interruption. The
  * delivery guards find the drain of an actor and the settle of a system (SD-28) only where the
- * `Actor` and `ActorSystem` modules put them.
+ * `Actor` and `ActorSystem` modules put them. The `finiteDelay` registry (`delay.ts`) clamps a
+ * result to `[0, max]`, gives the bound for `NaN` and for a value that is no delay, and counts as
+ * sure to fire only a wrapper it recorded, never a copy of one.
  */
 import { assert, describe, it, vi } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Logger, Option, Scope } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Logger, Option, Scope } from "effect"
 import { makeActorSystem } from "../../src/ActorSystem.js"
 import { DrainKey, hasDrain, hasSettle, SettleKey } from "../../src/internal/delivery.js"
 import * as Outbox from "../../src/internal/outbox.js"
@@ -29,6 +31,7 @@ import {
   type NotAgentLogic,
 } from "../../src/internal/agentBrand.js"
 import { delayOf } from "../../src/internal/actionDelay.js"
+import { clampDelay, finiteDelayOf, isFiniteDelay, registerFiniteDelay } from "../../src/internal/delay.js"
 import { isolateCallback, reportUnhandledError } from "../../src/internal/reportError.js"
 
 /** Lets every other ready fiber take twenty turns. */
@@ -385,4 +388,50 @@ describe("COV-4 two copies of the library in one program", () => {
       assert.strictEqual(runs.count, 0)
     })
   )
+})
+
+describe("COV-4 the finiteDelay registry clamps a result and counts only a recorded wrapper (NEG-10)", () => {
+  it("[COV-4] clampDelay keeps a value in [0, max], and gives max for NaN and for a value that is no delay", () => {
+    const cases: ReadonlyArray<readonly [unknown, number]> = [
+      [0, 0],
+      [1, 1],
+      [1000, 1000],
+      [5000, 1000],
+      [Infinity, 1000],
+      [-5, 0],
+      [-Infinity, 0],
+      [NaN, 1000],
+      [Duration.millis(250), 250],
+      [Duration.seconds(2), 1000],
+      [Duration.infinity, 1000],
+      ["500", 1000],
+      [undefined, 1000],
+    ]
+    for (const [value, expected] of cases) {
+      assert.strictEqual(clampDelay(value, 1000), expected, String(value))
+    }
+    // -0 gives +0, not -0
+    assert.isTrue(Object.is(clampDelay(-0, 1000), 0))
+  })
+
+  it("[COV-4] a recorded wrapper is sure to fire and keeps its entry; a copy of it, or a plain function, has none", () => {
+    const fn = () => 10
+    const wrapper = registerFiniteDelay(() => 10, { fn, max: 1000 })
+    assert.isTrue(isFiniteDelay(wrapper))
+    assert.deepStrictEqual(finiteDelayOf(wrapper), Option.some({ fn, max: 1000 }))
+    const copied = Object.defineProperties(() => 10, Object.getOwnPropertyDescriptors(wrapper))
+    for (const forged of [fn, copied, wrapper.bind(undefined), { ...wrapper }, "wrapper", undefined]) {
+      assert.isFalse(isFiniteDelay(forged), String(forged))
+      assert.isTrue(Option.isNone(finiteDelayOf(forged)))
+    }
+  })
+
+  it("[COV-4] isFiniteDelay keeps its numeric and Duration answers", () => {
+    for (const delay of [0, 10, Duration.seconds(1)]) {
+      assert.isTrue(isFiniteDelay(delay), String(delay))
+    }
+    for (const delay of [Infinity, NaN, Duration.infinity]) {
+      assert.isFalse(isFiniteDelay(delay), String(delay))
+    }
+  })
 })

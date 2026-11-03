@@ -1,0 +1,3 @@
+import { finiteDelay } from "../../../src/index.js"
+/** A finiteDelay whose max is a generic N: refused at max. */
+export const delayOf = <N extends number>(bound: N) => finiteDelay(() => 1, { max: bound })

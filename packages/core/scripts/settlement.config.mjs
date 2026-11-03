@@ -5,10 +5,11 @@
  * under `test/` has no lint block for `.mjs`, so it sits here beside the gate.
  *
  * The agents are real `fromAgent` logic, as the structural proof counts nothing else as
- * progress. The explorer starts no actor, so no turn runs and the run stays deterministic.
- * Each environment drives every event its machine handles.
+ * agent progress; `timeboxedAgent` adds a state whose only progress is a `finiteDelay` timer.
+ * The explorer starts no actor, so no turn runs and the run stays deterministic. Each
+ * environment drives every event its machine handles.
  */
-import { assign, fromAgent, setup } from "@jambudipa/xstate-effect"
+import { assign, finiteDelay, fromAgent, setup } from "@jambudipa/xstate-effect"
 import { processRestart, timerFirings } from "@jambudipa/xstate-effect/graph"
 import { Effect, Schema } from "effect"
 
@@ -73,6 +74,36 @@ const retriesReview = setup({
   },
 })
 
+/** Agent logic with the tool `GO`, as the brief's repro of a per-instance timebox has. */
+const worker = fromAgent({ budget: 3, deadline: 30_000, tools: { GO: Schema.Struct({ type: Schema.Literal("GO") }) }, turn: () => Effect.void })
+
+/**
+ * The brief's repro with `finiteDelay` (0.4.1): each delay is computed from the context at entry
+ * and clamped to a literal bound. `waiting` has no exit but its `warmup` timer, so the proof
+ * holds only if it counts a `finiteDelay` as sure to fire; `running` leaves on its agent, on
+ * `GO`, or when its `timebox` passes.
+ */
+const timeboxedAgent = setup({
+  actors: { worker },
+  delays: {
+    warmup: finiteDelay(({ context }) => context.warmup, { max: 60_000 }),
+    timebox: finiteDelay(({ context }) => context.deadline, { max: 14_400_000 }),
+  },
+}).createMachine({
+  id: "timeboxedAgent",
+  context: { warmup: 1_000, deadline: 60_000 },
+  initial: "waiting",
+  states: {
+    waiting: { after: { warmup: "running" } },
+    running: {
+      invoke: { src: "worker", id: "worker", input: 1, onDone: "done" },
+      on: { GO: "done" },
+      after: { timebox: "done" },
+    },
+    done: { type: "final" },
+  },
+})
+
 export default {
   output: "../test/settlement/certificate.ts",
   machines: {
@@ -99,6 +130,21 @@ export default {
           restart: processRestart(retriesReview),
         },
         abstraction: { retries: (value) => Number(value) },
+        timeout: "30 seconds",
+      },
+    },
+    timeboxedAgent: {
+      machine: timeboxedAgent,
+      environment: {
+        catalogue: ["settle", "go", "timer", "restart"],
+        inputs: {
+          settle: () => [{ type: "xstate.done.actor.worker", output: settlement }],
+          go: () => [{ type: "GO" }],
+          timer: timerFirings,
+          restart: processRestart(timeboxedAgent),
+        },
+        // Each delay reads its bound field at entry; neither changes, so each keeps its value
+        abstraction: { warmup: (value) => Number(value), deadline: (value) => Number(value) },
         timeout: "30 seconds",
       },
     },

@@ -1,0 +1,5 @@
+import { finiteDelay } from "../../../src/index.js"
+/** The union bound this fixture passes as max. */
+declare const either: 2 | 3
+/** A finiteDelay whose max is union: refused at max. */
+export const delay = finiteDelay(() => 1, { max: either })

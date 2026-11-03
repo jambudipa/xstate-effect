@@ -316,7 +316,7 @@ error with a `message`.
 | `AgentSpawnError` | `src`, `machineId` | a spawn of agent logic, inline, by name, through the registry, through `createSpawnFunction` or by a logic that reads `ActorScope` (NEG-3). The spawning actor errors; a `createSpawnFunction` call dies. |
 | `AgentRunError` | none | agent logic given to `createActor` or `Actor.make` (NEG-4), or one of its methods called without the runtime's capability; or a `budget` or `deadline` that is no positive safe integer, through a cast or plain JavaScript (NEG-5). The creation, the method or the invoking actor's start dies with it. |
 | `AgentProvideError` | `actor`, `machineId` | `provide` gave agent logic in place of an actor whose logic is not agent logic (NEG-7). Each initial or restored snapshot of the new machine dies with it. |
-| `ProgressDelayError` | `delay`, `machineId` | a machine that holds agent logic, directly, inline or through a child, has a progress delay, from `provide`, `setup` or `createMachine`, given as infinity, NaN, an infinite `Duration` or a function (NEG-10). As `AgentProvideError`. |
+| `ProgressDelayError` | `delay`, `machineId` | a machine that holds agent logic, directly, inline or through a child, has a progress delay, from `provide`, `setup` or `createMachine`, given as infinity, NaN, an infinite `Duration` or a plain function (NEG-10). A [`finiteDelay`](./finite-delay.md) is accepted; a forged one is refused. As `AgentProvideError`. |
 
 See [`machine.provide`](./create-machine.md#agent-logic-and-progress-delays).
 

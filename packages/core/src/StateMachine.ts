@@ -2070,7 +2070,8 @@ interface InvokingNode {
 
 /**
  * The first progress delay of a machine that holds agent logic whose merged value may never
- * fire: infinity, NaN, an infinite `Duration` or a function (NEG-10). It reads the merged record,
+ * fire: infinity, NaN, an infinite `Duration` or a plain function; a `finiteDelay` wrapper is
+ * sure to fire (NEG-10). It reads the merged record,
  * as the delay and the agent may arrive by different calls, or in `setup` or `createMachine`.
  */
 const progressDelayRefusal = (
@@ -2083,7 +2084,7 @@ const progressDelayRefusal = (
     Option.fromNullishOr(Object.entries(delays).find(([name, delay]) => progress.includes(name) && !isFiniteDelay(delay))),
     ([name]): ProvideRefusal =>
       new Errors.ProgressDelayError({
-        message: `The progress delay "${name}" must be a finite number of milliseconds: infinity, NaN and functions may never fire.`,
+        message: `The progress delay "${name}" must be a finite number of milliseconds or a finiteDelay: infinity, NaN and plain functions may never fire.`,
         delay: name,
         machineId,
       })

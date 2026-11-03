@@ -1118,5 +1118,89 @@
   {
     "file": "plain-D1-wide.ts",
     "diagnostics": []
+  },
+  {
+    "file": "finite-delay-A2-number.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 5,
+        "message": "PositiveIntegerLiteral<\"max\">"
+      }
+    ]
+  },
+  {
+    "file": "finite-delay-A2-zero.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 3,
+        "message": "PositiveIntegerLiteral<\"max\">"
+      }
+    ]
+  },
+  {
+    "file": "finite-delay-A2-negative.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 3,
+        "message": "PositiveIntegerLiteral<\"max\">"
+      }
+    ]
+  },
+  {
+    "file": "finite-delay-A2-fraction.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 3,
+        "message": "PositiveIntegerLiteral<\"max\">"
+      }
+    ]
+  },
+  {
+    "file": "finite-delay-A2-infinity.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 3,
+        "message": "PositiveIntegerLiteral<\"max\">"
+      }
+    ]
+  },
+  {
+    "file": "finite-delay-A2-union.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 5,
+        "message": "PositiveIntegerLiteral<\"max\">"
+      }
+    ]
+  },
+  {
+    "file": "finite-delay-A2-branded.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 5,
+        "message": "PositiveIntegerLiteral<\"max\">"
+      }
+    ]
+  },
+  {
+    "file": "finite-delay-A2-generic.ts",
+    "diagnostics": [
+      {
+        "code": 2322,
+        "line": 3,
+        "message": "CheckedLiteral<N, \"max\">"
+      }
+    ]
+  },
+  {
+    "file": "finite-delay-B1.ts",
+    "diagnostics": []
   }
 ]

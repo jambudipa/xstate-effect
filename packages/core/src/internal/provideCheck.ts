@@ -6,12 +6,14 @@
  * (NEG-7, NEG-10). Agent logic settles only through the `onDone` of an invocation that expects
  * it, so `provide` refuses agent logic in place of an actor whose declared logic is not agent
  * logic. In a machine that holds agent logic, directly or through a child, a named delay that keys an `after` transition out of its
- * state is that state's progress exit, so `provide` takes for it only a positive integer literal,
- * never a wide number (which may hold infinity or NaN) or a function (which may return either).
+ * state is that state's progress exit, so `provide` takes for it only a positive integer literal
+ * or a `finiteDelay` wrapper, never a wide number (which may hold infinity or NaN) or a plain
+ * function (which may return either).
  * `StateMachine.ts` holds the run-time half. Upstream has no counterpart: agent settlement is a
  * port addition.
  */
 import type { CheckedLiteral, PositiveIntegerLiteral } from "../actors/fromAgent.js"
+import type { FiniteDelayMark } from "../finiteDelay.js"
 import type { CertifiedChild, HoldsAgents, IsAgentLogic, NotInlineChild } from "./agentBrand.js"
 
 /**
@@ -62,8 +64,8 @@ type ActorsOf<TProvided> = TProvided extends { readonly actors?: infer TActors }
 /**
  * What the given implementations `TGiven` must also match (NEG-10): `unknown` unless the
  * machine names progress delays; then each progress delay given must be a positive integer
- * literal, and a wide number or a function fails with the {@link PositiveIntegerLiteral}
- * refusal that names the delay.
+ * literal or a `finiteDelay` wrapper, and a wide number or a plain function fails with the
+ * {@link PositiveIntegerLiteral} refusal that names the delay.
  *
  * @since 0.4.0
  * @category Internal
@@ -81,8 +83,13 @@ export type ProvidedDelayCheck<TGiven, TProvided> = [ProgressNamesOf<TProvided>]
 type ProgressNamesOf<TProvided> = TProvided extends { readonly [ProgressDelays]?: infer TNames extends string } ? TNames
   : never
 
-/** What a given progress delay must match: a number is checked as a literal, anything else is refused. */
-type ProgressDelayValue<TValue, TName extends string> = [TValue] extends [number]
+/**
+ * What a given progress delay must match: a `finiteDelay` wrapper is taken, a number is checked as
+ * a literal, anything else is refused. The wrapper's brand is type-only, so a cast can forge it
+ * here; the run-time refusal reads the private registry and still refuses the forgery.
+ */
+type ProgressDelayValue<TValue, TName extends string> = [TValue] extends [FiniteDelayMark] ? unknown
+  : [TValue] extends [number]
   ? CheckedLiteral<TValue, `progress delay ${TName}`>
   : PositiveIntegerLiteral<`progress delay ${TName}`>
 

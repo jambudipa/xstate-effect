@@ -15,7 +15,7 @@ sources: [packages/core/package.json, packages/core/src/index.ts, packages/core/
 
 | Specifier | Holds | Exports |
 |---|---|---|
-| [`@jambudipa/xstate-effect`](#root-entry-point) | Machines, `setup`, actors, actions, guards, actor logic, snapshots, events, errors, testing functions, types | 196 values, 341 types |
+| [`@jambudipa/xstate-effect`](#root-entry-point) | Machines, `setup`, actors, actions, guards, actor logic, snapshots, events, errors, testing functions, types | 197 values, 344 types |
 | [`@jambudipa/xstate-effect/actions`](#actions) | The built-in actions and their types | 20 values, 54 types |
 | [`@jambudipa/xstate-effect/actors`](#actors) | The actor logic creators, `createEmptyActor` and their types | 13 values, 41 types |
 | [`@jambudipa/xstate-effect/guards`](#guards) | The built-in guards and `evaluateGuard` | 6 values, 7 types |
@@ -67,7 +67,7 @@ export const imported = [Effect.void, createActor, createMachine, assign, fromEf
 | Actions | `assign`, `assignProperty`, `raise`, `sendTo`, `sendParent`, `sendSelf`, `forwardTo`, `emit`, `cancel`, `log`, `logDebug`, `logInfo`, `logWarning`, `logError`, `spawnChild`, `stopChild`, `stop` (deprecated alias of `stopChild`), `stopAllChildren`, `enqueueActions`, `actions` (namespace of `/actions`) | [assign](./actions/assign.md), [raise](./actions/raise.md), [sendTo](./actions/send-to.md), [emit](./actions/emit.md), [cancel](./actions/cancel.md), [log](./actions/log.md), [spawnChild](./actions/spawn-child.md), [stopChild](./actions/stop-child.md), [enqueueActions](./actions/enqueue-actions.md) |
 | Guards | `and`, `or`, `not`, `stateIn`, `stateNotIn`, `guards` (namespace of `/guards`) | [Guards](./guards.md) |
 | Actor logic creators | `fromPromise`, `fromCallback`, `fromTransition`, `fromTransitionWithInput`, `fromObservable`, `fromEventObservable`, `fromStream`, `fromEffect`, `fromEffectBackground`, `actors` (namespace of `/actors`) | [fromPromise](./actors/from-promise.md), [fromCallback](./actors/from-callback.md), [fromTransition](./actors/from-transition.md), [fromObservable](./actors/from-observable.md), [fromStream](./actors/from-stream.md), [fromEffect](./actors/from-effect.md) |
-| Agent logic | `fromAgent`, `AgentTurn`, `certified` | [fromAgent and AgentTurn](./actors/from-agent.md), [Settlement proof and certificates](./settlement.md) |
+| Agent logic | `fromAgent`, `AgentTurn`, `certified`, `finiteDelay` | [fromAgent and AgentTurn](./actors/from-agent.md), [Settlement proof and certificates](./settlement.md), [finiteDelay](./finite-delay.md) |
 | Pure transition functions | `transition`, `initialTransition`, `getNextSnapshot`, `getInitialSnapshot`, `getMicrosteps`, `getInitialMicrosteps`, `getNextTransitions` | [Pure transition functions](./testing/get-next-snapshot.md) |
 | Waiting | `waitFor`, `waitForPromise`, `WaitForTimeoutError`, `WaitForTerminatedError`, `toEffect`, `toPromise`, `ActorOutputError` | [waitFor, toEffect and toPromise](./testing/wait-for.md) |
 | Simulated clock | `SimulatedClock`, `makeSimulatedClock`, `makeSimulatedClockEffect`, `TimeTravelError` | [SimulatedClock](./testing/simulated-clock.md) |

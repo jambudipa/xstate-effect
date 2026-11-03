@@ -1,0 +1,3 @@
+import { finiteDelay } from "../../../src/index.js"
+/** A finiteDelay whose max is negative: refused at max. */
+export const delay = finiteDelay(() => 1, { max: -1 })

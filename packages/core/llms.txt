@@ -77,6 +77,7 @@ void Effect.runPromise(Effect.scoped(program))
 - A move is an observed state exit. An attempt that moves nothing is `silent`, `illegal`, `malformed`, `crashed` or `overdue`. A spent budget gives one output, `Unsettled { reason, attempts }`, which the required `onDone` receives. That `onDone` must leave the state.
 - Agent logic runs only as a declared `invoke`. `createActor`, a spawn and `provide` refuse it. It does not fit `AnyActorLogic`; `AnyLogicSlot` takes it, and `LogicTypes` reads its types.
 - A machine that holds agents needs a certificate before a parent can use it: `certified(machine, certificate)`. The `xstate-effect-certify <config> [--check]` bin writes or checks the certificate, and a config target's optional `layer` provides the services its guards need. In CI run `xstate-effect-certify-gate <config>`, as an exit code alone proves nothing: it fails unless the bin gives one passing report of that run. A real import that names no file fails with `unresolved-import`. A new package version needs a new certificate.
+- In a machine that holds agents, a named `after` delay that leaves its state must be sure to fire. A plain delay function is refused there. Use `finiteDelay(fn, { max })` (0.4.1): it clamps the result to `[0, max]`, `max` a positive integer literal, gives `max` for `NaN`, and lets a throw error the actor. A cast or copied wrapper is refused at run time.
 - A green compile does not prove a machine. A spread into `states` with an explicit key compiles, and a cast through `unknown` compiles. Run `proveSettlement`, ban the spread in ESLint, and read `docs/reference/setup.md#limits-of-the-compile-time-proof`. Use TypeScript 6.0.3 or later.
 
 ## Differences from XState
@@ -86,7 +87,7 @@ void Effect.runPromise(Effect.scoped(program))
 - Absent output, error and observable context are `Option` values.
 - Unhandled actor errors go to `Effect.logError`, through the program's Effect `Logger`, not a rethrow; the actor's `logger` option receives only `log` action output.
 - An actor that errors closes its scope, so its children stop.
-- Every deviation is a row of `test/upstream/CONFORMANCE.md`, with the decision (D1–D20, SD-1–SD-52 in `docs/decisions.md`) that requires it.
+- Every deviation is a row of `test/upstream/CONFORMANCE.md`, with the decision (D1–D20, SD-1–SD-53 in `docs/decisions.md`) that requires it.
 
 ## Versioning
 

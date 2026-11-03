@@ -1,0 +1,5 @@
+import { finiteDelay } from "../../../src/index.js"
+/** The branded bound this fixture passes as max. */
+declare const branded: number & { readonly brand: unique symbol }
+/** A finiteDelay whose max is branded: refused at max. */
+export const delay = finiteDelay(() => 1, { max: branded })

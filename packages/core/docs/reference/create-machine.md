@@ -389,8 +389,9 @@ Two rules keep a machine with [agent logic](./actors/from-agent.md) settled:
   replace agent logic.
 - In a setup machine with agent actors, a progress delay is a named `after` key whose transition
   targets a state outside the state that holds it. `provide` takes such a delay only as a
-  positive integer literal (`ProvidedDelayCheck`): a wide number, `Infinity`, `NaN` or a
-  function fails with `PositiveIntegerLiteral<"progress delay <name>">`. A `#id` target counts as
+  positive integer literal or a [`finiteDelay`](./finite-delay.md) (`ProvidedDelayCheck`): a
+  wide number, `Infinity`, `NaN` or a plain function fails with
+  `PositiveIntegerLiteral<"progress delay <name>">`. A `#id` target counts as
   leaving its state. Other delays keep the rules above.
 
 A cast that hides either is refused at run time. The new machine gives each actor status `error`,
@@ -400,7 +401,8 @@ machine built from it with `provide`, `withContext` or `withId` keeps an `AgentP
 
 The run-time delay rule reads the merged delays of each machine that holds agent logic: in its
 actors, inline in an invocation, or through a child machine at any depth. It refuses infinity,
-NaN, an infinite `Duration` and a function. It also covers delays that `setup` or the second
+NaN, an infinite `Duration` and a plain function, and takes a [`finiteDelay`](./finite-delay.md).
+It also covers delays that `setup` or the second
 argument of `createMachine` gives, which have no type check, and a machine that gets the delay and
 the agent from separate `provide` calls. A later `provide` of a finite delay cures the refusal.
 

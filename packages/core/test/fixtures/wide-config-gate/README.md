@@ -23,7 +23,7 @@ error that prevents `any` from swallowing an error intersection.
 The fixture files contain no diagnostic suppression directives. B fixtures also
 assert that their messages do not contain `ConfigNotLiteral`.
 
-The complete sampled matrix contains 127 fixtures and 102 expected diagnostics.
+The complete sampled matrix contains 136 fixtures and 110 expected diagnostics.
 The additional 34 negative inputs cover erased structural values and unions in both
 setup types. Nine positive inputs cover state/event names that equal config member
 names, nested invocation callbacks, opaque callback values, plain-setup compatibility,
@@ -34,3 +34,9 @@ cases report `SettlementMustExit`. These are their observed compile-time refusal
 the original B assertions still require the specific literal errors without
 `ConfigNotLiteral`. The matrix describes sampled static types, not every possible
 way TypeScript can erase information before a library receives a value.
+
+The `finite-delay-*` fixtures (0.4.1) check the bound of `finiteDelay`. Each A2 input passes a
+`max` that is no positive integer literal (a wide `number`, `0`, `-1`, `1.5`, `Infinity`, the
+union `2 | 3`, a branded number and a generic `N`) and gets its TS2322 at the `max` line. B1
+is the brief's repro with a `finiteDelay` timebox in an agent setup, and its `provide`; it
+compiles clean.

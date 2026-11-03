@@ -8,7 +8,8 @@ comments cite them by ID:
 - **SD-1–SD-28** — the spec decisions that settle the forks the research surfaced, with their
   dated amendments ([Spec decisions](#spec-decisions-sd-1sd-28)).
 - **SD-29–SD-52** — the decisions of agent settlement, added in 0.4.0
-  ([Agent settlement decisions](#agent-settlement-decisions-sd-29sd-52)).
+  ([Agent settlement decisions](#agent-settlement-decisions-sd-29sd-52)); SD-53 was added there
+  in 0.4.1.
 
 The text is copied from the port's planning documents. Internal file paths and the wording of
 the agent tooling that ran the port are left out; the meaning of each decision is unchanged.
@@ -688,6 +689,20 @@ bind the first application that uses agent logic, and the library only supplies 
   so widening bypassed the capability refusal. The capability is optional on `ActorLogic` and
   `AnyActorLogic` and required on agent logic. The library's generics read `AnyLogicSlot` and
   `LogicTypes`. A deliberate cast still compiles, and the run-time check stops it.
+- **SD-53 A computed progress delay is a `finiteDelay` (2026-11-03, 0.4.1).** A plain delay
+  function may return infinity or NaN, or throw, so it stays refused as a progress delay. An author
+  who needed a per-instance timeout had to drop the proof or lose exact timing.
+  `finiteDelay(fn, { max })` clamps the result to `[0, max]`, with `max` a positive integer literal
+  checked as an agent `budget` is. `NaN` and a value that is no delay give `max`, the declared
+  bound. A throw is not caught, so the actor errors. Only `finiteDelay` records a wrapper, in a
+  private `WeakMap`. The run-time refusal, `proveSettlement` and `certify` read that record, and a
+  cast or copied wrapper has none. A genuine wrapper from a second copy of the library has none
+  either, so it fails closed with `ProgressDelayError` and `NoProgressGuarantee`, as agent logic
+  does across copies. The type of `provide` reads a type-only brand, so a cast passes
+  it and the run-time check stops it. The wrapper does the clamp, so restore, the scheduler and
+  `resolveDelay` keep upstream timing. A certificate hashes the wrapped function and `max`.
+  Alternatives rejected: a marker property, which user code can copy, and a clamp inside
+  `resolveDelay`, which would change every plain delay function (C1).
 
 ## Task-phase plan (SD-2)
 

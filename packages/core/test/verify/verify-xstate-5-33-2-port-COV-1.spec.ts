@@ -55,9 +55,14 @@
  *   refuses agent logic in place of an ordinary actor by type and with `AgentProvideError`, and,
  *   in a machine with agent logic, a progress delay that is no positive integer literal by type
  *   and with `ProgressDelayError` for infinity, NaN or a function.
+ * - Finite delays (`src/finiteDelay.ts`, `src/StateMachine.ts`, `src/internal/provideCheck.ts`):
+ *   a `finiteDelay` is a progress delay in `setup`, `createMachine` and `provide`, by type and at
+ *   run time; under a TestClock it fires at its result clamped to `[0, max]`, `max` for NaN; a
+ *   restored actor waits only the time left; a throw in its function errors the actor; a plain
+ *   function, a cast or copied wrapper and a wrapper with a cast bound stay refused.
  */
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Chunk, Context, Deferred, Duration, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Stream } from "effect"
+import { Cause, Chunk, Context, Deferred, Duration, Effect, Equal, Exit, Fiber, HashMap, Inspectable, Option, Predicate, Result, Schema, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ActorClass, allocateChild, buildChild, createSpawnFunction, restoreChild } from "../../src/Actor.js"
 import type * as ActorLogicModule from "../../src/ActorLogic.js"
@@ -83,6 +88,8 @@ import {
   setup,
   setupWithSchema,
   fromAgent,
+  finiteDelay,
+  type FiniteDelay,
   type SnapshotType,
   spawnChild,
   stopChild,
@@ -94,6 +101,7 @@ import {
 import { fromEffect } from "../../src/actors/fromEffect.js"
 import type { TargetOf } from "../../src/settlement.js"
 import { and, not, or } from "../../src/guards/index.js"
+import { certify, explore, proveSettlement, timerFirings } from "../../src/graph/index.js"
 import * as Root from "../../src/index.js"
 import { markAgentLogic } from "../../src/internal/agentBrand.js"
 import type { ActorLogic as RootActorLogic, ActorRef as RootActorRef } from "../../src/index.js"
@@ -2333,6 +2341,230 @@ describe("COV-1 agent logic runs only as an invocation, and provide keeps it so 
         yield* actor.start
         assert.strictEqual((yield* actor.getSnapshot).status, "active")
       }
+    })
+  )
+})
+
+// ---------------------------------------------------------------- finite delays (NEG-10, 0.4.1)
+
+/** Agent logic whose one attempt never ends within a test, so only the timer leaves its state. */
+const waitingAgent = fromAgent({ budget: 3, deadline: 86_400_000, tools: { GO: GoTool }, turn: (_input: number) => Effect.never })
+
+/** `provide` takes a finiteDelay for a progress delay; a cast forgery passes the type too (the run time refuses it); never called. */
+export const acceptsFiniteDelayProvide = () => [
+  timedMachine.provide({ delays: { patience: finiteDelay(() => 10, { max: 100 }) } }),
+  holderOnlyMachine.provide({ delays: { patience: finiteDelay(() => 10, { max: 100 }) } }),
+  timedMachine.provide({ delays: { patience: (() => 10) as unknown as FiniteDelay<unknown, EventObject, 100> } }),
+]
+
+/** The brief's repro with finiteDelay: the delay reads the typed context, and the setup takes it. */
+const timeboxMachine = setup({
+  types: {} as { context: { deadline: number } },
+  actors: { child: waitingAgent },
+  delays: { timebox: finiteDelay(({ context }) => context.deadline, { max: 1000 }) },
+}).createMachine({
+  id: "timebox",
+  context: { deadline: 1_000 },
+  initial: "running",
+  states: {
+    running: { invoke: { src: "child", input: 1, onDone: "done" }, on: { GO: "done" }, after: { timebox: "done" } },
+    done: { type: "final" },
+  },
+})
+
+/** A machine without setup whose progress exit `patience` is `delay`; its context `value` is its input. */
+const valueTimedMachine = (delay: unknown) =>
+  createMachine(
+    {
+      id: "valued",
+      initial: "thinking",
+      context: ({ input }: { input: unknown }) => ({ value: input }),
+      states: {
+        thinking: { invoke: { src: "agent", input: 1, onDone: "stalled" }, after: { patience: "timedOut" } },
+        timedOut: { type: "final" },
+        stalled: { type: "final" },
+      },
+    } as never,
+    { actors: { agent: waitingAgent }, delays: { patience: delay } } as never
+  ) as unknown as AnyStateMachine
+
+/** A finiteDelay of bound 1000 that gives the context's `value`, counting its calls in `calls`. */
+const valueDelay = (calls: { count: number }) =>
+  finiteDelay(({ context }: { context: { value: number } }) => {
+    calls.count++
+    return context.value
+  }, { max: 1000 })
+
+/** The delay of each event the actor's system has scheduled. */
+const scheduledDelays = (actor: { readonly system: { readonly getSnapshot: Effect.Effect<{ readonly _scheduledEvents: Readonly<Record<string, { readonly delay: number }>> }> } }) =>
+  Effect.map(actor.system.getSnapshot, (snapshot) => Object.values(snapshot._scheduledEvents).map((event) => event.delay))
+
+describe("COV-1 a finiteDelay is a progress delay that fires within its bound (NEG-10, 0.4.1)", () => {
+  it.effect("[COV-1] the brief's repro with finiteDelay starts, waits on its timer and leaves at the computed time", () =>
+    Effect.gen(function* () {
+      const actor = yield* createActor(timeboxMachine)
+      yield* actor.start
+      yield* settle
+      assert.strictEqual((yield* actor.getSnapshot).status, "active")
+      assert.deepStrictEqual(yield* scheduledDelays(actor), [1000])
+      yield* TestClock.adjust("999 millis")
+      yield* settle
+      assert.strictEqual((yield* actor.getSnapshot).value, "running")
+      yield* TestClock.adjust("1 millis")
+      assert.isTrue(yield* eventually(Effect.map(actor.getSnapshot, (snapshot) => snapshot.status === "done")))
+    })
+  )
+
+  it.effect("[COV-1] the brief's repro with finiteDelay passes proveSettlement, and certify proves it (B1)", () =>
+    Effect.gen(function* () {
+      yield* proveSettlement(timeboxMachine)
+      const certificate = yield* certify(
+        timeboxMachine,
+        (machine) =>
+          explore(machine, {
+            catalogue: ["settle", "go", "timer"],
+            inputs: {
+              settle: () => [{ type: "xstate.done.actor.0.timebox.running", output: { reason: "silent", attempts: 3 } }],
+              go: () => [{ type: "GO" }],
+              timer: timerFirings,
+            },
+            abstraction: { deadline: (value) => Number(value) },
+            timeout: "30 seconds",
+          }),
+        { modules: [{ path: "entry.ts", source: "" }] }
+      )
+      assert.strictEqual(certificate.verdict, "proved")
+      assert.include(certificate.edges, "running: after timebox -> done")
+    })
+  )
+
+  it.effect("[COV-1] under a TestClock each result fires at its stated time: clamped to [0, max], max for NaN and a non-number", () =>
+    Effect.gen(function* () {
+      const cases: ReadonlyArray<readonly [unknown, number]> = [
+        [0, 0], [1, 1], [1000, 1000], [5000, 1000], [Infinity, 1000],
+        [-5, 0], [-0, 0], [-Infinity, 0], [NaN, 1000], [Duration.seconds(2), 1000], ["soon", 1000],
+      ]
+      for (const [value, expected] of cases) {
+        const calls = { count: 0 }
+        const actor = yield* createActor(valueTimedMachine(valueDelay(calls)), { input: value })
+        yield* actor.start
+        yield* settle
+        // A zero delay fires at once, so only a later one is still scheduled here
+        assert.deepStrictEqual(yield* scheduledDelays(actor), expected > 0 ? [expected] : [], String(value))
+        if (expected > 0) {
+          yield* TestClock.adjust(Duration.millis(expected - 1))
+          yield* settle
+          assert.strictEqual((yield* actor.getSnapshot).value, "thinking", String(value))
+        }
+        yield* TestClock.adjust(Duration.millis(1))
+        assert.isTrue(yield* eventually(Effect.map(actor.getSnapshot, (snapshot) => snapshot.value === "timedOut")), String(value))
+        assert.strictEqual(calls.count, 1, String(value))
+      }
+    })
+  )
+
+  it.effect("[COV-1] a restored actor waits only the time left, and does not call the delay again", () =>
+    Effect.gen(function* () {
+      const calls = { count: 0 }
+      const machine = valueTimedMachine(valueDelay(calls))
+      const scope = yield* Scope.make()
+      const first = yield* Scope.provide(createActor(machine, { input: 800 }), scope)
+      yield* first.start
+      yield* settle
+      yield* TestClock.adjust("300 millis")
+      yield* settle
+      const persisted = yield* first.getPersistedSnapshot
+      yield* Scope.close(scope, Exit.void)
+      const restored = yield* createActor(machine, { snapshot: throughJson(persisted) })
+      yield* restored.start
+      yield* settle
+      assert.strictEqual((yield* restored.getSnapshot).value, "thinking")
+      yield* TestClock.adjust("499 millis")
+      yield* settle
+      assert.strictEqual((yield* restored.getSnapshot).value, "thinking")
+      yield* TestClock.adjust("1 millis")
+      assert.isTrue(yield* eventually(Effect.map(restored.getSnapshot, (snapshot) => snapshot.value === "timedOut")))
+      assert.strictEqual(calls.count, 1)
+    })
+  )
+
+  it.effect("[COV-1] a throw in the delay's function errors the actor with the thrown value; it does not hang", () =>
+    Effect.gen(function* () {
+      const boom = new Error("boom")
+      const throwing = finiteDelay((): number => {
+        throw boom
+      }, { max: 1000 })
+      const actor = yield* createActor(valueTimedMachine(throwing), { input: 1 })
+      yield* actor.start
+      assert.isTrue(yield* eventually(Effect.map(actor.getSnapshot, (snapshot) => snapshot.status === "error")))
+      assert.strictEqual(Option.getOrUndefined((yield* actor.getSnapshot).error), boom)
+    })
+  )
+
+  it.effect("[COV-1] a plain function stays refused in setup, createMachine and provide", () =>
+    Effect.gen(function* () {
+      const hidden = runAgent as unknown as ActorLogicModule.AnyActorLogic
+      const named = { src: "agent", input: 1, onDone: "b" }
+      const machines: ReadonlyArray<readonly [string, AnyStateMachine]> = [
+        ["setup", setup({ actors: { agent: hidden }, delays: { patience: () => 10 } }).createMachine({
+          id: "plain", initial: "a", states: { a: { invoke: named, after: { patience: "b" } } as never, b: { type: "final" } },
+        }) as unknown as AnyStateMachine],
+        ["createMachine", plainDelayMachine(named, { actors: { agent: hidden }, delays: { patience: () => 10 } })],
+        ["provide", plainTimedMachine(hidden).provide({ delays: { patience: () => 10 } })],
+      ]
+      for (const [route, machine] of machines) {
+        const actor = yield* createActor(machine)
+        yield* actor.start
+        const error = Option.getOrUndefined((yield* actor.getSnapshot).error)
+        assert.instanceOf(error, Errors.ProgressDelayError, route)
+        assert.include(error.message, "plain functions may never fire", route)
+      }
+    })
+  )
+
+  it.effect("[COV-1] a finiteDelay is taken in setup, createMachine and provide; a forged one is refused at run time", () =>
+    Effect.gen(function* () {
+      const hidden = runAgent as unknown as ActorLogicModule.AnyActorLogic
+      const named = { src: "agent", input: 1, onDone: "b" }
+      const real = finiteDelay(() => 10, { max: 100 })
+      const accepted: ReadonlyArray<readonly [string, AnyStateMachine]> = [
+        ["setup", setup({ actors: { agent: hidden }, delays: { patience: real } }).createMachine({
+          id: "plain", initial: "a", states: { a: { invoke: named, after: { patience: "b" } } as never, b: { type: "final" } },
+        }) as unknown as AnyStateMachine],
+        ["createMachine", plainDelayMachine(named, { actors: { agent: hidden }, delays: { patience: real } })],
+        ["provide", plainTimedMachine(hidden).provide({ delays: { patience: real } })],
+        ["provide cures", plainTimedMachine(hidden).provide({ delays: { patience: () => 10 } }).provide({ delays: { patience: real } })],
+      ]
+      for (const [route, machine] of accepted) {
+        const actor = yield* createActor(machine)
+        yield* actor.start
+        assert.strictEqual((yield* actor.getSnapshot).status, "active", route)
+      }
+      const forged: ReadonlyArray<readonly [string, Types.DelayConfig<Types.MachineContext, EventObject>]> = [
+        ["cast", (() => 10) as unknown as FiniteDelay<unknown, EventObject, 100>],
+        ["copied keys", Object.defineProperties(() => 10, Object.getOwnPropertyDescriptors(real))],
+        ["bound", real.bind(undefined)],
+        ["max 0", finiteDelay(() => 10, { max: 0 as 1 })],
+        ["max -1", finiteDelay(() => 10, { max: -1 as 1 })],
+        ["max 1.5", finiteDelay(() => 10, { max: 1.5 as 1 })],
+        ["max NaN", finiteDelay(() => 10, { max: NaN as 1 })],
+        ["max Infinity", finiteDelay(() => 10, { max: Infinity as 1 })],
+      ]
+      for (const [route, delay] of forged) {
+        const actor = yield* createActor(plainTimedMachine(hidden).provide({ delays: { patience: delay } }))
+        yield* actor.start
+        const error = Option.getOrUndefined((yield* actor.getSnapshot).error)
+        assert.instanceOf(error, Errors.ProgressDelayError, route)
+      }
+    })
+  )
+
+  it.effect("[COV-1] numeric progress delays keep their timing beside the new form", () =>
+    Effect.gen(function* () {
+      const actor = yield* createActor(valueTimedMachine(250), { input: 0 })
+      yield* actor.start
+      yield* settle
+      assert.deepStrictEqual(yield* scheduledDelays(actor), [250])
     })
   )
 })

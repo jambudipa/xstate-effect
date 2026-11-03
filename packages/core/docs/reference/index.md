@@ -43,6 +43,7 @@ up while you work; the [how-to guides](../how-to/index.md) show how to use them 
 - [fromEffect, fromEffectBackground and fromEffectRetry](./actors/from-effect.md) — actor logic from an Effect.
 - [fromAgent and AgentTurn](./actors/from-agent.md) — agent logic: a literal-bounded model turn loop that must move its state.
 - [Settlement proof and certificates](./settlement.md) — `SettlementProof`, `proveSettlement`, `explore`, `certify`, `certified` and the `xstate-effect-certify` bin.
+- [finiteDelay](./finite-delay.md) — a delay computed at each state entry, clamped to a literal bound, that counts as a progress delay.
 - [fromStream](./actors/from-stream.md) — actor logic from an Effect `Stream`.
 - [Custom actor logic and createEmptyActor](./actors/custom-logic.md) — the `ActorLogic` contract and `makeActorLogic`.
 

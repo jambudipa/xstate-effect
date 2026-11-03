@@ -19,7 +19,7 @@ import { Array as Arr, Effect, HashMap, HashSet, type Layer, Option, Order, Pred
 import type { AnyLogicSlot } from "../ActorLogic.js"
 import { type EventObject, matchesEventDescriptor } from "../Event.js"
 import { hasAgentBrand } from "../internal/agentBrand.js"
-import { isFiniteDelay, lookupDelay } from "../internal/delay.js"
+import { finiteDelayOf, isFiniteDelay, lookupDelay } from "../internal/delay.js"
 import { isGenuineAgent } from "../internal/logicCapability.js"
 import { stopTargetOf } from "../internal/stopTarget.js"
 import { resolveReferencedActor, type SpawningMachine } from "../spawn.js"
@@ -448,8 +448,9 @@ const transitionLeaves = (transition: Transition, state: Node): boolean => {
 
 /**
  * `true` when an `after` delay is sure to fire: a finite number, or a name that the machine's
- * delays resolve to one. A name with no implementation, infinity and a function may never fire,
- * so such an `after` guarantees nothing, whatever target it has.
+ * delays resolve to one or to a `finiteDelay` wrapper. A name with no implementation, infinity
+ * and a plain function may never fire, so such an `after` guarantees nothing, whatever target it
+ * has.
  */
 const delayFires = (proof: Proof, delay: number | string): boolean =>
   typeof delay === "string" ? Option.exists(lookupDelay(proof.machine.implementations, delay), isFiniteDelay) : isFiniteDelay(delay)
@@ -766,7 +767,7 @@ const cycleFindings = (proof: Proof): ReadonlyArray<SettlementFinding> => {
  * @since 0.4.0
  * @category Settlement
  */
-export const libraryVersion = "0.4.0"
+export const libraryVersion = "0.4.1"
 
 /**
  * What an explorer reports to {@link certify}: the states it visited, and optionally its verdict.
@@ -1001,7 +1002,7 @@ const withLf = (text: string): string => text.replaceAll("\r\n", "\n")
 
 /**
  * A value as JSON that nothing but its content decides: keys sorted, functions as their source
- * text, a `Map` or a `Set` sorted by its entries' text, so their insertion order changes nothing,
+ * text (a `finiteDelay` wrapper as the source of the function it wraps and its bound), a `Map` or a `Set` sorted by its entries' text, so their insertion order changes nothing,
  * a `Date` and a `RegExp` by what they hold, and enumerable symbol keys under `[symbols]`. A
  * machine counts by its config and implementations, not its built tree. A Schema counts as a
  * mark: its object can hold memoized state, and its source is in the module closure. `ancestors`
@@ -1016,7 +1017,7 @@ export const canonical = (
   ancestors: ReadonlyArray<object> = [],
   at = "(root)"
 ): Result.Result<unknown, CertificateUnreadableValue> => {
-  if (Predicate.isFunction(value)) return Result.succeed(`function ${withLf(String(value))}`)
+  if (Predicate.isFunction(value)) return canonicalFunction(value)
   if (typeof value === "bigint" || typeof value === "symbol" || typeof value === "number") return Result.succeed(String(value))
   if (!Predicate.isObjectKeyword(value)) return Result.succeed(value)
   if (ancestors.includes(value)) return Result.succeed("[cycle]")
@@ -1030,6 +1031,19 @@ export const canonical = (
   if (Predicate.isSet(value)) return Result.map(canonicalList(Array.from(value), below, at), (entries) => ["[set]", ...entries])
   return canonicalObject(value, below, at)
 }
+
+/**
+ * A function as its source text. A `finiteDelay` wrapper has the same source for every delay, so
+ * it counts by the function it wraps and by its bound: the proof's claim that the delay fires
+ * rests on both, and a change of either makes a certificate stale.
+ */
+const canonicalFunction = (value: object): Result.Result<unknown, CertificateUnreadableValue> =>
+  Result.succeed(
+    Option.match(finiteDelayOf(value), {
+      onNone: () => `function ${withLf(String(value))}`,
+      onSome: ({ fn, max }) => `finiteDelay max ${max} function ${withLf(String(fn))}`,
+    })
+  )
 
 /** The canonical form of each entry, sorted by its text: for a collection whose order means nothing. */
 const canonicalList = (

@@ -256,6 +256,15 @@ export {
 export type { AgentBranded, IsAgentLogic, NotAgentLogic } from "./internal/agentBrand.js"
 export type { CertifiedChild, HoldsAgents } from "./internal/agentBrand.js"
 export { certified } from "./settlement.js"
+
+/**
+ * A delay computed at each state entry and proven to fire: `finiteDelay(fn, { max })` clamps
+ * `fn`'s result to `[0, max]`, so a machine that holds agent logic takes it as a progress delay.
+ *
+ * @since 0.4.1
+ */
+export { finiteDelay } from "./finiteDelay.js"
+export type { FiniteDelay, FiniteDelayMark, FiniteDelayOptions } from "./finiteDelay.js"
 export type { AgentDoneOutsideOnDone, SettlementMustExit } from "./internal/settlement.js"
 export type { AgentStateAcceptsNoEvents, AgentToolNotAccepted } from "./internal/agentMenu.js"
 export type { Unsettled, UnsettledReason } from "./actors/unsettled.js"

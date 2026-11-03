@@ -15,7 +15,7 @@ export const retriesReview = {
     "reviewing: on APPROVED -> approved"
   ],
   "explored": 11,
-  "hash": "c02af1cc776f9784d55e4cd8c5df37524b385f08210048d409cb761424d3f259",
+  "hash": "17561a7d0c17b5cb78d5fda40b9405ff3102d67997b0f3057e0ecf2c60510a1b",
   "verdict": "proved"
 } as const
 
@@ -29,6 +29,23 @@ export const settlesAgent = {
     "asking: on PING -> (none)"
   ],
   "explored": 2,
-  "hash": "6c520f4e6a19e3fc10ef0a0a23117e5bc39bd52569168b2d7fb2de53bad383e7",
+  "hash": "774e041aaa434f4811d8a7ec65cde5439d1778d770aeb3351250e3df8e65cf27",
+  "verdict": "proved"
+} as const
+
+export const timeboxedAgent = {
+  "states": [
+    "done",
+    "running",
+    "waiting"
+  ],
+  "edges": [
+    "running: after timebox -> done",
+    "running: invoke.0.onDone -> done",
+    "running: on GO -> done",
+    "waiting: after warmup -> running"
+  ],
+  "explored": 3,
+  "hash": "9afe01911736aef0950d4785c1d90b0ea8c5ceced822cc2ff6134da801b816a2",
   "verdict": "proved"
 } as const

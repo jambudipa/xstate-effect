@@ -32,6 +32,10 @@
  *   state's key holds its history, and a restart goes through persist and restore. DATA-2,
  *   DATA-3, S16 and S19 live in jamcode's agent-settlement suite as well; each detector of the
  *   explorer has a failing machine here, so no detector relies on that suite.
+ * - A `finiteDelay` (0.4.1) is a progress guarantee to `proveSettlement` and `certify`, and a
+ *   plain function or a forged wrapper is not; the certificate hash reads the wrapped function
+ *   and its bound, so a change of either makes a certificate stale. `timerFirings` offers its
+ *   `after` as any other timer.
  */
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Duration, Effect, Exit, FileSystem, Layer, Option, Path } from "effect"
@@ -69,11 +73,13 @@ import {
   createActor,
   createMachine,
   type EventObject,
+  finiteDelay,
   fromTransition,
   getInitialSnapshot,
   getNextSnapshot,
   type MachineSnapshot,
   type SettlementReport,
+  setup,
   Snapshot,
   type SnapshotType,
 } from "../../src/index.js"
@@ -1574,5 +1580,64 @@ describe("COV-5 the closure resolves each import form (F3)", () => {
       closure({ "/app/entry.ts": `import "me"`, "/app/package.json": `{ "type": "module" }`, "/package.json": `{ "name": "me" }`, "/index.ts": "" }),
       ["entry.ts", "unresolved:me"]
     )
+  })
+})
+
+// ---------------------------------------------------------------- finite delays (0.4.1)
+
+/**
+ * A machine `m` whose agent state `a` leaves for `done` only through the named delay `timebox`: its
+ * logic carries the brand but `fromAgent` did not build it, so its `onDone` is no progress guarantee.
+ */
+const timeboxed = (timebox: unknown) =>
+  withDone({ a: { invoke: { src: "work", id: "work", input: 1, onDone: "#m.done" }, after: { timebox: "#m.done" } } }, "a", { work: markedLogic })
+    .provide({ delays: { timebox } } as never)
+
+/** The certificate of `machine` with a fixed exploration and no module closure. */
+const certificateOf = (machine: AnyStateMachine) =>
+  Effect.runPromise(certify(machine, () => Effect.succeed({ explored: 1 }), { modules: [{ path: "entry.ts", source: "" }] }))
+
+describe("COV-5 a finiteDelay is a progress guarantee to the proof and the certificate (0.4.1)", () => {
+  it("[COV-5] proveSettlement takes a finiteDelay and refuses a plain function or a forged wrapper", () => {
+    const real = finiteDelay(() => 10, { max: 1000 })
+    assert.deepStrictEqual(findings(timeboxed(real)), [])
+    const forged = [
+      () => 10,
+      Object.defineProperties(() => 10, Object.getOwnPropertyDescriptors(real)),
+      real.bind(undefined),
+      finiteDelay(() => 10, { max: 0 as 1 }),
+    ]
+    for (const delay of forged) {
+      assert.deepStrictEqual(findings(timeboxed(delay)), ["NoProgressGuarantee: a"], String(delay))
+    }
+    // A plain function given through setup's delays (A1)
+    const throughSetup = setup({ actors: { work: markedLogic }, delays: { timebox: () => 10 } }).createMachine({
+      id: "m",
+      initial: "a",
+      states: { a: { invoke: { src: "work", id: "work", input: 1, onDone: "#m.done" }, after: { timebox: "#m.done" } }, done: { type: "final" } },
+    } as never) as unknown as AnyStateMachine
+    assert.deepStrictEqual(findings(throughSetup), ["NoProgressGuarantee: a"])
+  })
+
+  it("[COV-5] certify proves a finiteDelay machine, and its hash changes with the bound and with the function", async () => {
+    const base = await certificateOf(timeboxed(finiteDelay(() => 10, { max: 1000 })))
+    assert.strictEqual(base.verdict, "proved")
+    assert.include(base.edges, "a: after timebox -> done")
+    const same = await certificateOf(timeboxed(finiteDelay(() => 10, { max: 1000 })))
+    const otherMax = await certificateOf(timeboxed(finiteDelay(() => 10, { max: 2000 })))
+    const otherFn = await certificateOf(timeboxed(finiteDelay(() => 20, { max: 1000 })))
+    assert.strictEqual(same.hash, base.hash)
+    assert.notStrictEqual(otherMax.hash, base.hash)
+    assert.notStrictEqual(otherFn.hash, base.hash)
+    const plain = await certificateOf(timeboxed(() => 10))
+    assert.strictEqual(plain.verdict, "failed")
+  })
+
+  it("[COV-5] timerFirings offers a finiteDelay's after event, and the explorer takes it", async () => {
+    const machine = timeboxed(finiteDelay(() => 10, { max: 1000 }))
+    const result = await Effect.runPromise(
+      explore(machine, { catalogue: ["timer"], inputs: { timer: timerFirings }, abstraction: {}, timeout: "30 seconds" })
+    )
+    assert.isTrue(result.edges.some((edge) => edge.kind === "timer" && edge.input === `{"type":"xstate.after.timebox.m.a"}` && edge.to !== edge.from), JSON.stringify(result.edges))
   })
 })

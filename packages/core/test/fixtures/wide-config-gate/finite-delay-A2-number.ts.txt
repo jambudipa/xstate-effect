@@ -1,0 +1,5 @@
+import { finiteDelay } from "../../../src/index.js"
+/** The number bound this fixture passes as max. */
+declare const wide: number
+/** A finiteDelay whose max is number: refused at max. */
+export const delay = finiteDelay(() => 1, { max: wide })

@@ -53,6 +53,10 @@ needs neither the engine nor the runtime goes in `internal/`.
   livelock and a machine past `SettlementProofBound` (decision 4, 8 and 18); `SettlementReport`
   gives its findings as data. The root exports them all. The agent `onDone` exit rules it builds
   on are in `internal/settlement.ts`.
+- `finiteDelay.ts` (0.4.1) wraps a delay function in a total one clamped to a literal bound, and
+  records the wrapper in the private registry of `internal/delay.ts`. The run-time refusal of a
+  progress delay, `provide`'s type check and `graph/settlement.ts` accept a recorded wrapper as
+  sure to fire (SD-53).
 
 ## Effect-native rules
 

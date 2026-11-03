@@ -46,6 +46,7 @@ Task-oriented recipes for a goal you already have. Each assumes you know the bas
 ## Agents
 
 - [How to prove that an agent machine settles](./prove-an-agent-machine-settles.md) — Declare the agent in `setup`, fix each compile error, run `proveSettlement` and `explore`, and check a certificate in CI.
+- [How to set a timeout per instance](./a-timeout-per-instance.md) — Wrap the delay function in `finiteDelay(fn, { max })`, name it in `setup({ delays })`, and use the name as an `after` key.
 
 ## Coming from XState
 

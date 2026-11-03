@@ -246,6 +246,10 @@ const recordingScope = (snapshot: AnyMachineSnapshot, taken: (transitions: Reado
  * own in each state, so a breadth-first run takes the firings in every order (S19). A firing
  * that leaves the state in place stays on offer there, which only adds a self-edge.
  *
+ * It reads no delay value: a numeric delay, a `Duration` and a `finiteDelay` wrapper alike may
+ * fire at any point, in any order with the others. That covers every value a `finiteDelay`
+ * gives within `[0, max]`, so the explorer's verdict holds whatever the delay computes.
+ *
  * @example
  * ```ts
  * inputs: { timer: timerFirings }
